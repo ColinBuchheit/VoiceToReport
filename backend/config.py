@@ -1,46 +1,54 @@
 # backend/config.py
 import os
-from dotenv import load_dotenv
+from typing import List, Union
+from pydantic import field_validator
+from pydantic_settings import BaseSettings
 
-# Load environment variables from .env file
-load_dotenv()
-
-class Config:
-    """Application configuration"""
+class Settings(BaseSettings):
+    """Application configuration using Pydantic settings"""
     
     # OpenAI Configuration
-    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+    openai_api_key: str
     
     # Server Configuration
-    PORT = int(os.getenv('PORT', 3000))
-    DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+    port: int = 8000
+    debug: bool = False
     
-    # CORS Configuration
-    ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*').split(',')
+    # CORS Configuration - can be string or list
+    allowed_origins: Union[str, List[str]] = "*"
     
     # Logging Configuration
-    LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+    log_level: str = "INFO"
     
     # Audio Processing Configuration
-    MAX_AUDIO_SIZE_MB = int(os.getenv('MAX_AUDIO_SIZE_MB', 25))
-    SUPPORTED_AUDIO_FORMATS = os.getenv('SUPPORTED_AUDIO_FORMATS', 'm4a,mp4,wav,mp3,webm').split(',')
+    max_audio_size_mb: int = 25
+    supported_audio_formats: Union[str, List[str]] = "m4a,mp4,wav,mp3,webm"
     
     # GPT Configuration
-    GPT_MODEL = os.getenv('GPT_MODEL', 'gpt-4o-mini')
-    GPT_MAX_TOKENS = int(os.getenv('GPT_MAX_TOKENS', 500))
-    GPT_TEMPERATURE = float(os.getenv('GPT_TEMPERATURE', 0.3))
+    gpt_model: str = "gpt-4-turbo-preview"
+    gpt_max_tokens: int = 500
+    gpt_temperature: float = 0.3
     
+    @field_validator('allowed_origins', mode='before')
     @classmethod
-    def validate(cls):
-        """Validate that all required configuration is present"""
-        required_vars = ['OPENAI_API_KEY']
-        missing_vars = []
-        
-        for var in required_vars:
-            if not getattr(cls, var):
-                missing_vars.append(var)
-        
-        if missing_vars:
-            raise ValueError(f"Missing required configuration: {', '.join(missing_vars)}")
-        
-        return True
+    def parse_allowed_origins(cls, v):
+        if isinstance(v, str):
+            if v == "*":
+                return ["*"]
+            return [x.strip() for x in v.split(',') if x.strip()]
+        return v
+    
+    @field_validator('supported_audio_formats', mode='before')
+    @classmethod
+    def parse_supported_formats(cls, v):
+        if isinstance(v, str):
+            return [x.strip() for x in v.split(',') if x.strip()]
+        return v
+    
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        case_sensitive = False
+
+# Global settings instance
+settings = Settings()

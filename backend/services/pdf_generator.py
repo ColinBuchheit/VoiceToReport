@@ -1,22 +1,25 @@
 import os
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from datetime import datetime
 import tempfile
 import logging
+from datetime import datetime
+from typing import Dict, Any
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
 
 logger = logging.getLogger(__name__)
 
 class PDFGenerator:
+    """Service for generating PDF reports from summary and transcription data"""
+    
     def __init__(self):
         self.styles = getSampleStyleSheet()
         self._setup_custom_styles()
         
     def _setup_custom_styles(self):
-        """Setup custom paragraph styles"""
+        """Setup custom paragraph styles for the PDF"""
         self.styles.add(ParagraphStyle(
             name='CustomTitle',
             parent=self.styles['Heading1'],
@@ -51,13 +54,24 @@ class PDFGenerator:
             spaceAfter=10
         ))
         
-    async def generate_report(self, summary: dict, transcription: str) -> str:
+    async def generate_report(self, summary: Dict[str, Any], transcription: str) -> str:
         """
         Generate PDF report from summary and transcription
+        
+        Args:
+            summary: Dictionary containing structured summary data
+            transcription: Original transcription text
+            
+        Returns:
+            Path to generated PDF file
+            
+        Raises:
+            Exception: If PDF generation fails
         """
         try:
             # Create temporary file for PDF
             temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+            temp_pdf.close()  # Close to allow ReportLab to write to it
             
             # Create PDF document
             doc = SimpleDocTemplate(
@@ -99,19 +113,21 @@ class PDFGenerator:
             # Summary Section
             story.append(Paragraph("Summary", self.styles['SectionHeading']))
             
-            # Summary fields
+            # Summary fields - handle both direct dict and nested summary structure
+            summary_data = summary.get('summary', summary) if 'summary' in summary else summary
+            
             summary_fields = [
-                ('Task Description', summary.get('taskDescription', 'N/A')),
-                ('Location', summary.get('location', 'Not specified')),
-                ('Date/Time', summary.get('datetime', 'Not specified')),
-                ('Outcome', summary.get('outcome', 'Not specified')),
-                ('Additional Notes', summary.get('notes', 'None')),
+                ('Task Description', summary_data.get('taskDescription', 'N/A')),
+                ('Location', summary_data.get('location', 'Not specified')),
+                ('Date/Time', summary_data.get('datetime', 'Not specified')),
+                ('Outcome', summary_data.get('outcome', 'Not specified')),
+                ('Additional Notes', summary_data.get('notes', 'None')),
             ]
             
             for label, value in summary_fields:
-                if value and value != 'Not specified' and value != 'None':
+                if value and value not in ['Not specified', 'None', 'N/A', None]:
                     story.append(Paragraph(label, self.styles['FieldLabel']))
-                    story.append(Paragraph(value, self.styles['FieldValue']))
+                    story.append(Paragraph(str(value), self.styles['FieldValue']))
             
             story.append(Spacer(1, 0.3*inch))
             
@@ -131,7 +147,9 @@ class PDFGenerator:
                 backgroundColor=colors.HexColor('#F9FAFB')
             )
             
-            story.append(Paragraph(transcription, trans_style))
+            # Escape any special characters and ensure proper text formatting
+            safe_transcription = self._escape_html(transcription)
+            story.append(Paragraph(safe_transcription, trans_style))
             
             # Footer
             story.append(Spacer(1, 0.5*inch))
@@ -152,4 +170,31 @@ class PDFGenerator:
             
         except Exception as e:
             logger.error(f"PDF generation error: {str(e)}")
-            raise
+            # Clean up temp file if it was created
+            if 'temp_pdf' in locals() and os.path.exists(temp_pdf.name):
+                try:
+                    os.unlink(temp_pdf.name)
+                except:
+                    pass
+            raise Exception(f"PDF generation failed: {str(e)}")
+    
+    def _escape_html(self, text: str) -> str:
+        """
+        Escape special characters for ReportLab Paragraph
+        """
+        if not text:
+            return "No transcription available"
+            
+        # Replace common problematic characters
+        replacements = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }
+        
+        for old, new in replacements.items():
+            text = text.replace(old, new)
+            
+        return text
