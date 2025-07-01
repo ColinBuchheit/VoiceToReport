@@ -1,0 +1,100 @@
+# --- ENV & Secrets ---
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.crt
+*.cert
+*.jks
+
+# --- Test & Media Files ---
+test_audio.*
+*.wav
+*.mp3
+*.m4a
+*.ogg
+*.webm
+*.flac
+*.log
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+*.egg-info/
+*.egg
+*.pkl
+*.h5
+*.sqlite3
+*.db
+.Python
+.mypy_cache/
+.pytest_cache/
+.tox/
+*.ipynb_checkpoints
+
+# --- Node.js ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- System Files ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- IDE & Editor Configs ---
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# --- Build Artifacts ---
+dist/
+build/
+*.tgz
+*.zip
+*.tar.gz
+
+# --- Docker / Containers ---
+*.pid
+*.sock
+docker-compose.override.yml
+
+# --- Jupyter Notebook Checkpoints ---
+.ipynb_checkpoints/
+
+# --- Coverage Reports ---
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+.nox/
+coverage.xml
+
+# --- Virtual Environments ---
+venv/
+.venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# --- Misc ---
+*.bak
+*.tmp
+*.swp
+*.swo
+*.orig
+
+# --- Local Secrets or Overrides ---
+config.local.*
+secrets.*
+
+# --- Logs ---
+logs/
+*.log
+logfile.log
