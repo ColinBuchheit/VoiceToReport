@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+"""
+Voice-to-Report Backend Startup Script - FIXED FOR EXPO TUNNEL
+"""
+
 import os
 import sys
 import subprocess
@@ -69,13 +74,16 @@ def validate_services():
         return False
 
 def start_server():
-    """Start the FastAPI server"""
+    """Start the FastAPI server with proper binding for Expo tunnel"""
     print("🚀 Starting Voice-to-Report Backend...")
-    print("📍 Server will be available at: http://localhost:8000")
-    print("📋 API docs will be available at: http://localhost:8000/docs")
+    print("🌐 Server binding to ALL network interfaces (0.0.0.0:8000)")
+    print("📍 This allows Expo tunnel to connect")
+    print("📋 API docs: http://localhost:8000/docs")
+    print("🏥 Health check: http://localhost:8000/health")
     print("\nPress Ctrl+C to stop the server\n")
     
     try:
+        # IMPORTANT: Bind to 0.0.0.0 to allow external connections (including Expo tunnel)
         os.system(f"{sys.executable} -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload")
     except KeyboardInterrupt:
         print("\n👋 Server stopped")
@@ -84,6 +92,8 @@ def main():
     """Main startup sequence"""
     print("Voice-to-Report Backend Startup")
     print("=" * 40)
+    print("🎯 Optimized for Expo Tunnel Mode")
+    print()
     
     # Change to backend directory if not already there
     if not Path("main.py").exists():
@@ -107,7 +117,7 @@ def main():
     if not validate_services():
         sys.exit(1)
     
-    # Start server
+    # Start server with proper binding
     start_server()
 
 if __name__ == "__main__":
