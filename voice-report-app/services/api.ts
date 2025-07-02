@@ -1,14 +1,26 @@
-// voice-report-app/services/api.ts - DEBUG VERSION
 import axios from 'axios';
 import * as FileSystem from 'expo-file-system';
 
-// Backend URLs using ngrok (Colin's actual URL)
-const BACKEND_URLS = [
-  'https://7cce-173-230-76-186.ngrok-free.app', // Colin's ngrok URL
-  'http://localhost:8000',                      // Local fallback
-];
+// Try to import API_CONFIG, fallback to default config if not available
+let API_CONFIG: {
+  NGROK_URL: string;
+  LOCAL_URL: string;
+  BACKEND_URLS: string[];
+};
 
-const USE_MOCKS = false; // Temporarily enable while debugging tunnel
+try {
+  const config = require('./api-config');
+  API_CONFIG = config.API_CONFIG;
+} catch (error) {
+  console.warn('⚠️ API config not found, using fallback configuration');
+  API_CONFIG = {
+    NGROK_URL: 'http://localhost:8000',
+    LOCAL_URL: 'http://localhost:8000',
+    BACKEND_URLS: [
+      'http://localhost:8000'
+    ]
+  };
+}
 
 interface TranscriptionResponse {
   transcription: string;
@@ -28,19 +40,19 @@ interface SummaryResponse {
 async function findWorkingBackend(): Promise<string | null> {
   console.log('🔍 Testing backend connectivity...');
   
-  for (const url of BACKEND_URLS) {
+  for (const url of API_CONFIG.BACKEND_URLS) {
     try {
       console.log(`Testing: ${url}`);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // Increased to 15 seconds
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
       
       const response = await fetch(`${url}/health`, {
         method: 'GET',
         signal: controller.signal,
         headers: {
           'Accept': 'application/json',
-          'User-Agent': 'VoiceReportApp/1.0', // Custom User-Agent to bypass localtunnel security
+          'User-Agent': 'VoiceReportApp/1.0',
         },
       });
       
@@ -66,24 +78,14 @@ async function findWorkingBackend(): Promise<string | null> {
 }
 
 export async function transcribeAudio(audioUri: string): Promise<TranscriptionResponse> {
-  if (USE_MOCKS) {
-    console.log('🎭 Using mock transcription data');
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    return {
-      transcription: "Today I completed the mobile app interface for the voice-to-report system. I implemented the recording functionality, created all the necessary screens including home, transcript, summary, and PDF preview. The app uses React Native with TypeScript and integrates with Expo AV for audio recording. The UI is clean and user-friendly with a modern design."
-    };
-  }
-
-  // Find a working backend first
   const workingBackendUrl = await findWorkingBackend();
   
   if (!workingBackendUrl) {
-    throw new Error(`No backend server found! Tried:\n${BACKEND_URLS.join('\n')}\n\nMake sure your backend is running on one of these URLs.`);
+    throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
   }
 
   try {
-    console.log(`🎤 Transcribing audio with backend: ${workingBackendUrl}`);
+    console.log(`🎙️ Transcribing audio using: ${workingBackendUrl}`);
     
     // Read audio file as base64
     const base64Audio = await FileSystem.readAsStringAsync(audioUri, {
@@ -95,26 +97,24 @@ export async function transcribeAudio(audioUri: string): Promise<TranscriptionRe
     // Determine audio format from file extension
     const format = audioUri.split('.').pop()?.toLowerCase() || 'm4a';
     
-    // Create API client for the working backend
-    const api = axios.create({
-      baseURL: workingBackendUrl,
-      timeout: 60000, // 60 seconds for AI processing
+    // Create request payload matching backend expectations
+    const payload = {
+      audio: base64Audio,
+      format: format
+    };
+    
+    const response = await axios.post(`${workingBackendUrl}/transcribe`, payload, {
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'VoiceReportApp/1.0', // Bypass localtunnel security
+        'User-Agent': 'VoiceReportApp/1.0',
       },
-    });
-    
-    const response = await api.post<TranscriptionResponse>('/transcribe', {
-      audio: base64Audio,
-      format: format,
+      timeout: 60000,
     });
 
     console.log('✅ Transcription successful');
     return response.data;
-    
   } catch (error) {
-    console.error('❌ Transcription failed:', error);
+    console.error('Transcription failed:', error);
     
     if (axios.isAxiosError(error)) {
       if (error.response?.status === 400) {
@@ -128,106 +128,77 @@ export async function transcribeAudio(audioUri: string): Promise<TranscriptionRe
       }
     }
     
-    throw new Error(`Transcription failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error('Failed to transcribe audio. Please check your connection and try again.');
   }
 }
 
 export async function generateSummary(transcription: string): Promise<SummaryResponse> {
-  if (USE_MOCKS) {
-    console.log('🎭 Using mock summary data');
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    return {
-      summary: {
-        taskDescription: "Developed mobile app interface for voice-to-report system with recording functionality and screen navigation",
-        location: "Remote - Home Office",
-        datetime: new Date().toLocaleDateString() + " at " + new Date().toLocaleTimeString(),
-        outcome: "Successfully implemented all core features including audio recording, transcription display, and PDF generation flow",
-        notes: "Ready for backend integration. UI tested on both iOS and Android devices."
-      }
-    };
-  }
-
   const workingBackendUrl = await findWorkingBackend();
   
   if (!workingBackendUrl) {
-    throw new Error('No backend server available for summary generation');
+    throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
   }
 
   try {
-    console.log(`🤖 Generating summary with backend: ${workingBackendUrl}`);
+    console.log(`📝 Generating summary using: ${workingBackendUrl}`);
     
-    const api = axios.create({
-      baseURL: workingBackendUrl,
-      timeout: 60000,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    // Create request payload matching backend expectations (/summarize endpoint)
+    const payload = {
+      transcription: transcription
+    };
     
-    const response = await api.post<SummaryResponse>('/summarize', {
-      transcription,
+    const response = await axios.post(`${workingBackendUrl}/summarize`, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'VoiceReportApp/1.0',
+      },
+      timeout: 30000,
     });
 
     console.log('✅ Summary generation successful');
     return response.data;
-    
   } catch (error) {
-    console.error('❌ Summary generation failed:', error);
-    throw new Error(`Summary generation failed: ${error instanceof Error ? error.message : String(error)}`);
+    console.error('Summary generation failed:', error);
+    throw new Error('Failed to generate summary. Please check your connection and try again.');
   }
+}
+
+// Alias for backward compatibility
+export async function summarizeText(transcription: string): Promise<SummaryResponse> {
+  return generateSummary(transcription);
 }
 
 export async function generatePDF(data: {
   summary: any;
   transcription: string;
 }): Promise<string> {
-  if (USE_MOCKS) {
-    console.log('🎭 Using mock PDF generation');
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const mockPdfContent = `
-Mock PDF Report
-===============
-
-Task: ${data.summary.taskDescription}
-Location: ${data.summary.location || 'N/A'}
-Date/Time: ${data.summary.datetime || 'N/A'}
-Outcome: ${data.summary.outcome || 'N/A'}
-Notes: ${data.summary.notes || 'N/A'}
-
-Full Transcription:
-${data.transcription}
-    `;
-    
-    const fileUri = `${FileSystem.documentDirectory}report_${Date.now()}.txt`;
-    await FileSystem.writeAsStringAsync(fileUri, mockPdfContent);
-    
-    return fileUri;
-  }
-
   const workingBackendUrl = await findWorkingBackend();
   
   if (!workingBackendUrl) {
-    throw new Error('No backend server available for PDF generation');
+    throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
   }
 
   try {
-    console.log(`📄 Generating PDF with backend: ${workingBackendUrl}`);
+    console.log(`📄 Generating PDF using: ${workingBackendUrl}`);
     
-    const api = axios.create({
-      baseURL: workingBackendUrl,
-      timeout: 60000,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    // Create request payload matching backend expectations (/generate-pdf endpoint)
+    const payload = {
+      summary: data.summary,
+      transcription: data.transcription
+    };
     
-    const response = await api.post('/generate-pdf', data, {
-      responseType: 'arraybuffer',
+    const response = await axios.post(`${workingBackendUrl}/generate-pdf`, payload, {
       headers: {
-        'Accept': 'application/pdf',
+        'Content-Type': 'application/json',
+        'User-Agent': 'VoiceReportApp/1.0',
       },
+      timeout: 30000,
+      responseType: 'arraybuffer', // Important: PDF comes as binary data
     });
 
     console.log(`📁 PDF received: ${response.data.byteLength} bytes`);
     
+    // Convert binary data to base64 and save to file
     const bytes = new Uint8Array(response.data);
     const base64 = btoa(String.fromCharCode(...bytes));
 
@@ -238,46 +209,44 @@ ${data.transcription}
 
     console.log('✅ PDF saved to:', fileUri);
     return fileUri;
-    
   } catch (error) {
-    console.error('❌ PDF generation failed:', error);
-    throw new Error(`PDF generation failed: ${error instanceof Error ? error.message : String(error)}`);
+    console.error('PDF generation failed:', error);
+    throw new Error('Failed to generate PDF. Please check your connection and try again.');
   }
 }
 
-export function handleApiError(error: any): string {
-  if (axios.isAxiosError(error)) {
-    if (error.response) {
-      return error.response.data?.detail || error.response.data?.message || 'Server error occurred';
-    } else if (error.request) {
-      return 'No response from server. Please check your connection and backend URL.';
-    }
-  }
-  return 'An unexpected error occurred';
-}
-
-// Manual network test function
-export async function testNetworkConnectivity(): Promise<void> {
-  console.log('🧪 Testing network connectivity...');
-  
-  // Test basic internet connectivity
+// Additional utility functions for debugging
+export async function checkBackendHealth(): Promise<boolean> {
   try {
-    const response = await fetch('https://httpbin.org/status/200', {
-      method: 'GET',
-      signal: AbortSignal.timeout(5000),
-    });
-    console.log('✅ Internet connectivity: OK');
+    const workingBackendUrl = await findWorkingBackend();
+    return workingBackendUrl !== null;
   } catch (error) {
-    console.log('❌ Internet connectivity: FAILED');
-    throw new Error('No internet connection');
-  }
-  
-  // Test backend connectivity
-  const workingBackend = await findWorkingBackend();
-  if (workingBackend) {
-    console.log(`✅ Backend connectivity: ${workingBackend}`);
-  } else {
-    console.log('❌ Backend connectivity: FAILED');
-    throw new Error('No backend server accessible');
+    console.error('Health check failed:', error);
+    return false;
   }
 }
+
+export async function getBackendInfo(): Promise<any> {
+  const workingBackendUrl = await findWorkingBackend();
+  
+  if (!workingBackendUrl) {
+    throw new Error('No backend server available');
+  }
+
+  try {
+    const response = await axios.get(`${workingBackendUrl}/health`, {
+      timeout: 5000,
+    });
+    return {
+      url: workingBackendUrl,
+      status: response.status,
+      data: response.data,
+    };
+  } catch (error) {
+    console.error('Failed to get backend info:', error);
+    throw new Error('Failed to get backend information');
+  }
+}
+
+// Export the current configuration for debugging
+export const getAPIConfig = () => API_CONFIG;
