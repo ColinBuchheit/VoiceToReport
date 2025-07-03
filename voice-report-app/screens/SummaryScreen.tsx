@@ -1,3 +1,4 @@
+// Updated SummaryScreen with BearS&T theming
 import React, { useState } from 'react';
 import {
   View,
@@ -100,7 +101,7 @@ const SummaryItem: React.FC<{ label: string; value: string }> = ({ label, value 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFFFFF', // White background
   },
   scrollContent: {
     padding: 20,
@@ -108,19 +109,21 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: '600',
-    color: '#1A1A1A',
+    color: '#000000', // Black text
     marginBottom: 20,
   },
   summaryCard: {
-    backgroundColor: 'white',
+    backgroundColor: '#F8F9FA', // Very light gray background
     borderRadius: 12,
     padding: 20,
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.05,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 2,
   },
   summaryItem: {
     marginBottom: 16,
@@ -128,12 +131,14 @@ const styles = StyleSheet.create({
   summaryLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#6B7280',
+    color: '#FF6B35', // Orange labels
     marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   summaryValue: {
     fontSize: 16,
-    color: '#1A1A1A',
+    color: '#000000', // Black text
     lineHeight: 22,
   },
   transcriptionSection: {
@@ -142,26 +147,28 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1A1A1A',
+    color: '#000000', // Black text
     marginBottom: 12,
   },
   transcriptionCard: {
-    backgroundColor: 'white',
+    backgroundColor: '#F8F9FA', // Very light gray background
     borderRadius: 12,
     padding: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.05,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 2,
   },
   transcriptionText: {
     fontSize: 14,
-    color: '#6B7280',
+    color: '#666666', // Dark gray text
     lineHeight: 20,
   },
   generateButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#FF6B35', // Orange background
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
@@ -173,7 +180,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   generateButtonText: {
-    color: 'white',
+    color: '#FFFFFF', // White text
     fontSize: 18,
     fontWeight: '600',
   },

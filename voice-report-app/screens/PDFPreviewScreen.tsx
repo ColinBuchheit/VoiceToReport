@@ -1,3 +1,4 @@
+// Updated PDFPreviewScreen with BearS&T theming
 import React from 'react';
 import {
   View,
@@ -93,76 +94,80 @@ export default function PDFPreviewScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFFFFF', // White background
   },
   content: {
     flex: 1,
     padding: 20,
   },
   successCard: {
-    backgroundColor: 'white',
+    backgroundColor: '#F8F9FA', // Very light gray background
     borderRadius: 12,
     padding: 30,
     alignItems: 'center',
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.05,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 2,
   },
   iconContainer: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#10B981',
+    backgroundColor: '#FF6B35', // Orange background
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
   },
   checkIcon: {
     fontSize: 40,
-    color: 'white',
+    color: '#FFFFFF', // White checkmark
     fontWeight: 'bold',
   },
   successTitle: {
     fontSize: 24,
     fontWeight: '600',
-    color: '#1A1A1A',
+    color: '#000000', // Black text
     marginBottom: 8,
   },
   successMessage: {
     fontSize: 16,
-    color: '#6B7280',
+    color: '#666666', // Dark gray text
     textAlign: 'center',
   },
   infoCard: {
-    backgroundColor: 'white',
+    backgroundColor: '#F8F9FA', // Very light gray background
     borderRadius: 12,
     padding: 20,
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.05,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 2,
   },
   infoTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1A1A1A',
+    color: '#000000', // Black text
     marginBottom: 12,
   },
   infoText: {
     fontSize: 14,
-    color: '#6B7280',
+    color: '#666666', // Dark gray text
     marginBottom: 8,
   },
   actions: {
     gap: 12,
   },
   primaryButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#FF6B35', // Orange background
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
@@ -174,20 +179,20 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   primaryButtonText: {
-    color: 'white',
+    color: '#FFFFFF', // White text
     fontSize: 18,
     fontWeight: '600',
   },
   secondaryButton: {
-    backgroundColor: 'white',
+    backgroundColor: '#F8F9FA', // Light gray background
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderWidth: 2,
+    borderColor: '#FF6B35', // Orange border
   },
   secondaryButtonText: {
-    color: '#007AFF',
+    color: '#FF6B35', // Orange text
     fontSize: 18,
     fontWeight: '600',
   },

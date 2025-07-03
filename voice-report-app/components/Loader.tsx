@@ -1,3 +1,4 @@
+// Updated Loader component with BearS&T theming
 import React from 'react';
 import {
   View,
@@ -14,7 +15,7 @@ export default function Loader({ message = 'Loading...' }: LoaderProps) {
   return (
     <View style={styles.container}>
       <View style={styles.loaderCard}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color="#FF6B35" />
         <Text style={styles.message}>{message}</Text>
       </View>
     </View>
@@ -26,22 +27,25 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFFFFF', // White background
   },
   loaderCard: {
-    backgroundColor: 'white',
+    backgroundColor: '#F8F9FA', // Very light gray background
     borderRadius: 12,
     padding: 30,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.05,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 2,
   },
   message: {
     marginTop: 16,
     fontSize: 16,
-    color: '#6B7280',
+    color: '#000000', // Black text
+    fontWeight: '500',
   },
 });

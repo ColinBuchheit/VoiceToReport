@@ -1,3 +1,4 @@
+// Updated TranscriptScreen with BearS&T theming
 import React, { useState } from 'react';
 import {
   View,
@@ -99,7 +100,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFFFFF', // White background
   },
   scrollContent: {
     padding: 20,
@@ -113,42 +114,41 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: '600',
-    color: '#1A1A1A',
+    color: '#000000', // Black text
   },
   editButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#F5F5F5', // Light gray background
   },
   editButtonText: {
-    color: '#007AFF',
+    color: '#FF6B35', // Orange text
     fontSize: 16,
     fontWeight: '500',
   },
   transcriptionCard: {
-    backgroundColor: 'white',
+    backgroundColor: '#F8F9FA', // Very light gray background
     borderRadius: 12,
     padding: 20,
     marginBottom: 24,
     minHeight: 300,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   transcriptionText: {
     fontSize: 16,
-    color: '#374151',
+    color: '#000000', // Black text
     lineHeight: 24,
   },
   transcriptionInput: {
     fontSize: 16,
-    color: '#374151',
+    color: '#000000', // Black text
     lineHeight: 24,
     minHeight: 250,
   },
   continueButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#FF6B35', // Orange background
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   continueButtonText: {
-    color: 'white',
+    color: '#FFFFFF', // White text
     fontSize: 18,
     fontWeight: '600',
   },

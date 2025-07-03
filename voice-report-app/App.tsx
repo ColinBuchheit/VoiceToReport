@@ -42,7 +42,7 @@ export default function App() {
             headerStyle: {
               backgroundColor: '#ffffff',
             },
-            headerTintColor: '#007AFF',
+            headerTintColor: '#FF6B35',
             headerTitleStyle: {
               fontWeight: '600',
             },
