@@ -1,4 +1,4 @@
-// Enhanced SummaryScreen with integrated PDF preview and Bears&T logo
+// screens/SummaryScreen.tsx - Complete file with AI Agent integration
 import React, { useState } from 'react';
 import {
   View,
@@ -13,13 +13,11 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
-import Loader from '../components/Loader';
 import { generatePDF } from '../services/api';
+import AIAgent from '../components/AIAgent';
+import { useSummaryScreenContext } from '../hooks/useScreenContext';
 
-type SummaryScreenNavigationProp = NativeStackNavigationProp<
-  RootStackParamList,
-  'Summary'
->;
+type SummaryScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Summary'>;
 type SummaryScreenRouteProp = RouteProp<RootStackParamList, 'Summary'>;
 
 interface Props {
@@ -27,199 +25,237 @@ interface Props {
   route: SummaryScreenRouteProp;
 }
 
-interface EditableSummary {
-  taskDescription: string;
-  location: string;
-  datetime: string;
-  outcome: string;
-  notes: string;
-}
-
 export default function SummaryScreen({ navigation, route }: Props) {
-  const { summary, transcription } = route.params;
-  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
-  const [isPreviewMode, setIsPreviewMode] = useState(true);
-  
-  // Editable summary state
-  const [editableSummary, setEditableSummary] = useState<EditableSummary>({
-    taskDescription: summary.taskDescription || '',
-    location: summary.location || '',
-    datetime: summary.datetime || '',
-    outcome: summary.outcome || '',
-    notes: summary.notes || '',
-  });
-  
+  const { transcription, summary } = route.params;
+  const [editableSummary, setEditableSummary] = useState(summary);
   const [editableTranscription, setEditableTranscription] = useState(transcription);
+  const [isPreviewMode, setIsPreviewMode] = useState(true);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // AI Agent screen context
+  const screenContext = useSummaryScreenContext(
+    editableSummary,
+    isPreviewMode,
+    editableTranscription
+  );
+
+  const updateSummaryField = (field: keyof typeof editableSummary, value: string) => {
+    setEditableSummary(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
 
   const handleGeneratePDF = async () => {
     try {
-      setIsGeneratingPDF(true);
-      const finalSummary = {
-        ...summary,
-        ...editableSummary,
-      };
-      
-      const pdfUrl = await generatePDF({ 
-        summary: finalSummary, 
-        transcription: editableTranscription 
+      setIsGenerating(true);
+      const pdfUrl = await generatePDF({
+        summary: editableSummary,
+        transcription: editableTranscription,
       });
       
       navigation.navigate('PDFPreview', {
         pdfUrl,
-        summary: finalSummary,
+        summary: editableSummary,
       });
     } catch (error) {
       console.error('Error generating PDF:', error);
       Alert.alert('Error', 'Failed to generate PDF');
     } finally {
-      setIsGeneratingPDF(false);
+      setIsGenerating(false);
     }
   };
 
-  const updateSummaryField = (field: keyof EditableSummary, value: string) => {
-    setEditableSummary(prev => ({
-      ...prev,
-      [field]: value,
-    }));
+  // AI Agent callback functions
+  const handleAIFieldUpdate = (fieldName: string, value: string) => {
+    console.log(`AI Agent updating field: ${fieldName} = ${value}`);
+    
+    if (fieldName === 'transcription') {
+      setEditableTranscription(value);
+    } else if (fieldName in editableSummary) {
+      updateSummaryField(fieldName as keyof typeof editableSummary, value);
+    }
   };
 
-  if (isGeneratingPDF) {
-    return <Loader message="Creating PDF report..." />;
-  }
+  const handleAIModeToggle = () => {
+    console.log(`AI Agent toggling mode from ${isPreviewMode ? 'preview' : 'edit'}`);
+    setIsPreviewMode(prev => !prev);
+  };
+
+  const handleAIAction = (actionName: string, params?: any) => {
+    console.log(`AI Agent executing action: ${actionName}`, params);
+    
+    switch (actionName) {
+      case 'generate PDF':
+      case 'generate_pdf':
+        handleGeneratePDF();
+        break;
+      case 'add current date':
+      case 'add_current_date':
+        const currentDate = new Date().toLocaleDateString();
+        updateSummaryField('datetime', currentDate);
+        break;
+      case 'add current time':
+      case 'add_current_time':
+        const currentTime = new Date().toLocaleString();
+        updateSummaryField('datetime', currentTime);
+        break;
+      case 'clear_field':
+        // This would need additional context about which field to clear
+        console.log('Clear field action needs field specification');
+        break;
+      default:
+        console.warn(`Unknown AI action: ${actionName}`);
+    }
+  };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>AI Summary & PDF Preview</Text>
+    <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Summary & Review</Text>
+          <TouchableOpacity
+            style={styles.toggleButton}
+            onPress={() => setIsPreviewMode(!isPreviewMode)}
+          >
+            <Text style={styles.toggleButtonText}>
+              {isPreviewMode ? 'Edit Mode' : 'Preview Mode'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* PDF Preview Section */}
+        <View style={styles.pdfPreviewContainer}>
+          <View style={styles.pdfPreviewHeader}>
+            <Text style={styles.previewTitle}>📄 PDF Preview</Text>
+            <Text style={styles.previewSubtitle}>
+              {isPreviewMode ? 'Tap "Edit Mode" to modify fields' : 'Editing enabled - changes appear in real-time'}
+            </Text>
+          </View>
+
+          {/* PDF Document Mock */}
+          <View style={styles.pdfDocument}>
+            {/* Logo Section */}
+            <View style={styles.logoSection}>
+              <Image 
+                source={require('../assets/bears&t.png')} 
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
+            </View>
+
+            {/* Document Title */}
+            <Text style={styles.documentTitle}>WORK REPORT</Text>
+
+            {/* Metadata */}
+            <View style={styles.metadataSection}>
+              <View style={styles.metadataRow}>
+                <Text style={styles.metadataLabel}>Report Generated:</Text>
+                <Text style={styles.metadataValue}>{new Date().toLocaleDateString()}</Text>
+              </View>
+              <View style={styles.metadataRow}>
+                <Text style={styles.metadataLabel}>Report Type:</Text>
+                <Text style={styles.metadataValue}>Voice-to-Text Work Summary</Text>
+              </View>
+            </View>
+
+            {/* Summary Section */}
+            <View style={styles.summarySection}>
+              <Text style={styles.sectionHeading}>SUMMARY</Text>
+              <View style={styles.sectionDivider} />
+
+              <EditableField
+                label="Task Description"
+                value={editableSummary.taskDescription || ''}
+                onChangeText={(text) => updateSummaryField('taskDescription', text)}
+                isEditing={!isPreviewMode}
+                multiline
+              />
+
+              <EditableField
+                label="Location"
+                value={editableSummary.location || ''}
+                onChangeText={(text) => updateSummaryField('location', text)}
+                isEditing={!isPreviewMode}
+                placeholder="Not specified"
+              />
+
+              <EditableField
+                label="Date/Time"
+                value={editableSummary.datetime || ''}
+                onChangeText={(text) => updateSummaryField('datetime', text)}
+                isEditing={!isPreviewMode}
+                placeholder="Not specified"
+              />
+
+              <EditableField
+                label="Outcome"
+                value={editableSummary.outcome || ''}
+                onChangeText={(text) => updateSummaryField('outcome', text)}
+                isEditing={!isPreviewMode}
+                multiline
+                placeholder="Not specified"
+              />
+
+              <EditableField
+                label="Additional Notes"
+                value={editableSummary.notes || ''}
+                onChangeText={(text) => updateSummaryField('notes', text)}
+                isEditing={!isPreviewMode}
+                multiline
+                placeholder="None"
+              />
+            </View>
+
+            {/* Transcription Section */}
+            <View style={styles.transcriptionSection}>
+              <Text style={styles.sectionHeading}>FULL TRANSCRIPTION</Text>
+              <View style={styles.sectionDivider} />
+
+              <View style={styles.transcriptionContainer}>
+                {isPreviewMode ? (
+                  <Text style={styles.transcriptionText}>
+                    {editableTranscription}
+                  </Text>
+                ) : (
+                  <TextInput
+                    style={styles.transcriptionInput}
+                    value={editableTranscription}
+                    onChangeText={setEditableTranscription}
+                    multiline
+                    textAlignVertical="top"
+                    placeholder="Transcription text..."
+                  />
+                )}
+              </View>
+            </View>
+
+            {/* Clean footer without AI text */}
+          </View>
+        </View>
+
+        {/* Generate PDF Button */}
         <TouchableOpacity
-          style={styles.toggleButton}
-          onPress={() => setIsPreviewMode(!isPreviewMode)}
+          style={styles.generateButton}
+          onPress={handleGeneratePDF}
+          disabled={isGenerating}
         >
-          <Text style={styles.toggleButtonText}>
-            {isPreviewMode ? 'Edit Mode' : 'Preview Mode'}
+          <Text style={styles.generateButtonText}>
+            {isGenerating ? 'Generating PDF...' : 'Generate PDF Report'}
           </Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
 
-      {/* PDF Preview Section */}
-      <View style={styles.pdfPreviewContainer}>
-        <View style={styles.pdfPreviewHeader}>
-          <Text style={styles.previewTitle}>📄 PDF Preview</Text>
-          <Text style={styles.previewSubtitle}>
-            {isPreviewMode ? 'Tap "Edit Mode" to modify fields' : 'Editing enabled - changes appear in real-time'}
-          </Text>
-        </View>
-
-        {/* PDF Document Mock */}
-        <View style={styles.pdfDocument}>
-          {/* Logo Section */}
-          <View style={styles.logoSection}>
-            <Image 
-              source={require('../assets/bears&t.png')} 
-              style={styles.logoImage}
-              resizeMode="contain"
-            />
-          </View>
-
-          {/* Document Title */}
-          <Text style={styles.documentTitle}>WORK REPORT</Text>
-
-          {/* Metadata */}
-          <View style={styles.metadataSection}>
-            <View style={styles.metadataRow}>
-              <Text style={styles.metadataLabel}>Report Generated:</Text>
-              <Text style={styles.metadataValue}>{new Date().toLocaleDateString()}</Text>
-            </View>
-            <View style={styles.metadataRow}>
-              <Text style={styles.metadataLabel}>Report Type:</Text>
-              <Text style={styles.metadataValue}>Voice-to-Text Work Summary</Text>
-            </View>
-          </View>
-
-          {/* Summary Section */}
-          <View style={styles.summarySection}>
-            <Text style={styles.sectionHeading}>SUMMARY</Text>
-            <View style={styles.sectionDivider} />
-
-            <EditableField
-              label="Task Description"
-              value={editableSummary.taskDescription}
-              onChangeText={(text) => updateSummaryField('taskDescription', text)}
-              isEditing={!isPreviewMode}
-              multiline
-            />
-
-            <EditableField
-              label="Location"
-              value={editableSummary.location}
-              onChangeText={(text) => updateSummaryField('location', text)}
-              isEditing={!isPreviewMode}
-              placeholder="Not specified"
-            />
-
-            <EditableField
-              label="Date/Time"
-              value={editableSummary.datetime}
-              onChangeText={(text) => updateSummaryField('datetime', text)}
-              isEditing={!isPreviewMode}
-              placeholder="Not specified"
-            />
-
-            <EditableField
-              label="Outcome"
-              value={editableSummary.outcome}
-              onChangeText={(text) => updateSummaryField('outcome', text)}
-              isEditing={!isPreviewMode}
-              multiline
-              placeholder="Not specified"
-            />
-
-            <EditableField
-              label="Additional Notes"
-              value={editableSummary.notes}
-              onChangeText={(text) => updateSummaryField('notes', text)}
-              isEditing={!isPreviewMode}
-              multiline
-              placeholder="None"
-            />
-          </View>
-
-          {/* Transcription Section */}
-          <View style={styles.transcriptionSection}>
-            <Text style={styles.sectionHeading}>FULL TRANSCRIPTION</Text>
-            <View style={styles.sectionDivider} />
-
-            <View style={styles.transcriptionContainer}>
-              {isPreviewMode ? (
-                <Text style={styles.transcriptionText}>
-                  {editableTranscription}
-                </Text>
-              ) : (
-                <TextInput
-                  style={styles.transcriptionInput}
-                  value={editableTranscription}
-                  onChangeText={setEditableTranscription}
-                  multiline
-                  textAlignVertical="top"
-                  placeholder="Transcription text..."
-                />
-              )}
-            </View>
-          </View>
-
-          {/* Clean footer without AI text */}
-        </View>
-      </View>
-
-      {/* Generate PDF Button */}
-      <TouchableOpacity
-        style={styles.generateButton}
-        onPress={handleGeneratePDF}
-      >
-        <Text style={styles.generateButtonText}>Generate PDF Report</Text>
-      </TouchableOpacity>
-    </ScrollView>
+      {/* AI Agent Component */}
+      <AIAgent
+        screenContext={screenContext}
+        onFieldUpdate={handleAIFieldUpdate}
+        onModeToggle={handleAIModeToggle}
+        onAction={handleAIAction}
+        position="bottom-right"
+        disabled={isGenerating}
+      />
+    </View>
   );
 }
 
