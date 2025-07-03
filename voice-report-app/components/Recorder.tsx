@@ -343,24 +343,24 @@ const styles = StyleSheet.create({
     height: 200,
     borderRadius: 100,
     borderWidth: 2,
-    borderColor: '#007AFF',
+    borderColor: '#FF6B35', // Orange waves
   },
   pulseCircle: {
     position: 'absolute',
     width: 200,
     height: 200,
     borderRadius: 100,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#FF6B35', // Orange pulse
   },
   recordButton: {
     width: 160,
     height: 160,
     borderRadius: 80,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#FF6B35', // Orange - BearS&T brand color
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 4,
-    borderColor: '#ffffff',
+    borderColor: '#000000', // Black border instead of white
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.3,
@@ -368,10 +368,10 @@ const styles = StyleSheet.create({
     elevation: 12,
   },
   recordingActive: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#000000', // Black when recording
   },
   processingActive: {
-    backgroundColor: '#34C759',
+    backgroundColor: '#FF6B35', // Orange when processing
   },
   micContainer: {
     alignItems: 'center',
@@ -380,12 +380,12 @@ const styles = StyleSheet.create({
   micIcon: {
     width: 40,
     height: 50,
-    backgroundColor: 'white',
+    backgroundColor: '#000000', // Black microphone icon
     borderRadius: 20,
     position: 'relative',
   },
   micIconActive: {
-    backgroundColor: '#FFF',
+    backgroundColor: '#000000', // Keep black when active
   },
   recordingIndicator: {
     position: 'absolute',
@@ -396,7 +396,7 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#FFF',
+    backgroundColor: '#000000', // Black recording dot
   },
   processingContent: {
     alignItems: 'center',
@@ -407,36 +407,37 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 4,
-    borderColor: '#ffffff',
+    borderColor: '#000000', // Black spinner
     borderTopColor: 'transparent',
   },
   statusContainer: {
     position: 'absolute',
-    bottom: -60,
+    bottom: -80, // Moved further down to give more space
     alignItems: 'center',
+    width: '100%', // Full width for better centering
   },
   statusText: {
-    fontSize: 16,
-    color: '#34C759',
+    fontSize: 20, // Enlarged from 16
+    color: '#FF6B35', // Orange for processing
     fontWeight: '600',
   },
   recordingStatus: {
     alignItems: 'center',
   },
   recordingText: {
-    fontSize: 16,
-    color: '#FF3B30',
+    fontSize: 20, // Enlarged from 16
+    color: '#FF6B35', // Orange text for recording status
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: 6, // Slightly more space
   },
   durationText: {
-    fontSize: 14,
-    color: '#6B7280',
+    fontSize: 18, // Enlarged from 14
+    color: '#666666', // Dark gray for duration on white background
     fontFamily: 'monospace',
   },
   instructionText: {
-    fontSize: 14,
-    color: '#9CA3AF',
+    fontSize: 18, // Enlarged from 14
+    color: '#666666', // Dark gray for instructions on white background
     textAlign: 'center',
   },
 });
