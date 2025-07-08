@@ -1,4 +1,4 @@
-// components/AIAgent.tsx - COMPLETE FIXED VERSION
+// components/AIAgent.tsx - PROFESSIONAL VERSION WITH BEAR LOGO
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -7,10 +7,53 @@ import {
   StyleSheet,
   Animated,
   Alert,
+  Image,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import { AIAgentService } from '../services/aiAgentService';
 import { VoiceCommandResponse, ScreenContext } from '../types/aiAgent';
+
+// Professional SVG-style icons as text components
+const MicrophoneIcon = ({ size = 24, color = '#FFFFFF' }) => (
+  <View style={[styles.iconContainer, { width: size, height: size }]}>
+    <View style={[styles.micBody, { backgroundColor: color }]} />
+    <View style={[styles.micTop, { backgroundColor: color }]} />
+    <View style={[styles.micStand, { backgroundColor: color }]} />
+    <View style={[styles.micBase, { backgroundColor: color }]} />
+  </View>
+);
+
+const ProcessingIcon = ({ size = 24, color = '#FFFFFF' }) => (
+  <View style={[styles.iconContainer, { width: size, height: size }]}>
+    <View style={[styles.processingDot1, { backgroundColor: color }]} />
+    <View style={[styles.processingDot2, { backgroundColor: color }]} />
+    <View style={[styles.processingDot3, { backgroundColor: color }]} />
+  </View>
+);
+
+const SpeakerIcon = ({ size = 24, color = '#FFFFFF' }) => (
+  <View style={[styles.iconContainer, { width: size, height: size }]}>
+    <View style={[styles.speakerBox, { borderColor: color }]} />
+    <View style={[styles.speakerWave1, { borderColor: color }]} />
+    <View style={[styles.speakerWave2, { borderColor: color }]} />
+  </View>
+);
+
+// Bear Logo Icon Component
+const BearLogoIcon = ({ size = 55, opacity = 1 }) => (
+  <Image 
+    source={require('../assets/bears&t2.png')} 
+    style={[
+      styles.bearLogo, 
+      { 
+        width: size, 
+        height: size,
+        opacity: opacity 
+      }
+    ]}
+    resizeMode="contain"
+  />
+);
 
 interface AIAgentState {
   isListening: boolean;
@@ -48,10 +91,11 @@ export default function AIAgent({
   const aiService = AIAgentService.getInstance();
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // Animation values
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const rotateAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+  // FIXED: Separate animation values for different properties
+  const scaleAnim = useRef(new Animated.Value(1)).current;        // For transform scale (native)
+  const rotateAnim = useRef(new Animated.Value(0)).current;       // For transform rotate (native)
+  const opacityAnim = useRef(new Animated.Value(1)).current;      // For opacity (native)
+  const haloAnim = useRef(new Animated.Value(0)).current;         // For orange halo effect (native)
 
   // Cleanup on unmount
   useEffect(() => {
@@ -73,20 +117,23 @@ export default function AIAgent({
       startResponseAnimation();
     } else {
       stopAllAnimations();
+      // Start subtle halo animation for default state to draw attention
+      startHaloAnimation();
     }
   }, [agentState.isListening, agentState.isProcessing, agentState.isPlayingResponse]);
 
   const startListeningAnimation = () => {
+    // Simple scale pulse animation
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.3,
-          duration: 800,
+        Animated.timing(scaleAnim, {
+          toValue: 1.15,
+          duration: 1000,
           useNativeDriver: true,
         }),
-        Animated.timing(pulseAnim, {
+        Animated.timing(scaleAnim, {
           toValue: 1,
-          duration: 800,
+          duration: 1000,
           useNativeDriver: true,
         }),
       ])
@@ -94,6 +141,7 @@ export default function AIAgent({
   };
 
   const startProcessingAnimation = () => {
+    // Smooth rotation for processing
     Animated.loop(
       Animated.timing(rotateAnim, {
         toValue: 1,
@@ -104,16 +152,35 @@ export default function AIAgent({
   };
 
   const startResponseAnimation = () => {
+    // Gentle pulse for speaking
     Animated.loop(
       Animated.sequence([
         Animated.timing(scaleAnim, {
-          toValue: 1.2,
-          duration: 500,
+          toValue: 1.08,
+          duration: 600,
           useNativeDriver: true,
         }),
         Animated.timing(scaleAnim, {
           toValue: 1,
-          duration: 500,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  };
+
+  const startHaloAnimation = () => {
+    // Prominent orange pulsing halo effect for default state
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(haloAnim, {
+          toValue: 1,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(haloAnim, {
+          toValue: 0,
+          duration: 2000,
           useNativeDriver: true,
         }),
       ])
@@ -121,13 +188,13 @@ export default function AIAgent({
   };
 
   const stopAllAnimations = () => {
-    pulseAnim.stopAnimation();
-    rotateAnim.stopAnimation();
     scaleAnim.stopAnimation();
+    rotateAnim.stopAnimation();
+    opacityAnim.stopAnimation();
     
-    pulseAnim.setValue(1);
-    rotateAnim.setValue(0);
     scaleAnim.setValue(1);
+    rotateAnim.setValue(0);
+    opacityAnim.setValue(1);
   };
 
   const startListening = async () => {
@@ -138,7 +205,7 @@ export default function AIAgent({
       await aiService.startListening();
       console.log('✅ AI Agent listening started successfully');
       
-      // Auto-stop after 15 seconds to prevent long recordings
+      // Auto-stop after 15 seconds
       recordingTimer.current = setTimeout(() => {
         console.log('⏰ AI Agent auto-stopping after 15 seconds');
         stopListening();
@@ -165,7 +232,6 @@ export default function AIAgent({
     try {
       console.log('🛑 AI Agent stopping listening...');
       
-      // Clear the auto-stop timer
       if (recordingTimer.current) {
         clearTimeout(recordingTimer.current);
         recordingTimer.current = null;
@@ -201,12 +267,10 @@ export default function AIAgent({
     }
   };
 
-  // CRITICAL FIX: Execute command first, then handle TTS separately
   const processCommand = async (audioUri: string) => {
     try {
       console.log('🤖 AI Agent processing voice command from:', audioUri);
       
-      // IMPROVED: Better file validation
       const fileInfo = await FileSystem.getInfoAsync(audioUri);
       console.log('📁 Audio file info:', fileInfo);
       
@@ -218,15 +282,12 @@ export default function AIAgent({
         throw new Error('Audio recording too short - please speak longer');
       }
       
-      // Process the voice command
       const response = await aiService.processVoiceCommand(audioUri, screenContext);
       console.log('📋 AI Agent response:', response);
       
-      // CRITICAL FIX: Execute the command FIRST, regardless of TTS success
       await executeCommand(response);
       console.log('✅ AI Agent command executed successfully');
       
-      // FIXED: Make TTS optional and non-blocking
       setAgentState(prev => ({ ...prev, isProcessing: false, isPlayingResponse: true }));
       
       try {
@@ -234,7 +295,6 @@ export default function AIAgent({
         console.log('🔊 AI Agent voice response completed');
       } catch (ttsError) {
         console.warn('🔇 AI Agent TTS failed (continuing without voice):', ttsError);
-        // IMPROVED: Show text fallback instead of failing entirely
         setTimeout(() => {
           Alert.alert('AI Agent', response.confirmation, [{ text: 'OK' }]);
         }, 500);
@@ -256,7 +316,6 @@ export default function AIAgent({
         error: 'Failed to understand command'
       }));
       
-      // IMPROVED: More specific and helpful error messages
       let errorMessage = 'Failed to process voice command. Please try again.';
       
       if (error instanceof Error) {
@@ -319,8 +378,6 @@ export default function AIAgent({
         
       case 'clarify':
         console.log('❓ AI Agent needs clarification:', response.clarification);
-        // For clarifications, just play the TTS response or show alert
-        // The TTS will be handled in processCommand
         break;
         
       default:
@@ -329,7 +386,6 @@ export default function AIAgent({
   };
 
   const handlePress = async () => {
-    // Prevent interaction when disabled or processing
     if (disabled || agentState.isProcessing || agentState.isPlayingResponse) {
       console.log('🚫 AI Agent interaction blocked - disabled or busy');
       return;
@@ -343,33 +399,59 @@ export default function AIAgent({
   };
 
   const getButtonStyle = () => {
+    let baseStyle = styles.agentButton;
     let additionalStyles = {};
     
     if (agentState.isListening) {
-      additionalStyles = { backgroundColor: '#FF0000', shadowColor: '#FF0000' }; // Red for listening
+      additionalStyles = { 
+        backgroundColor: '#FF4757', // Professional red for listening
+        shadowColor: '#FF4757',
+        shadowOpacity: 0.6,
+      };
     } else if (agentState.isProcessing) {
-      additionalStyles = { backgroundColor: '#FFA500', shadowColor: '#FFA500' }; // Orange for processing
+      additionalStyles = { 
+        backgroundColor: '#FFA502', // Professional orange for processing
+        shadowColor: '#FFA502',
+        shadowOpacity: 0.5,
+      };
     } else if (agentState.isPlayingResponse) {
-      additionalStyles = { backgroundColor: '#00FF00', shadowColor: '#00FF00' }; // Green for speaking
+      additionalStyles = { 
+        backgroundColor: '#2ED573', // Professional green for speaking
+        shadowColor: '#2ED573',
+        shadowOpacity: 0.5,
+      };
     } else if (disabled) {
-      additionalStyles = { backgroundColor: '#999999', shadowColor: '#999999' }; // Gray for disabled
+      additionalStyles = { 
+        backgroundColor: '#747D8C', // Professional gray for disabled
+        shadowOpacity: 0.2,
+      };
+    } else {
+      additionalStyles = {
+        backgroundColor: '#2a2a2a', // Slightly lighter dark gray to complement the logo
+        shadowColor: '#FFA502', // Orange shadow to match logo
+        shadowOpacity: 0.3,
+      };
     }
     
-    return [styles.agentButton, additionalStyles];
+    return [baseStyle, additionalStyles];
   };
 
   const getIcon = () => {
-    if (agentState.isListening) return '🎙️';
-    if (agentState.isProcessing) return '⚡';
-    if (agentState.isPlayingResponse) return '🔊';
-    if (disabled) return '🤖';
-    return '🤖';
+    const iconSize = 55; // Larger bear logo for better visibility and impact
+    const iconColor = '#FFFFFF';
+    
+    if (agentState.isListening) return <MicrophoneIcon size={28} color={iconColor} />;
+    if (agentState.isProcessing) return <ProcessingIcon size={28} color={iconColor} />;
+    if (agentState.isPlayingResponse) return <SpeakerIcon size={28} color={iconColor} />;
+    
+    // Default state shows your beautiful bear logo - larger and more prominent
+    return <BearLogoIcon size={iconSize} opacity={1} />;
   };
 
   const getStatusText = () => {
-    if (agentState.isListening) return 'Listening...';
-    if (agentState.isProcessing) return 'Processing...';
-    if (agentState.isPlayingResponse) return 'Speaking...';
+    if (agentState.isListening) return 'Listening';
+    if (agentState.isProcessing) return 'Processing';
+    if (agentState.isPlayingResponse) return 'Speaking';
     if (agentState.error) return 'Error';
     return null;
   };
@@ -381,11 +463,11 @@ export default function AIAgent({
     position === 'bottom-right' && styles.positionBottomRight,
   ];
 
+  // FIXED: Single animation style with only native driver compatible properties
   const animatedStyle = {
     transform: [
       { 
-        scale: agentState.isListening ? pulseAnim : 
-               agentState.isPlayingResponse ? scaleAnim : 1 
+        scale: agentState.isListening || agentState.isPlayingResponse ? scaleAnim : 1 
       },
       { 
         rotate: agentState.isProcessing ? 
@@ -395,28 +477,60 @@ export default function AIAgent({
           }) : '0deg'
       }
     ],
+    opacity: opacityAnim,
+  };
+
+  // Orange halo effect for default state
+  const haloStyle = {
+    position: 'absolute' as const,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: 'transparent',
+    borderWidth: 3,
+    borderColor: '#FFA502',
+    opacity: haloAnim,
+    // FIXED: Perfect centering around the 70px button
+    top: -10, // (90 - 70) / 2 = 10px offset to center
+    left: -10, // (90 - 70) / 2 = 10px offset to center
+    transform: [
+      {
+        scale: haloAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [1, 1.3],
+        }),
+      },
+    ],
   };
 
   return (
     <View style={containerStyle}>
-      {/* Status text */}
+      {/* Status text - FIXED: Positioned to prevent button shifting */}
       {getStatusText() && (
-        <View style={styles.statusContainer}>
+        <View style={[styles.statusContainer, styles.statusFixed]}>
           <Text style={styles.statusText}>{getStatusText()}</Text>
         </View>
       )}
       
-      {/* AI Agent Button */}
-      <Animated.View style={animatedStyle}>
-        <TouchableOpacity
-          style={getButtonStyle()}
-          onPress={handlePress}
-          disabled={disabled}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.agentIcon}>{getIcon()}</Text>
-        </TouchableOpacity>
-      </Animated.View>
+      {/* Button container with centered halo */}
+      <View style={styles.buttonContainer}>
+        {/* Orange Halo Effect - Behind and centered on the button */}
+        {!agentState.isListening && !agentState.isProcessing && !agentState.isPlayingResponse && (
+          <Animated.View style={haloStyle} />
+        )}
+        
+        {/* AI Agent Button - FIXED: Static positioning */}
+        <Animated.View style={animatedStyle}>
+          <TouchableOpacity
+            style={getButtonStyle()}
+            onPress={handlePress}
+            disabled={disabled}
+            activeOpacity={0.8}
+          >
+            {getIcon()}
+          </TouchableOpacity>
+        </Animated.View>
+      </View>
     </View>
   );
 }
@@ -427,6 +541,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 1000,
   },
+  buttonContainer: {
+    position: 'relative',
+    width: 70,
+    height: 70,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   positionBottomLeft: {
     bottom: 100,
     left: 20,
@@ -434,40 +555,177 @@ const styles = StyleSheet.create({
   positionBottomCenter: {
     bottom: 100,
     left: '50%',
-    marginLeft: -35, // Half of button width
+    marginLeft: -35,
   },
   positionBottomRight: {
     bottom: 100,
     right: 20,
   },
   statusContainer: {
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    marginBottom: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  statusFixed: {
+    position: 'absolute',
+    top: -50, // Fixed position above button
+    left: '50%',
+    marginLeft: -50, // Center horizontally (approximate)
+    minWidth: 100,
+    alignItems: 'center',
   },
   statusText: {
-    color: 'white',
-    fontSize: 12,
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '600',
+    letterSpacing: 0.3,
   },
   agentButton: {
     width: 70,
     height: 70,
     borderRadius: 35,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#2a2a2a', // Dark gray to complement the bear logo
     justifyContent: 'center',
     alignItems: 'center',
     shadowOffset: {
       width: 0,
-      height: 4,
+      height: 6,
     },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 8,
+    elevation: 12,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 165, 2, 0.2)', // Subtle orange border to match logo
   },
-  agentIcon: {
-    fontSize: 28,
+  
+  // Bear logo styling
+  bearLogo: {
+    // Image styling handled by component props
+  },
+  
+  // Icon styles - Professional geometric designs
+  iconContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  
+  // Microphone Icon
+  micBody: {
+    width: 8,
+    height: 14,
+    borderRadius: 4,
+    position: 'absolute',
+  },
+  micTop: {
+    width: 8,
+    height: 3,
+    borderRadius: 4,
+    position: 'absolute',
+    top: -2,
+  },
+  micStand: {
+    width: 2,
+    height: 6,
+    position: 'absolute',
+    bottom: -3,
+  },
+  micBase: {
+    width: 12,
+    height: 2,
+    borderRadius: 1,
+    position: 'absolute',
+    bottom: -5,
+  },
+  
+  // Processing Icon (three dots)
+  processingDot1: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    position: 'absolute',
+    left: 2,
+  },
+  processingDot2: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    position: 'absolute',
+    left: 10,
+  },
+  processingDot3: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    position: 'absolute',
+    left: 18,
+  },
+  
+  // Speaker Icon
+  speakerBox: {
+    width: 8,
+    height: 8,
+    borderWidth: 2,
+    position: 'absolute',
+    left: 2,
+  },
+  speakerWave1: {
+    width: 6,
+    height: 6,
+    borderWidth: 2,
+    borderRadius: 3,
+    borderLeftWidth: 0,
+    borderBottomWidth: 0,
+    borderTopWidth: 0,
+    position: 'absolute',
+    right: 6,
+  },
+  speakerWave2: {
+    width: 8,
+    height: 8,
+    borderWidth: 2,
+    borderRadius: 4,
+    borderLeftWidth: 0,
+    borderBottomWidth: 0,
+    borderTopWidth: 0,
+    position: 'absolute',
+    right: 2,
+  },
+  
+  // AI Icon (circle with dots)
+  aiCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    position: 'absolute',
+  },
+  aiDot1: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    position: 'absolute',
+    top: 6,
+    left: 10.5,
+  },
+  aiDot2: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    position: 'absolute',
+    top: 10.5,
+    left: 7,
+  },
+  aiDot3: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    position: 'absolute',
+    top: 10.5,
+    right: 7,
   },
 });
