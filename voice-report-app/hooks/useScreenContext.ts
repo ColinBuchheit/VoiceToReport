@@ -1,30 +1,31 @@
-// hooks/useScreenContext.ts
+// hooks/useScreenContext.ts - SIMPLIFIED & FLEXIBLE VERSION
 import { useMemo } from 'react';
 import { ScreenContext, FieldInfo } from '../types/aiAgent';
 
-// Summary Screen Context Hook
+// Basic Summary Screen Context Hook - Easy to adapt later
 export const useSummaryScreenContext = (
   editableSummary: any,
   isPreviewMode: boolean,
   editableTranscription: string
 ): ScreenContext => {
   return useMemo(() => {
+    // Basic fields that can be easily expanded when manager defines requirements
     const fields: FieldInfo[] = [
       {
         name: 'taskDescription',
-        label: 'Task Description',
+        label: 'Task Description', 
         currentValue: editableSummary.taskDescription || '',
         type: 'multiline',
         isEditable: !isPreviewMode,
-        synonyms: ['task', 'description', 'work description', 'job', 'activity', 'work']
+        synonyms: ['task', 'description', 'work', 'job', 'what did you do']
       },
       {
         name: 'location',
         label: 'Location',
         currentValue: editableSummary.location || '',
-        type: 'text',
+        type: 'text', 
         isEditable: !isPreviewMode,
-        synonyms: ['place', 'site', 'address', 'where', 'job site', 'location', 'spot']
+        synonyms: ['location', 'place', 'where', 'site', 'address']
       },
       {
         name: 'datetime',
@@ -32,7 +33,7 @@ export const useSummaryScreenContext = (
         currentValue: editableSummary.datetime || '',
         type: 'text',
         isEditable: !isPreviewMode,
-        synonyms: ['time', 'date', 'when', 'timestamp', 'datetime', 'day']
+        synonyms: ['time', 'date', 'when', 'datetime']
       },
       {
         name: 'outcome',
@@ -40,23 +41,23 @@ export const useSummaryScreenContext = (
         currentValue: editableSummary.outcome || '',
         type: 'multiline',
         isEditable: !isPreviewMode,
-        synonyms: ['result', 'completion', 'status', 'finish', 'outcome', 'end result']
+        synonyms: ['outcome', 'result', 'status', 'how did it go']
       },
       {
         name: 'notes',
-        label: 'Additional Notes',
+        label: 'Notes',
         currentValue: editableSummary.notes || '',
         type: 'multiline',
         isEditable: !isPreviewMode,
-        synonyms: ['additional notes', 'extra notes', 'comments', 'remarks', 'notes']
+        synonyms: ['notes', 'comments', 'additional', 'other']
       },
       {
         name: 'transcription',
-        label: 'Full Transcription',
+        label: 'Transcription',
         currentValue: editableTranscription || '',
         type: 'multiline',
         isEditable: !isPreviewMode,
-        synonyms: ['transcription', 'transcript', 'full text', 'recording text']
+        synonyms: ['transcription', 'transcript', 'recording', 'what I said']
       }
     ];
 
@@ -64,9 +65,6 @@ export const useSummaryScreenContext = (
       'switch to edit mode',
       'switch to preview mode', 
       'generate PDF',
-      'update field',
-      'modify transcription',
-      'clear field',
       'add current date',
       'add current time'
     ];
@@ -97,8 +95,7 @@ export const usePDFPreviewScreenContext = (
       'share PDF',
       'download PDF', 
       'create new report',
-      'go back to edit',
-      'regenerate PDF'
+      'go back to edit'
     ];
 
     return {
@@ -106,8 +103,7 @@ export const usePDFPreviewScreenContext = (
       visibleFields: fields,
       currentValues: {
         pdfUrl,
-        summary,
-        hasGeneratedPDF: true
+        summary
       },
       availableActions
     };
@@ -127,7 +123,7 @@ export const useTranscriptScreenContext = (
         currentValue: transcription || '',
         type: 'multiline',
         isEditable: isEditing,
-        synonyms: ['transcription', 'transcript', 'text', 'recording', 'speech text']
+        synonyms: ['transcription', 'transcript', 'text', 'recording']
       }
     ];
 
@@ -161,9 +157,7 @@ export const useHomeScreenContext = (
     const availableActions = [
       'start recording',
       'stop recording',
-      'start new report',
-      'help',
-      'instructions'
+      'start new report'
     ];
 
     return {
@@ -177,3 +171,44 @@ export const useHomeScreenContext = (
     };
   }, [isRecording, isProcessing]);
 };
+
+// UTILITY: Easy field configuration for future expansion
+export const createCustomField = (
+  name: string,
+  label: string,
+  currentValue: string,
+  synonyms: string[],
+  type: 'text' | 'multiline' | 'readonly' = 'text',
+  isEditable: boolean = true
+): FieldInfo => ({
+  name,
+  label,
+  currentValue: currentValue || '',
+  type,
+  isEditable,
+  synonyms
+});
+
+// UTILITY: Helper for adding fields when manager defines requirements
+export const addFieldsToContext = (
+  baseContext: ScreenContext,
+  newFields: FieldInfo[]
+): ScreenContext => ({
+  ...baseContext,
+  visibleFields: [...baseContext.visibleFields, ...newFields]
+});
+
+// EXAMPLE: How to easily add new fields when requirements are defined
+/*
+// When your manager defines new fields, just add them like this:
+
+const customFields = [
+  createCustomField('priority', 'Priority Level', summary.priority, ['priority', 'urgent', 'important']),
+  createCustomField('clientName', 'Client', summary.clientName, ['client', 'customer', 'company']),
+  createCustomField('duration', 'Duration', summary.duration, ['duration', 'time spent', 'hours']),
+  // Add as many as needed...
+];
+
+// Then use in your screen context:
+const enhancedContext = addFieldsToContext(baseContext, customFields);
+*/

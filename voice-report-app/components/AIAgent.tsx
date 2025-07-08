@@ -1,19 +1,34 @@
-// components/AIAgent.tsx
-import React, { useState, useRef, useEffect } from 'react';
+// components/AIAgent.tsx - COMPLETE FIXED VERSION
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
+  TouchableOpacity,
   Text,
   StyleSheet,
-  TouchableOpacity,
   Animated,
   Alert,
-  Dimensions,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system';
-import { AIAgentProps, AIAgentState, VoiceCommandResponse } from '../types/aiAgent';
 import { AIAgentService } from '../services/aiAgentService';
+import { VoiceCommandResponse, ScreenContext } from '../types/aiAgent';
 
-const { width } = Dimensions.get('window');
+interface AIAgentState {
+  isListening: boolean;
+  isProcessing: boolean;
+  isPlayingResponse: boolean;
+  lastResponse?: string;
+  error?: string;
+}
+
+interface AIAgentProps {
+  screenContext: ScreenContext;
+  onFieldUpdate?: (fieldName: string, value: string) => void;
+  onModeToggle?: () => void;
+  onNavigate?: (destination: string) => void;
+  onAction?: (actionName: string, params?: any) => void;
+  position?: 'bottom-left' | 'bottom-center' | 'bottom-right';
+  disabled?: boolean;
+}
 
 export default function AIAgent({
   screenContext,
@@ -30,25 +45,25 @@ export default function AIAgent({
     isPlayingResponse: false,
   });
 
-  // Animation refs (reuse patterns from your Recorder.tsx)
+  const aiService = AIAgentService.getInstance();
+  const recordingTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // Animation values
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
-  const aiService = useRef(AIAgentService.getInstance()).current;
-  const recordingTimer = useRef<NodeJS.Timeout | null>(null);
-
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      aiService.cleanup();
       if (recordingTimer.current) {
         clearTimeout(recordingTimer.current);
       }
+      aiService.cleanup();
     };
   }, []);
 
-  // Animation effects
+  // Handle animations based on state
   useEffect(() => {
     if (agentState.isListening) {
       startListeningAnimation();
@@ -115,42 +130,42 @@ export default function AIAgent({
     scaleAnim.setValue(1);
   };
 
-  const handlePress = async () => {
-    if (disabled || agentState.isProcessing || agentState.isPlayingResponse) {
-      return;
-    }
-
-    if (agentState.isListening) {
-      await stopListening();
-    } else {
-      await startListening();
-    }
-  };
-
   const startListening = async () => {
     try {
+      console.log('🎙️ AI Agent starting to listen...');
       setAgentState(prev => ({ ...prev, isListening: true, error: undefined }));
       
       await aiService.startListening();
+      console.log('✅ AI Agent listening started successfully');
       
-      // Auto-stop after 15 seconds
+      // Auto-stop after 15 seconds to prevent long recordings
       recordingTimer.current = setTimeout(() => {
+        console.log('⏰ AI Agent auto-stopping after 15 seconds');
         stopListening();
       }, 15000);
 
     } catch (error) {
-      console.error('Failed to start listening:', error);
+      console.error('❌ Failed to start AI Agent listening:', error);
       setAgentState(prev => ({ 
         ...prev, 
         isListening: false, 
         error: 'Failed to start listening' 
       }));
-      Alert.alert('Error', 'Failed to start voice recognition');
+      
+      let errorMessage = 'Failed to start voice recognition. Please try again.';
+      if (error instanceof Error && error.message.includes('permission')) {
+        errorMessage = 'Microphone permission denied. Please enable microphone access in settings.';
+      }
+      
+      Alert.alert('AI Agent Error', errorMessage, [{ text: 'OK' }]);
     }
   };
 
   const stopListening = async () => {
     try {
+      console.log('🛑 AI Agent stopping listening...');
+      
+      // Clear the auto-stop timer
       if (recordingTimer.current) {
         clearTimeout(recordingTimer.current);
         recordingTimer.current = null;
@@ -159,44 +174,59 @@ export default function AIAgent({
       setAgentState(prev => ({ ...prev, isListening: false, isProcessing: true }));
       
       const audioUri = await aiService.stopListening();
+      console.log('📁 AI Agent got audio URI:', audioUri);
       
       if (audioUri) {
         await processCommand(audioUri);
       } else {
-        setAgentState(prev => ({ ...prev, isProcessing: false }));
+        console.warn('⚠️ No audio URI received from AI Agent');
+        setAgentState(prev => ({ 
+          ...prev, 
+          isProcessing: false, 
+          error: 'No audio recorded' 
+        }));
+        Alert.alert('AI Agent', 'No audio was recorded. Please try again.', [{ text: 'OK' }]);
       }
 
     } catch (error) {
-      console.error('Failed to stop listening:', error);
+      console.error('❌ Failed to stop AI Agent listening:', error);
       setAgentState(prev => ({ 
         ...prev, 
         isListening: false, 
         isProcessing: false,
         error: 'Failed to process voice command'
       }));
+      
+      Alert.alert('AI Agent Error', 'Failed to process voice recording. Please try again.', [{ text: 'OK' }]);
     }
   };
 
+  // CRITICAL FIX: Execute command first, then handle TTS separately
   const processCommand = async (audioUri: string) => {
     try {
       console.log('🤖 AI Agent processing voice command from:', audioUri);
       
-      // Verify audio file exists
+      // IMPROVED: Better file validation
       const fileInfo = await FileSystem.getInfoAsync(audioUri);
       console.log('📁 Audio file info:', fileInfo);
       
       if (!fileInfo.exists) {
         throw new Error('Audio file does not exist');
       }
+
+      if (fileInfo.size && fileInfo.size < 500) {
+        throw new Error('Audio recording too short - please speak longer');
+      }
       
+      // Process the voice command
       const response = await aiService.processVoiceCommand(audioUri, screenContext);
       console.log('📋 AI Agent response:', response);
       
-      // Execute the command first
+      // CRITICAL FIX: Execute the command FIRST, regardless of TTS success
       await executeCommand(response);
       console.log('✅ AI Agent command executed successfully');
       
-      // Try TTS response (make it optional)
+      // FIXED: Make TTS optional and non-blocking
       setAgentState(prev => ({ ...prev, isProcessing: false, isPlayingResponse: true }));
       
       try {
@@ -204,7 +234,7 @@ export default function AIAgent({
         console.log('🔊 AI Agent voice response completed');
       } catch (ttsError) {
         console.warn('🔇 AI Agent TTS failed (continuing without voice):', ttsError);
-        // Show the text response instead
+        // IMPROVED: Show text fallback instead of failing entirely
         setTimeout(() => {
           Alert.alert('AI Agent', response.confirmation, [{ text: 'OK' }]);
         }, 500);
@@ -226,16 +256,20 @@ export default function AIAgent({
         error: 'Failed to understand command'
       }));
       
-      // Show more specific error messages
+      // IMPROVED: More specific and helpful error messages
       let errorMessage = 'Failed to process voice command. Please try again.';
       
       if (error instanceof Error) {
-        if (error.message.includes('Audio file does not exist')) {
-          errorMessage = 'Audio recording failed. Please try again.';
-        } else if (error.message.includes('No backend server')) {
-          errorMessage = 'Connection to server failed. Please check your internet connection.';
-        } else if (error.message.includes('Transcription failed')) {
+        if (error.message.includes('too short')) {
+          errorMessage = 'Please speak for a longer duration and try again.';
+        } else if (error.message.includes('Audio file does not exist')) {
+          errorMessage = 'Recording failed. Please try again.';
+        } else if (error.message.includes('connect') || error.message.includes('server') || error.message.includes('backend')) {
+          errorMessage = 'Cannot connect to server. Please check your internet connection and try again.';
+        } else if (error.message.includes('understand') || error.message.includes('transcription')) {
           errorMessage = 'Could not understand the audio. Please speak clearly and try again.';
+        } else if (error.message.includes('format')) {
+          errorMessage = 'Audio format error. Please try recording again.';
         }
       }
       
@@ -244,37 +278,67 @@ export default function AIAgent({
   };
 
   const executeCommand = async (response: VoiceCommandResponse) => {
+    console.log(`🎯 Executing AI command: ${response.action}`, response);
+    
     switch (response.action) {
       case 'update_field':
         if (response.target && response.value !== undefined && onFieldUpdate) {
+          console.log(`📝 Updating field: ${response.target} = ${response.value}`);
           onFieldUpdate(response.target, response.value);
+        } else {
+          console.warn('⚠️ update_field action missing target or value:', response);
         }
         break;
         
       case 'toggle_mode':
         if (onModeToggle) {
+          console.log('🔄 Toggling mode');
           onModeToggle();
+        } else {
+          console.warn('⚠️ toggle_mode action but no onModeToggle handler');
         }
         break;
         
       case 'navigate':
         if (response.target && onNavigate) {
+          console.log(`🧭 Navigating to: ${response.target}`);
           onNavigate(response.target);
+        } else {
+          console.warn('⚠️ navigate action missing target or handler:', response);
         }
         break;
         
       case 'execute_action':
         if (response.target && onAction) {
+          console.log(`⚡ Executing action: ${response.target}`);
           onAction(response.target);
+        } else {
+          console.warn('⚠️ execute_action missing target or handler:', response);
         }
         break;
         
       case 'clarify':
-        // For clarifications, just play the TTS response
+        console.log('❓ AI Agent needs clarification:', response.clarification);
+        // For clarifications, just play the TTS response or show alert
+        // The TTS will be handled in processCommand
         break;
         
       default:
-        console.warn('Unknown command action:', response.action);
+        console.warn('⚠️ Unknown AI command action:', response.action);
+    }
+  };
+
+  const handlePress = async () => {
+    // Prevent interaction when disabled or processing
+    if (disabled || agentState.isProcessing || agentState.isPlayingResponse) {
+      console.log('🚫 AI Agent interaction blocked - disabled or busy');
+      return;
+    }
+
+    if (agentState.isListening) {
+      await stopListening();
+    } else {
+      await startListening();
     }
   };
 
@@ -282,11 +346,13 @@ export default function AIAgent({
     let additionalStyles = {};
     
     if (agentState.isListening) {
-      additionalStyles = { backgroundColor: '#FF0000' };
+      additionalStyles = { backgroundColor: '#FF0000', shadowColor: '#FF0000' }; // Red for listening
     } else if (agentState.isProcessing) {
-      additionalStyles = { backgroundColor: '#FFA500' };
+      additionalStyles = { backgroundColor: '#FFA500', shadowColor: '#FFA500' }; // Orange for processing
     } else if (agentState.isPlayingResponse) {
-      additionalStyles = { backgroundColor: '#00FF00' };
+      additionalStyles = { backgroundColor: '#00FF00', shadowColor: '#00FF00' }; // Green for speaking
+    } else if (disabled) {
+      additionalStyles = { backgroundColor: '#999999', shadowColor: '#999999' }; // Gray for disabled
     }
     
     return [styles.agentButton, additionalStyles];
@@ -296,6 +362,7 @@ export default function AIAgent({
     if (agentState.isListening) return '🎙️';
     if (agentState.isProcessing) return '⚡';
     if (agentState.isPlayingResponse) return '🔊';
+    if (disabled) return '🤖';
     return '🤖';
   };
 
@@ -303,6 +370,7 @@ export default function AIAgent({
     if (agentState.isListening) return 'Listening...';
     if (agentState.isProcessing) return 'Processing...';
     if (agentState.isPlayingResponse) return 'Speaking...';
+    if (agentState.error) return 'Error';
     return null;
   };
 
@@ -325,28 +393,30 @@ export default function AIAgent({
             inputRange: [0, 1],
             outputRange: ['0deg', '360deg'],
           }) : '0deg'
-      },
+      }
     ],
   };
 
   return (
     <View style={containerStyle}>
+      {/* Status text */}
       {getStatusText() && (
         <View style={styles.statusContainer}>
           <Text style={styles.statusText}>{getStatusText()}</Text>
         </View>
       )}
       
-      <TouchableOpacity
-        style={getButtonStyle()}
-        onPress={handlePress}
-        disabled={disabled}
-        activeOpacity={0.8}
-      >
-        <Animated.View style={[styles.iconContainer, animatedStyle]}>
-          <Text style={styles.icon}>{getIcon()}</Text>
-        </Animated.View>
-      </TouchableOpacity>
+      {/* AI Agent Button */}
+      <Animated.View style={animatedStyle}>
+        <TouchableOpacity
+          style={getButtonStyle()}
+          onPress={handlePress}
+          disabled={disabled}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.agentIcon}>{getIcon()}</Text>
+        </TouchableOpacity>
+      </Animated.View>
     </View>
   );
 }
@@ -357,48 +427,47 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 1000,
   },
-  positionBottomRight: {
-    bottom: 100,
-    right: 20,
-  },
   positionBottomLeft: {
     bottom: 100,
     left: 20,
   },
   positionBottomCenter: {
     bottom: 100,
-    left: width / 2 - 30,
+    left: '50%',
+    marginLeft: -35, // Half of button width
+  },
+  positionBottomRight: {
+    bottom: 100,
+    right: 20,
   },
   statusContainer: {
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
-    marginBottom: 8,
+    marginBottom: 10,
   },
   statusText: {
-    color: '#FFFFFF',
+    color: 'white',
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   agentButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#FF6B35',
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#007AFF',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
   },
-  iconContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  icon: {
-    fontSize: 24,
+  agentIcon: {
+    fontSize: 28,
   },
 });
