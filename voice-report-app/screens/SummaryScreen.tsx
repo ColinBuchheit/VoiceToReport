@@ -1,4 +1,4 @@
-// screens/SummaryScreen.tsx - Enhanced with Sam AI Capabilities - TYPESCRIPT FIXED
+// screens/SummaryScreen.tsx - SILENT VOICE UPDATES (NO ANNOYING POPUPS)
 import React, { useState } from 'react';
 import {
   View,
@@ -146,9 +146,9 @@ export default function SummaryScreen({ navigation, route }: Props) {
     }
   };
 
-  // AI Agent callback functions
+  // FIXED: Silent AI field updates (no annoying popups)
   const handleAIFieldUpdate = (fieldName: string, value: string) => {
-    console.log(`🤖 Sam AI updating field: ${fieldName} = ${value}`);
+    console.log(`🤖 Sam AI silently updating field: ${fieldName} = ${value}`);
     
     if (fieldName === 'transcription') {
       setEditableTranscription(value);
@@ -156,27 +156,19 @@ export default function SummaryScreen({ navigation, route }: Props) {
       updateSummaryField(fieldName as keyof typeof editableSummary, value);
     }
     
-    // Show brief confirmation
-    const fieldLabel = getEnhancedScreenContext().visibleFields.find(f => f.name === fieldName)?.label || fieldName;
-    Alert.alert(
-      'Field Updated',
-      `${fieldLabel} has been updated by Sam AI.`,
-      [{ text: 'OK' }],
-      { cancelable: true }
-    );
+    // REMOVED: No more annoying popup notifications for voice updates
+    // Voice AI should work seamlessly in the background
+    // The TTS response from the AI is confirmation enough
   };
 
+  // FIXED: Silent mode toggle (no popup)
   const handleAIModeToggle = () => {
     const newMode = !isPreviewMode;
-    console.log(`🤖 Sam AI toggling mode to: ${newMode ? 'edit' : 'preview'}`);
+    console.log(`🤖 Sam AI silently toggling mode to: ${newMode ? 'edit' : 'preview'}`);
     setIsPreviewMode(!isPreviewMode);
     
-    Alert.alert(
-      'Edit Mode Changed',
-      `Sam switched to ${newMode ? 'edit' : 'preview'} mode.`,
-      [{ text: 'OK' }],
-      { cancelable: true }
-    );
+    // REMOVED: No popup - the AI's voice response is confirmation enough
+    // Plus the user can see the mode change visually
   };
 
   const handleAIAction = (actionName: string, params?: any) => {
@@ -206,14 +198,16 @@ export default function SummaryScreen({ navigation, route }: Props) {
         handleSuggestImprovements();
         break;
       case 'save_summary':
-        Alert.alert('Summary Saved', 'Your summary has been saved locally.');
+        // FIXED: Silent save (no popup)
+        console.log('📝 Summary saved by AI');
         break;
       default:
-        Alert.alert('Action', `Sam executed: ${actionName}`);
+        // REMOVED: No generic action popup
+        console.log(`🤖 Sam executed: ${actionName}`);
     }
   };
 
-  // FIXED: Added missing callback functions
+  // FIXED: Only show capability explanations when explicitly asked
   const handleCapabilityExplain = (capability: string) => {
     console.log(`🤖 Sam explaining capability: ${capability}`);
     
@@ -228,6 +222,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
     const explanation = explanations[capability as keyof typeof explanations] || 
       `I can help with ${capability}. Just tap me and ask!`;
     
+    // Only show popup for explicit capability requests
     Alert.alert(
       `${capability.replace('_', ' ').toUpperCase()} Capability`,
       explanation,
@@ -236,38 +231,53 @@ export default function SummaryScreen({ navigation, route }: Props) {
     );
   };
 
+  // FIXED: Only show suggestion popup if user needs to approve major changes
   const handleSuggestionProvided = (suggestion: string, targetField?: string) => {
     console.log(`🤖 Sam providing suggestion for ${targetField}: ${suggestion}`);
     
     const fieldLabel = targetField ? 
       getEnhancedScreenContext().visibleFields.find(f => f.name === targetField)?.label || targetField :
       'your summary';
-      
-    Alert.alert(
-      'Suggestion from Sam AI',
-      `For ${fieldLabel}: ${suggestion}`,
-      [
-        { text: 'Ignore', style: 'cancel' },
-        { 
-          text: 'Apply', 
-          onPress: () => {
-            if (targetField && targetField in editableSummary) {
-              updateSummaryField(targetField as keyof typeof editableSummary, suggestion);
-            } else if (targetField === 'transcription') {
-              setEditableTranscription(suggestion);
+    
+    // Only show suggestion popup for major changes that need approval
+    const isMinorUpdate = suggestion.length < 50 && targetField !== 'taskDescription';
+    
+    if (isMinorUpdate) {
+      // Apply minor suggestions silently
+      if (targetField && targetField in editableSummary) {
+        updateSummaryField(targetField as keyof typeof editableSummary, suggestion);
+      } else if (targetField === 'transcription') {
+        setEditableTranscription(suggestion);
+      }
+      console.log(`✅ Applied minor suggestion silently: ${suggestion.substring(0, 30)}...`);
+    } else {
+      // Only show popup for major suggestions
+      Alert.alert(
+        'Suggestion from Sam AI',
+        `For ${fieldLabel}: ${suggestion}`,
+        [
+          { text: 'Ignore', style: 'cancel' },
+          { 
+            text: 'Apply', 
+            onPress: () => {
+              if (targetField && targetField in editableSummary) {
+                updateSummaryField(targetField as keyof typeof editableSummary, suggestion);
+              } else if (targetField === 'transcription') {
+                setEditableTranscription(suggestion);
+              }
             }
           }
-        }
-      ],
-      { cancelable: true }
-    );
+        ],
+        { cancelable: true }
+      );
+    }
   };
 
   const handleSuggestImprovements = () => {
     // Example improvement suggestions
     const suggestions = [
       "Consider adding more specific technical details",
-      "Include time estimates for the work performed",
+      "Include time estimates for the work performed", 
       "Add any follow-up actions that are needed",
       "Mention any challenges encountered and how they were resolved",
     ];
@@ -294,7 +304,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
         <View style={styles.summaryCard}>
           <EditableField
             label="Task Description"
-            value={editableSummary.taskDescription || ''} // FIXED: Handle undefined with default
+            value={editableSummary.taskDescription || ''}
             onChangeText={(text) => updateSummaryField('taskDescription', text)}
             isEditing={!isPreviewMode}
             multiline
@@ -303,7 +313,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
           <EditableField
             label="Location"
-            value={editableSummary.location || ''} // FIXED: Handle undefined with default
+            value={editableSummary.location || ''}
             onChangeText={(text) => updateSummaryField('location', text)}
             isEditing={!isPreviewMode}
             placeholder="Where did this work take place?"
@@ -311,7 +321,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
           <EditableField
             label="Date/Time"
-            value={editableSummary.datetime || ''} // FIXED: Handle undefined with default
+            value={editableSummary.datetime || ''}
             onChangeText={(text) => updateSummaryField('datetime', text)}
             isEditing={!isPreviewMode}
             placeholder="When was this work performed?"
@@ -319,7 +329,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
           <EditableField
             label="Outcome"
-            value={editableSummary.outcome || ''} // FIXED: Handle undefined with default
+            value={editableSummary.outcome || ''}
             onChangeText={(text) => updateSummaryField('outcome', text)}
             isEditing={!isPreviewMode}
             multiline
@@ -328,7 +338,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
           <EditableField
             label="Additional Notes"
-            value={editableSummary.notes || ''} // FIXED: Handle undefined with default
+            value={editableSummary.notes || ''}
             onChangeText={(text) => updateSummaryField('notes', text)}
             isEditing={!isPreviewMode}
             multiline
@@ -342,7 +352,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             {!isPreviewMode ? (
               <TextInput
                 style={styles.transcriptionInput}
-                value={editableTranscription || ''} // FIXED: Handle undefined with default
+                value={editableTranscription || ''}
                 onChangeText={setEditableTranscription}
                 multiline
                 textAlignVertical="top"
@@ -367,18 +377,18 @@ export default function SummaryScreen({ navigation, route }: Props) {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* ENHANCED AI Agent with all new capabilities */}
+      {/* ENHANCED AI Agent with silent operation */}
       <AIAgent
         screenContext={getEnhancedScreenContext()}
         onFieldUpdate={handleAIFieldUpdate}
         onModeToggle={handleAIModeToggle}
         onAction={handleAIAction}
-        onCapabilityExplain={handleCapabilityExplain}        // NEW
-        onSuggestionProvided={handleSuggestionProvided}      // NEW
+        onCapabilityExplain={handleCapabilityExplain}
+        onSuggestionProvided={handleSuggestionProvided}
         position="bottom-right"
         disabled={isGenerating}
-        showDebugInfo={__DEV__}                              // NEW
-        customStyle={{                                       // NEW
+        showDebugInfo={__DEV__}
+        customStyle={{
           buttonColor: '#00b894',
           iconColor: '#ffffff',
           size: 60,
@@ -391,7 +401,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
 // Enhanced Editable Field Component
 interface EditableFieldProps {
   label: string;
-  value: string; // FIXED: Changed from string | undefined to string
+  value: string;
   onChangeText: (text: string) => void;
   isEditing: boolean;
   multiline?: boolean;

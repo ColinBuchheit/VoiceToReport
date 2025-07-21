@@ -1,4 +1,4 @@
-// services/aiAgentService.ts - BACKEND FORMAT FIXED TO MATCH WORKING API
+// services/aiAgentService.ts - FIXED TTS ERRORS & REDUCED NOTIFICATIONS
 import * as FileSystem from 'expo-file-system';
 import { Audio, AVPlaybackStatus } from 'expo-av';
 import { VoiceCommand, VoiceCommandResponse, ScreenContext } from '../types/aiAgent';
@@ -279,7 +279,7 @@ export class AIAgentService {
     };
   }
 
-  // Play TTS response with enhanced error handling
+  // FIXED: Play TTS response with enhanced error handling and shorter timeout
   async playTTSResponse(text: string): Promise<void> {
     try {
       console.log('🔊 Playing TTS response:', text);
@@ -296,9 +296,12 @@ export class AIAgentService {
         return;
       }
 
-      // FIXED: Use AbortController for timeout instead of timeout property
+      // FIXED: Shorter timeout for TTS to prevent blocking
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+      const timeoutId = setTimeout(() => {
+        console.warn('⏰ TTS request timed out, continuing without voice');
+        controller.abort();
+      }, 8000); // REDUCED: 8 second timeout instead of 15
 
       // Request TTS audio from backend
       const response = await fetch(`${workingBackendUrl}/text-to-speech`, {
@@ -307,14 +310,14 @@ export class AIAgentService {
           'Content-Type': 'application/json',
           'ngrok-skip-browser-warning': 'true',
         },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text: text.substring(0, 200) }), // FIXED: Limit text length
         signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        console.warn('🔇 TTS request failed:', response.status);
+        console.warn(`🔇 TTS request failed: ${response.status} - continuing without voice`);
         return;
       }
 
@@ -335,26 +338,44 @@ export class AIAgentService {
 
       this.sound = sound;
 
-      // Wait for playback to complete
+      // FIXED: Shorter timeout for playback completion
       return new Promise<void>((resolve, reject) => {
+        const playbackTimeout = setTimeout(() => {
+          console.warn('⏰ TTS playback timed out, cleaning up');
+          sound.unloadAsync().catch(console.warn);
+          FileSystem.deleteAsync(tempAudioUri, { idempotent: true }).catch(console.warn);
+          resolve(); // FIXED: Resolve instead of reject to prevent blocking
+        }, 10000); // 10 second max playback time
+
         sound.setOnPlaybackStatusUpdate((status: AVPlaybackStatus) => {
           if (status.isLoaded && status.didJustFinish) {
+            clearTimeout(playbackTimeout);
             console.log('✅ TTS playback completed');
             sound.unloadAsync().then(() => {
               // Clean up temp file
               FileSystem.deleteAsync(tempAudioUri, { idempotent: true }).catch(console.warn);
               resolve();
-            }).catch(reject);
+            }).catch(() => {
+              // Even if cleanup fails, resolve to prevent blocking
+              resolve();
+            });
           } else if (status.isLoaded === false) {
-            console.error('❌ TTS playback error');
-            reject(new Error('Playback failed'));
+            clearTimeout(playbackTimeout);
+            console.warn('⚠️ TTS playback failed, continuing anyway');
+            FileSystem.deleteAsync(tempAudioUri, { idempotent: true }).catch(console.warn);
+            resolve(); // FIXED: Resolve instead of reject
           }
         });
       });
 
     } catch (error) {
-      console.error('❌ TTS playback failed:', error);
-      // Don't throw - TTS failure shouldn't break the voice command flow
+      // FIXED: Never throw errors from TTS - just log and continue
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.warn('⏰ TTS request was cancelled due to timeout');
+      } else {
+        console.warn('🔇 TTS playback failed, continuing without voice:', error);
+      }
+      // Always resolve - TTS failure should never block the UI
     }
   }
 

@@ -1,4 +1,4 @@
-// screens/TranscriptScreen.tsx - Complete Enhanced with Bear AI Capabilities - FIXED
+// screens/TranscriptScreen.tsx - SILENT VOICE UPDATES (NO ANNOYING POPUPS)
 import React, { useState } from 'react';
 import {
   View,
@@ -100,33 +100,25 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     }
   };
 
-  // AI Agent callback functions
+  // FIXED: Silent AI field updates (no annoying popups)
   const handleAIFieldUpdate = (fieldName: string, value: string) => {
-    console.log(`🤖 Bear AI updating field: ${fieldName} = ${value}`);
+    console.log(`🤖 Bear AI silently updating field: ${fieldName} = ${value}`);
     
     if (fieldName === 'transcription') {
       setTranscription(value);
-      
-      Alert.alert(
-        'Transcription Updated',
-        'Bear AI has updated your transcription text.',
-        [{ text: 'OK' }],
-        { cancelable: true }
-      );
+      // REMOVED: No more annoying popup notifications for voice updates
+      // The AI's voice response is confirmation enough
     }
   };
 
+  // FIXED: Silent mode toggle (no popup)
   const handleAIModeToggle = () => {
     const newMode = !isEditing;
-    console.log(`🤖 Bear AI toggling edit mode to: ${newMode}`);
+    console.log(`🤖 Bear AI silently toggling edit mode to: ${newMode}`);
     setIsEditing(newMode);
     
-    Alert.alert(
-      'Edit Mode Changed',
-      `Bear switched to ${newMode ? 'edit' : 'preview'} mode.`,
-      [{ text: 'OK' }],
-      { cancelable: true }
-    );
+    // REMOVED: No popup - the AI's voice response is confirmation enough
+    // Plus the user can see the mode change visually
   };
 
   const handleAIAction = (actionName: string, params?: any) => {
@@ -137,6 +129,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         handleGenerateSummary();
         break;
       case 'clear_transcription':
+        // Only show confirmation for destructive actions
         Alert.alert(
           'Clear Transcription',
           'Are you sure you want to clear all transcription text?',
@@ -160,11 +153,12 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         handleAIModeToggle();
         break;
       default:
-        Alert.alert('Action', `Bear executed: ${actionName}`);
+        // REMOVED: No generic action popup
+        console.log(`🤖 Bear executed: ${actionName}`);
     }
   };
 
-  // FIXED: Added missing callback functions
+  // FIXED: Only show capability explanations when explicitly asked
   const handleCapabilityExplain = (capability: string) => {
     console.log(`🤖 Bear explaining capability: ${capability}`);
     
@@ -179,6 +173,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     const explanation = explanations[capability as keyof typeof explanations] || 
       `I can help with ${capability}. Just tap me and ask!`;
     
+    // Only show popup for explicit capability requests
     Alert.alert(
       `${capability.replace('_', ' ').toUpperCase()} Capability`,
       explanation,
@@ -187,25 +182,46 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     );
   };
 
+  // FIXED: Smart suggestion handling - only popup for major changes
   const handleSuggestionProvided = (suggestion: string, targetField?: string) => {
     console.log(`🤖 Bear providing suggestion for ${targetField}: ${suggestion}`);
     
-    Alert.alert(
-      'Suggestion from Bear AI',
-      `For your transcription: ${suggestion}`,
-      [
-        { text: 'Ignore', style: 'cancel' },
-        { 
-          text: 'Apply', 
-          onPress: () => {
-            if (targetField === 'transcription') {
-              setTranscription(suggestion);
+    // Check if this is a minor improvement (small text changes) or major rewrite
+    const currentText = transcription || '';
+    const similarityRatio = calculateSimilarity(currentText, suggestion);
+    const isMinorChange = similarityRatio > 0.7 || suggestion.length < 100;
+    
+    if (isMinorChange && targetField === 'transcription') {
+      // Apply minor improvements silently
+      setTranscription(suggestion);
+      console.log(`✅ Applied minor transcription improvement silently`);
+    } else {
+      // Only show popup for major changes
+      Alert.alert(
+        'Suggestion from Bear AI',
+        `For your transcription: ${suggestion}`,
+        [
+          { text: 'Ignore', style: 'cancel' },
+          { 
+            text: 'Apply', 
+            onPress: () => {
+              if (targetField === 'transcription') {
+                setTranscription(suggestion);
+              }
             }
           }
-        }
-      ],
-      { cancelable: true }
-    );
+        ],
+        { cancelable: true }
+      );
+    }
+  };
+
+  // Helper function to calculate text similarity
+  const calculateSimilarity = (text1: string, text2: string): number => {
+    const words1 = text1.toLowerCase().split(/\s+/);
+    const words2 = text2.toLowerCase().split(/\s+/);
+    const commonWords = words1.filter(word => words2.includes(word));
+    return commonWords.length / Math.max(words1.length, words2.length);
   };
 
   const handleSuggestImprovements = () => {
@@ -231,9 +247,11 @@ export default function TranscriptScreen({ navigation, route }: Props) {
       .replace(/^./, transcription.charAt(0).toUpperCase()); // Capitalize first letter
       
     if (professionalVersion !== transcription && professionalVersion.length > 0) {
+      // This is usually a minor improvement, apply silently
       handleSuggestionProvided(professionalVersion, 'transcription');
     } else {
-      Alert.alert('Already Professional', 'Your transcription already sounds professional!');
+      // Only show this if no improvement was possible
+      console.log('📝 Transcription is already professional');
     }
   };
 
@@ -290,18 +308,18 @@ export default function TranscriptScreen({ navigation, route }: Props) {
       {/* Show loading overlay when processing */}
       {isProcessing && <Loader />}
 
-      {/* ENHANCED AI Agent with Bear branding */}
+      {/* ENHANCED AI Agent with silent operation */}
       <AIAgent
         screenContext={getEnhancedScreenContext()}
         onFieldUpdate={handleAIFieldUpdate}
         onModeToggle={handleAIModeToggle}
         onAction={handleAIAction}
-        onCapabilityExplain={handleCapabilityExplain}        // NEW
-        onSuggestionProvided={handleSuggestionProvided}      // NEW
+        onCapabilityExplain={handleCapabilityExplain}
+        onSuggestionProvided={handleSuggestionProvided}
         position="bottom-right"
         disabled={isProcessing}
-        showDebugInfo={__DEV__}                              // NEW
-        customStyle={{                                       // NEW
+        showDebugInfo={__DEV__}
+        customStyle={{
           buttonColor: '#00b894',
           iconColor: '#ffffff',
           size: 60,

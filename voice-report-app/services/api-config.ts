@@ -1,12 +1,12 @@
 // Auto-generated API configuration
 // This file is automatically updated by the startup script
-// Last updated: 2025-07-21 15:04:38
+// Last updated: 2025-07-21 15:30:06
 
 export const API_CONFIG = {
-  NGROK_URL: 'https://57513d12d2bd.ngrok-free.app',
+  NGROK_URL: 'https://344adb4b42ee.ngrok-free.app',
   LOCAL_URL: 'http://localhost:8000',
   BACKEND_URLS: [
-    'https://57513d12d2bd.ngrok-free.app',
+    'https://344adb4b42ee.ngrok-free.app',
     'http://localhost:8000'
   ]
 };

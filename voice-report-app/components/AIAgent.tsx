@@ -1,3 +1,4 @@
+// components/AIAgent.tsx - FIXED BUTTON STYLING & PERFECTLY CENTERED HALO
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -62,12 +63,12 @@ export default function AIAgent({
   onModeToggle,
   onNavigate,
   onAction,
-  onCapabilityExplain,        // FIXED: Added missing prop
-  onSuggestionProvided,       // FIXED: Added missing prop
+  onCapabilityExplain,
+  onSuggestionProvided,
   position = 'bottom-right',
   disabled = false,
-  showDebugInfo = false,      // FIXED: Added missing prop
-  customStyle,                // FIXED: Added missing prop
+  showDebugInfo = false,
+  customStyle,
 }: AIAgentProps) {
   const [agentState, setAgentState] = useState<AIAgentState>({
     isListening: false,
@@ -83,6 +84,11 @@ export default function AIAgent({
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(1)).current;
   const haloAnim = useRef(new Animated.Value(0)).current;
+
+  // FIXED: Calculate button size for proper centering
+  const buttonSize = customStyle?.size || 70;
+  const haloSize = buttonSize + 20; // Halo is 20px larger than button
+  const haloOffset = -10; // Half the difference to center it
 
   // Cleanup on unmount
   useEffect(() => {
@@ -109,6 +115,7 @@ export default function AIAgent({
   }, [agentState.isListening, agentState.isProcessing, agentState.isPlayingResponse]);
 
   const startListeningAnimation = () => {
+    stopAllAnimations();
     Animated.loop(
       Animated.sequence([
         Animated.timing(scaleAnim, {
@@ -126,6 +133,7 @@ export default function AIAgent({
   };
 
   const startProcessingAnimation = () => {
+    stopAllAnimations();
     Animated.loop(
       Animated.timing(rotateAnim, {
         toValue: 1,
@@ -136,6 +144,7 @@ export default function AIAgent({
   };
 
   const startResponseAnimation = () => {
+    stopAllAnimations();
     Animated.loop(
       Animated.sequence([
         Animated.timing(scaleAnim, {
@@ -153,6 +162,7 @@ export default function AIAgent({
   };
 
   const startHaloAnimation = () => {
+    stopAllAnimations();
     Animated.loop(
       Animated.sequence([
         Animated.timing(haloAnim, {
@@ -398,23 +408,21 @@ export default function AIAgent({
     }
   };
 
-  // FIXED: Proper button styling with correct TypeScript types
-  const getButtonStyle = (): ViewStyle[] => {
+  // FIXED: Proper button styling with correct TypeScript types and customization
+  const getButtonStyle = (): ViewStyle => {
     const baseStyle: ViewStyle = {
-      ...styles.agentButton,
+      width: buttonSize,
+      height: buttonSize,
+      borderRadius: buttonSize / 2,
+      backgroundColor: customStyle?.buttonColor || '#2a2a2a',
+      justifyContent: 'center',
+      alignItems: 'center',
+      shadowColor: '#FFA502',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 8,
     };
-    
-    // Apply custom styling if provided
-    if (customStyle) {
-      if (customStyle.buttonColor) {
-        baseStyle.backgroundColor = customStyle.buttonColor;
-      }
-      if (customStyle.size) {
-        baseStyle.width = customStyle.size;
-        baseStyle.height = customStyle.size;
-        baseStyle.borderRadius = customStyle.size / 2;
-      }
-    }
     
     // State-based styling overrides
     if (agentState.isListening) {
@@ -434,11 +442,11 @@ export default function AIAgent({
       baseStyle.shadowOpacity = 0.2;
     }
     
-    return [baseStyle];
+    return baseStyle;
   };
 
   const getIcon = () => {
-    const iconSize = customStyle?.size ? Math.floor(customStyle.size * 0.9) : 55;
+    const iconSize = Math.floor(buttonSize * 0.4); // Scale icon to 40% of button size
     const iconColor = customStyle?.iconColor || '#FFFFFF';
     
     if (agentState.isListening) return <MicrophoneIcon size={28} color={iconColor} />;
@@ -446,7 +454,7 @@ export default function AIAgent({
     if (agentState.isPlayingResponse) return <SpeakerIcon size={28} color={iconColor} />;
     
     // Default state shows the bear logo
-    return <BearLogoIcon size={iconSize} opacity={1} />;
+    return <BearLogoIcon size={Math.floor(buttonSize * 0.8)} opacity={1} />;
   };
 
   const getStatusText = () => {
@@ -479,18 +487,18 @@ export default function AIAgent({
     opacity: opacityAnim,
   };
 
-  // Orange halo effect for default state
+  // FIXED: Perfectly centered halo effect
   const haloStyle = {
     position: 'absolute' as const,
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+    width: haloSize,
+    height: haloSize,
+    borderRadius: haloSize / 2,
     backgroundColor: 'transparent',
     borderWidth: 3,
     borderColor: '#FFA502',
+    top: haloOffset,
+    left: haloOffset,
     opacity: haloAnim,
-    top: -10,
-    left: -10,
     transform: [
       {
         scale: haloAnim.interpolate({
@@ -503,21 +511,21 @@ export default function AIAgent({
 
   return (
     <View style={containerStyle}>
-      {/* Status text */}
+      {/* FIXED: Status text positioned above button container */}
       {getStatusText() && (
-        <View style={[styles.statusContainer, styles.statusFixed]}>
+        <View style={styles.statusContainer}>
           <Text style={styles.statusText}>{getStatusText()}</Text>
         </View>
       )}
       
-      {/* Button container with centered halo */}
-      <View style={styles.buttonContainer}>
-        {/* Orange Halo Effect - Behind and centered on the button */}
+      {/* FIXED: Button container with perfectly centered halo */}
+      <View style={[styles.buttonContainer, { width: buttonSize, height: buttonSize }]}>
+        {/* FIXED: Orange Halo Effect - Perfectly centered behind button */}
         {!agentState.isListening && !agentState.isProcessing && !agentState.isPlayingResponse && (
           <Animated.View style={haloStyle} />
         )}
         
-        {/* AI Agent Button */}
+        {/* FIXED: AI Agent Button with proper centering */}
         <Animated.View style={animatedStyle}>
           <TouchableOpacity
             style={getButtonStyle()}
@@ -565,41 +573,31 @@ const styles = StyleSheet.create({
   positionBottomCenter: {
     bottom: 20,
     left: '50%',
-    marginLeft: -30,
+    marginLeft: -35, // Half of default button size for centering
   },
   buttonContainer: {
     position: 'relative',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  agentButton: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: '#2a2a2a',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#FFA502',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    // FIXED: No fixed dimensions - uses calculated buttonSize
   },
   statusContainer: {
-    alignItems: 'center',
-  },
-  statusFixed: {
     position: 'absolute',
-    top: -35,
-    left: '50%',
-    marginLeft: -25,
-    width: 50,
+    top: -40, // FIXED: Position above button container
+    alignItems: 'center',
+    width: 80,
+    left: -5, // FIXED: Slight offset for better centering over button
   },
   statusText: {
     fontSize: 12,
     color: '#666',
     textAlign: 'center',
     fontWeight: '500',
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    overflow: 'hidden',
   },
   debugContainer: {
     marginTop: 8,
