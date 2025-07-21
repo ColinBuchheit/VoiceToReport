@@ -1,4 +1,4 @@
-# backend/main.py - Complete fixed version with proper OpenAI integration and AI Agent improvements
+# backend/main.py - Complete Enhanced AI Agent with Natural Conversation
 import logging
 import os
 from datetime import datetime
@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 # Initialize FastAPI app
 app = FastAPI(
     title="Voice Report Backend",
-    description="Backend API for voice report generation with AI agent",
-    version="1.0.0"
+    description="Backend API for voice report generation with Sam AI agent",
+    version="2.0.0"
 )
 
 # Configure CORS
@@ -41,41 +41,13 @@ app.add_middleware(
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     logger.error("OPENAI_API_KEY not found in environment variables!")
-    logger.error("Please check that your .env file exists and contains OPENAI_API_KEY=your_key_here")
-    raise ValueError("OPENAI_API_KEY must be set in environment variables")
 
-# Initialize OpenAI client properly
-try:
-    openai_client = OpenAI(api_key=OPENAI_API_KEY)
-    logger.info("OpenAI client initialized successfully")
-except Exception as e:
-    logger.error(f"Failed to initialize OpenAI client: {e}")
-    raise
+# Initialize OpenAI client
+openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-# Request/Response Models
-class TranscribeRequest(BaseModel):
-    audio: str
-    format: str = "m4a"
-
-class TranscribeResponse(BaseModel):
-    transcription: str
-
-class SummarizeRequest(BaseModel):
-    transcription: str
-
-class SummarizeResponse(BaseModel):
-    summary: Dict[str, Any]
-
-class GeneratePDFRequest(BaseModel):
-    summary: dict
-    transcription: str
-
-class GeneratePDFResponse(BaseModel):
-    pdf_url: str
-
+# Enhanced Pydantic models
 class VoiceCommandRequest(BaseModel):
-    audio: str
-    format: str = "m4a"
+    audio: str  # base64 encoded audio
     screenContext: Dict[str, Any]
 
 class VoiceCommandResponse(BaseModel):
@@ -87,92 +59,381 @@ class VoiceCommandResponse(BaseModel):
     confirmation: str
     ttsText: str
 
-class TTSRequest(BaseModel):
+class TextToSpeechRequest(BaseModel):
     text: str
 
-# Health check endpoint
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "service": "voice-report-backend",
-        "version": "1.0.0",
-        "config": {
-            "gpt_model": "gpt-4",
-            "max_audio_size_mb": 25,
-            "supported_formats": ["m4a", "mp3", "wav", "ogg"]
-        }
-    }
+class SummarizeRequest(BaseModel):
+    transcription: str
 
-# Transcription endpoint
-@app.post("/transcribe", response_model=TranscribeResponse)
-async def transcribe_audio(request: TranscribeRequest):
-    """Transcribe audio using OpenAI Whisper"""
+class SummarizeResponse(BaseModel):
+    summary: Dict[str, Any]
+
+class GeneratePDFRequest(BaseModel):
+    summary: Dict[str, Any]
+
+class GeneratePDFResponse(BaseModel):
+    pdf_url: str
+
+# Enhanced AI Agent personality and capabilities
+AGENT_PERSONA = """You are Sam, a friendly and efficient AI assistant working for a technology services company. You help field technicians create detailed service reports while they're on the road or at job sites.
+
+Your personality:
+- Professional yet conversational and warm
+- Understanding that technicians are often busy, driving, or have their hands full
+- Patient with voice recognition errors and ready to clarify when needed
+- Knowledgeable about technology services: hardware replacement, installations, cable routing, network setup, and various IT services
+- Efficient but thorough - you understand the importance of accurate documentation
+
+Your capabilities:
+- Process voice commands to update report fields
+- Help with wording and suggestions for professional reports
+- Ask clarifying questions when something is unclear
+- Provide quick confirmations and natural responses
+- Understand technical terminology and common abbreviations
+- Handle multiple ways of saying the same thing (synonyms, colloquialisms)
+
+Your communication style:
+- Use natural, conversational language
+- Keep responses brief but complete
+- Sound helpful and approachable
+- Acknowledge when you understand vs. when you need clarification
+- Provide gentle guidance when needed"""
+
+# Enhanced voice command processing endpoint
+@app.post("/voice-command", response_model=VoiceCommandResponse)
+async def process_voice_command(request: VoiceCommandRequest):
+    """Enhanced voice command processing with natural conversation"""
     try:
-        logger.info("Processing transcription request")
+        logger.info(f"Processing voice command for screen: {request.screenContext.get('screenName')}")
+        
+        # Validate inputs
+        if not request.screenContext:
+            return VoiceCommandResponse(
+                action="clarify",
+                confidence=0.0,
+                clarification="I need to know what screen you're on. Can you try again?",
+                confirmation="Missing screen context",
+                ttsText="Sorry, I can't see what screen you're on. Could you try your command again?"
+            )
+        
+        if not request.audio or len(request.audio) < 100:
+            return VoiceCommandResponse(
+                action="clarify",
+                confidence=0.0,
+                clarification="I didn't catch any audio. Please try speaking again.",
+                confirmation="No audio received",
+                ttsText="I didn't hear anything. Could you try speaking again, maybe a bit louder?"
+            )
+
+        # Process audio and get transcription
+        try:
+            audio_bytes = base64.b64decode(request.audio)
+            logger.info(f"Processing audio: {len(audio_bytes)} bytes")
+            
+            if len(audio_bytes) < 1000:
+                return VoiceCommandResponse(
+                    action="clarify",
+                    confidence=0.0,
+                    clarification="That recording was quite short. Could you try speaking longer?",
+                    confirmation="Audio too short",
+                    ttsText="That was pretty quick. Could you try saying a bit more?"
+                )
+
+            # Create temp file for Whisper
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_file:
+                temp_file.write(audio_bytes)
+                temp_file_path = temp_file.name
+
+            # Transcribe with Whisper
+            with open(temp_file_path, 'rb') as audio_file:
+                transcription_response = openai_client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    language="en"
+                )
+                transcription = transcription_response.text.strip()
+
+        except Exception as e:
+            logger.error(f"Transcription failed: {e}")
+            return VoiceCommandResponse(
+                action="clarify",
+                confidence=0.0,
+                clarification="I had trouble understanding the audio. Could you try speaking more clearly?",
+                confirmation="Transcription failed",
+                ttsText="Sorry, I couldn't quite catch that. Could you try speaking a bit more clearly?"
+            )
+        
+        finally:
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass
+
+        # Check if transcription is meaningful
+        if not transcription or len(transcription.strip()) < 3:
+            return VoiceCommandResponse(
+                action="clarify",
+                confidence=0.0,
+                clarification="I didn't hear much. Could you try speaking a bit louder?",
+                confirmation="No clear speech detected",
+                ttsText="I didn't catch much there. Could you try speaking a bit louder?"
+            )
+
+        # Build enhanced context for GPT
+        context = request.screenContext
+        fields_info = []
+        
+        for field in context.get('visibleFields', []):
+            field_desc = f"- {field['label']} ('{field['name']}')"
+            field_desc += f": Current='{field.get('currentValue', 'empty')}'"
+            field_desc += f", Type={field.get('type', 'text')}"
+            if field.get('synonyms'):
+                field_desc += f", Synonyms={field['synonyms']}"
+            fields_info.append(field_desc)
+        
+        fields_text = "\n".join(fields_info) if fields_info else "No editable fields available"
+        
+        logger.info(f"Screen: {context.get('screenName')}, Fields: {len(context.get('visibleFields', []))}")
+        logger.info(f"User said: '{transcription}'")
+
+        # Enhanced prompt for more natural conversation
+        prompt = f"""{AGENT_PERSONA}
+
+CURRENT CONTEXT:
+- Screen: {context.get('screenName', 'unknown')}
+- Mode: {context.get('mode', 'N/A')}
+- Available Actions: {', '.join(context.get('availableActions', []))}
+
+AVAILABLE FIELDS TO UPDATE:
+{fields_text}
+
+TECHNICIAN SAID: "{transcription}"
+
+Your task: Interpret what the technician wants to do and respond naturally. Consider:
+
+1. FIELD UPDATES: If they want to change/update/set a field value
+   - Match field names flexibly (location/place/where, task/work/job, notes/comments, etc.)
+   - Use exact field names from the list above in your response
+   - Be smart about partial matches and synonyms
+
+2. QUESTIONS ABOUT CAPABILITIES: If they ask "what can you do" or similar
+   - Use "explain_capabilities" action
+   - Give them a helpful overview of your abilities
+
+3. WORDING HELP: If they ask "how does that sound" or want wording suggestions
+   - Use "provide_suggestion" action  
+   - Look at current field values and suggest improvements
+
+4. CLARIFICATIONS: If unclear (confidence < 0.7)
+   - Use "clarify" action
+   - Ask specific, helpful questions
+
+5. MODE CHANGES: If they want to switch modes
+   - Use "toggle_mode" action
+
+6. GENERAL CONVERSATION: If they're just chatting or checking in
+   - Use "acknowledge" action
+   - Respond naturally and helpfully
+
+Respond with JSON:
+{{
+  "action": "update_field|explain_capabilities|provide_suggestion|clarify|toggle_mode|acknowledge",
+  "target": "exact_field_name_if_updating",
+  "value": "new_value_if_updating_field", 
+  "confidence": 0.95,
+  "clarification": "specific_question_if_needed",
+  "confirmation": "brief_technical_confirmation",
+  "ttsText": "natural_conversational_response"
+}}
+
+Guidelines for responses:
+- Sound like a helpful colleague, not a robot
+- Use "Got it", "Sure thing", "No problem" etc.
+- For confirmations: "Updated the location to Downtown Office"
+- For questions: "I can help you update fields, suggest better wording, or answer questions about your report"
+- Keep it conversational but professional
+- Remember they might be driving or have their hands full
+"""
+
+        logger.info("Calling enhanced GPT for command processing...")
+        
+        try:
+            response = openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "You are Sam, a helpful AI assistant for field technicians. Always respond with valid JSON only. Be conversational and natural in your ttsText responses."
+                    },
+                    {
+                        "role": "user", 
+                        "content": prompt
+                    }
+                ],
+                temperature=0.3,
+                max_tokens=500
+            )
+            
+            gpt_response = response.choices[0].message.content
+            logger.info(f"GPT response: {gpt_response}")
+            
+            # Parse JSON response
+            try:
+                start_idx = gpt_response.find('{')
+                end_idx = gpt_response.rfind('}') + 1
+                json_str = gpt_response[start_idx:end_idx]
+                parsed_response = json.loads(json_str)
+                
+                # Validate required fields
+                required_fields = ['action', 'confidence', 'confirmation', 'ttsText']
+                for field in required_fields:
+                    if field not in parsed_response:
+                        raise ValueError(f"Missing required field: {field}")
+                
+                # Ensure confidence is a float
+                parsed_response['confidence'] = float(parsed_response['confidence'])
+                
+                # Create response object
+                return VoiceCommandResponse(**parsed_response)
+                
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.error(f"Failed to parse GPT response: {e}")
+                return VoiceCommandResponse(
+                    action="clarify",
+                    confidence=0.0,
+                    clarification="I had a processing error. Could you try that again?",
+                    confirmation="Processing error",
+                    ttsText="Sorry, I had a technical hiccup. Could you try saying that again?"
+                )
+                
+        except Exception as e:
+            logger.error(f"GPT processing failed: {e}")
+            return VoiceCommandResponse(
+                action="clarify",
+                confidence=0.0,
+                clarification="I'm having trouble processing that. Could you try again?",
+                confirmation="GPT processing failed",
+                ttsText="I'm having a bit of trouble right now. Could you try your request again?"
+            )
+
+    except Exception as e:
+        logger.error(f"Voice command processing failed: {e}")
+        return VoiceCommandResponse(
+            action="clarify",
+            confidence=0.0,
+            clarification="Something went wrong. Please try again.",
+            confirmation="System error",
+            ttsText="Sorry, something went wrong on my end. Could you try that again?"
+        )
+
+# Enhanced Text-to-Speech with better voice selection
+@app.post("/text-to-speech")
+async def text_to_speech(request: TextToSpeechRequest):
+    """Generate natural-sounding speech with improved voice"""
+    try:
+        if not request.text or len(request.text.strip()) == 0:
+            raise HTTPException(status_code=400, detail="Text is required")
+        
+        # Limit text length for reasonable response times
+        text_to_speak = request.text[:500]
+        
+        logger.info(f"Generating TTS for: '{text_to_speak[:50]}...'")
+        
+        # Use a more natural voice - "nova" is conversational and clear
+        response = openai_client.audio.speech.create(
+            model="tts-1",
+            voice="nova",  # Changed from "alloy" to "nova" for more natural sound
+            input=text_to_speak,
+            speed=1.0  # Normal speed for clear understanding
+        )
+        
+        audio_content = response.content
+        logger.info(f"Generated TTS audio: {len(audio_content)} bytes")
+        
+        return Response(
+            content=audio_content,
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": "attachment; filename=speech.mp3"}
+        )
+        
+    except Exception as e:
+        logger.error(f"TTS generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"TTS generation failed: {str(e)}")
+
+@app.post("/transcribe")
+async def transcribe_audio(audio: str):
+    """Transcribe audio to text using Whisper"""
+    try:
+        logger.info("Transcription request received")
+        
+        if not audio:
+            raise HTTPException(status_code=400, detail="Audio data is required")
         
         # Decode base64 audio
-        audio_bytes = base64.b64decode(request.audio)
-        logger.info(f"Decoded audio size: {len(audio_bytes)} bytes")
+        audio_bytes = base64.b64decode(audio)
+        logger.info(f"Audio size: {len(audio_bytes)} bytes")
         
         # Create temporary file
-        with tempfile.NamedTemporaryFile(suffix=f'.{request.format}', delete=False) as temp_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_file:
             temp_file.write(audio_bytes)
             temp_file_path = temp_file.name
         
         try:
             # Transcribe with Whisper
             with open(temp_file_path, 'rb') as audio_file:
-                transcript = openai_client.audio.transcriptions.create(
+                response = openai_client.audio.transcriptions.create(
                     model="whisper-1",
                     file=audio_file,
                     language="en"
                 )
+                transcription = response.text
             
-            transcription_text = transcript.text
-            logger.info(f"Transcription successful: '{transcription_text}'")
-            
-            return TranscribeResponse(transcription=transcription_text)
+            logger.info(f"Transcription completed: {len(transcription)} characters")
+            return {"transcription": transcription}
             
         finally:
             # Clean up temp file
-            os.unlink(temp_file_path)
-        
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass
+                
     except Exception as e:
         logger.error(f"Transcription failed: {e}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
 
-# Summarization endpoint
 @app.post("/summarize", response_model=SummarizeResponse)
-async def generate_summary(request: SummarizeRequest):
-    """Generate structured summary using OpenAI GPT"""
+async def summarize_text(request: SummarizeRequest):
+    """Generate structured summary from transcription"""
     try:
-        logger.info("Processing summarization request")
+        if not request.transcription or len(request.transcription.strip()) < 10:
+            raise HTTPException(status_code=400, detail="Transcription too short to summarize")
         
-        prompt = f"""
-        Please analyze this voice transcription and extract structured information for a work report.
+        logger.info(f"Summarizing text: {len(request.transcription)} characters")
         
-        Transcription: "{request.transcription}"
-        
-        Extract the following information and return as JSON:
-        {{
-            "taskDescription": "Brief description of the work performed",
-            "location": "Where the work was done",
-            "datetime": "When the work was done",
-            "outcome": "Results or completion status",
-            "notes": "Any additional important details",
-            "workType": "Type or category of work",
-            "duration": "How long the work took",
-            "clientName": "Client or customer name if mentioned",
-            "priority": "Priority level if mentioned",
-            "nextSteps": "Follow-up actions needed"
-        }}
-        
-        If any information is not mentioned, use null for that field.
-        """
-        
+        # Enhanced prompt for field technician summaries
+        prompt = f"""You are analyzing a work report from a field technician who provides technology services including hardware replacement, installations, cable routing, and various IT services for businesses.
+
+Extract and organize the following information from this work report:
+
+TRANSCRIPTION:
+"{request.transcription}"
+
+Please provide a structured JSON summary with these fields:
+{{
+  "location": "where the work was performed",
+  "client_company": "name of the client/business", 
+  "services_performed": ["list of specific services/tasks completed"],
+  "equipment_involved": ["any hardware, cables, or equipment mentioned"],
+  "issues_encountered": ["any problems or challenges faced"],
+  "resolution_status": "completed/partial/pending",
+  "additional_notes": "any other relevant details",
+  "duration_estimate": "estimated time spent",
+  "follow_up_needed": "yes/no and what type if yes"
+}}
+
+Focus on extracting factual information that would be important for service documentation, billing, and follow-up scheduling."""
+
         response = openai_client.chat.completions.create(
             model="gpt-4",
             messages=[
@@ -182,7 +443,6 @@ async def generate_summary(request: SummarizeRequest):
             temperature=0.3
         )
         
-        # Parse the JSON response
         summary_text = response.choices[0].message.content
         logger.info(f"GPT response: {summary_text}")
         
@@ -199,314 +459,33 @@ async def generate_summary(request: SummarizeRequest):
         logger.error(f"Summarization failed: {e}")
         raise HTTPException(status_code=500, detail=f"Summarization failed: {str(e)}")
 
-# IMPROVED: Voice command processing endpoint with enhanced validation
-@app.post("/voice-command", response_model=VoiceCommandResponse)
-async def process_voice_command(request: VoiceCommandRequest):
-    """Process voice command with improved error handling and validation"""
-    try:
-        logger.info(f"Processing voice command for screen: {request.screenContext.get('screenName')}")
-        
-        # ADDED: Validate screen context first
-        if not request.screenContext:
-            logger.warning("No screen context provided")
-            return VoiceCommandResponse(
-                action="clarify",
-                confidence=0.0,
-                clarification="Screen context missing. Please try again.",
-                confirmation="Error: No screen context",
-                ttsText="There was a technical issue. Please try your command again."
-            )
-        
-        # ADDED: Validate audio data early
-        if not request.audio or len(request.audio) < 100:
-            logger.warning("Audio data too small or missing")
-            return VoiceCommandResponse(
-                action="clarify",
-                confidence=0.0,
-                clarification="No audio received. Please try again.",
-                confirmation="No audio detected",
-                ttsText="I didn't receive any audio. Please try speaking again."
-            )
-        
-        # Enhanced audio processing with better validation
-        try:
-            audio_bytes = base64.b64decode(request.audio)
-            logger.info(f"Decoded audio size: {len(audio_bytes)} bytes")
-            
-            # ADDED: Minimum audio size validation
-            if len(audio_bytes) < 1000:
-                logger.warning(f"Audio too small: {len(audio_bytes)} bytes")
-                return VoiceCommandResponse(
-                    action="clarify",
-                    confidence=0.0,
-                    clarification="Audio recording too short. Please speak longer.",
-                    confirmation="Audio too brief",
-                    ttsText="I need you to speak a bit longer. Please try again."
-                )
-                
-        except Exception as e:
-            logger.error(f"Failed to decode base64 audio: {e}")
-            return VoiceCommandResponse(
-                action="clarify",
-                confidence=0.0,
-                clarification="Invalid audio format. Please try again.",
-                confirmation="Audio format error",
-                ttsText="I had trouble with your audio format. Please try recording again."
-            )
-        
-        # Create temporary file for Whisper
-        with tempfile.NamedTemporaryFile(suffix=f'.{request.format}', delete=False) as temp_file:
-            temp_file.write(audio_bytes)
-            temp_file_path = temp_file.name
-        
-        logger.info(f"Created temporary audio file: {temp_file_path}")
-        
-        transcription = ""
-        try:
-            # Transcribe with Whisper
-            with open(temp_file_path, 'rb') as audio_file:
-                logger.info("Calling OpenAI Whisper API...")
-                transcript = openai_client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    language="en"  # Specify English for better accuracy
-                )
-            
-            transcription = transcript.text.strip()
-            logger.info(f"Whisper transcription successful: '{transcription}'")
-            
-        except Exception as e:
-            logger.error(f"Whisper transcription failed: {e}")
-            return VoiceCommandResponse(
-                action="clarify",
-                confidence=0.0,
-                clarification="Could not understand the audio. Please try again.",
-                confirmation="Transcription failed",
-                ttsText="I couldn't understand what you said. Please try speaking more clearly."
-            )
-        
-        finally:
-            # Always clean up temp file
-            try:
-                os.unlink(temp_file_path)
-            except:
-                pass
-        
-        # IMPROVED: Check if transcription is meaningful
-        if not transcription or len(transcription.strip()) < 3:
-            logger.warning("Empty or very short transcription received")
-            return VoiceCommandResponse(
-                action="clarify",
-                confidence=0.0,
-                clarification="I didn't hear anything clear. Could you try speaking louder?",
-                confirmation="No clear speech detected",
-                ttsText="I didn't catch that. Could you try speaking a bit louder and clearer?"
-            )
-        
-        # Enhanced GPT processing with better context
-        context = request.screenContext
-        
-        # Build more comprehensive field information
-        fields_info = []
-        for field in context.get('visibleFields', []):
-            field_desc = f"- {field['label']} ('{field['name']}')"
-            field_desc += f": Current='{field.get('currentValue', '')}'"
-            field_desc += f", Editable={field.get('isEditable', True)}"
-            if field.get('synonyms'):
-                field_desc += f", Synonyms={field['synonyms']}"
-            fields_info.append(field_desc)
-        
-        fields_text = "\n".join(fields_info) if fields_info else "No editable fields available"
-        
-        logger.info(f"Screen context: {context.get('screenName')}")
-        logger.info(f"Available fields: {len(context.get('visibleFields', []))}")
-        logger.info(f"User said: '{transcription}'")
-        
-        # IMPROVED: More comprehensive prompt for GPT
-        prompt = f"""You are an AI assistant helping a user interact with their mobile voice report app via voice commands while driving.
-
-CURRENT SCREEN: {context.get('screenName', 'unknown')}
-CURRENT MODE: {context.get('mode', 'N/A')}
-
-AVAILABLE FIELDS:
-{fields_text}
-
-AVAILABLE ACTIONS:
-{', '.join(context.get('availableActions', []))}
-
-USER COMMAND: "{transcription}"
-
-Context: The user is likely driving and needs hands-free interaction. They want to update their after-work report.
-
-Respond with JSON only:
-{{
-  "action": "update_field|toggle_mode|execute_action|clarify",
-  "target": "exact_field_name_or_action_name",
-  "value": "new_value_if_updating_field",
-  "confidence": 0.95,
-  "clarification": "Question if confidence < 0.7",
-  "confirmation": "Brief confirmation of what was done",
-  "ttsText": "Natural spoken response for driving user"
-}}
-
-Rules:
-- If confidence < 0.7, use "clarify" action and ask for clarification
-- For field updates, use EXACT field names from available fields
-- Handle common synonyms: "location/place/where", "task/work/job", "time/date/when", "notes/additional notes"
-- For unclear commands, ask specific questions
-- Keep TTS responses brief and conversational for driving safety
-- If user says "change that" or "update the location", map to appropriate fields
-
-Examples of good responses:
-- "Updated! Location is now Downtown Office"
-- "Got it! Task description updated"
-- "I heard 'place' - did you mean the location field?"
-"""
-        
-        logger.info("Calling OpenAI GPT API for command processing...")
-        
-        try:
-            response = openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {
-                        "role": "system", 
-                        "content": "You are a helpful AI assistant for a voice-controlled mobile app. Always respond with valid JSON only. The user is driving and needs brief, clear responses."
-                    },
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,  # Low temperature for consistent responses
-                max_tokens=300    # Limit response length
-            )
-            
-            logger.info("GPT API call successful")
-            
-            # Parse JSON response with better error handling
-            response_text = response.choices[0].message.content.strip()
-            logger.info(f"GPT response: {response_text}")
-            
-            # Extract JSON from response (handle cases where GPT adds extra text)
-            start_idx = response_text.find('{')
-            end_idx = response_text.rfind('}') + 1
-            
-            if start_idx == -1 or end_idx == 0:
-                logger.error("No JSON found in GPT response")
-                raise ValueError("Invalid JSON response from GPT")
-                
-            json_str = response_text[start_idx:end_idx]
-            
-            try:
-                result = json.loads(json_str)
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON parsing failed: {e}")
-                logger.error(f"JSON string: {json_str}")
-                raise ValueError(f"Invalid JSON from GPT: {e}")
-            
-            # ADDED: Validate required fields in response
-            required_fields = ['action', 'confidence', 'confirmation', 'ttsText']
-            for field in required_fields:
-                if field not in result:
-                    logger.error(f"Missing required field in GPT response: {field}")
-                    raise ValueError(f"Missing field: {field}")
-            
-            # ADDED: Ensure confidence is a valid number
-            try:
-                result['confidence'] = float(result['confidence'])
-            except (ValueError, TypeError):
-                logger.warning("Invalid confidence value, setting to 0.5")
-                result['confidence'] = 0.5
-            
-            logger.info(f"Voice command processed successfully: {result['action']} (confidence: {result['confidence']})")
-            return VoiceCommandResponse(**result)
-            
-        except Exception as e:
-            logger.error(f"GPT processing failed: {e}")
-            return VoiceCommandResponse(
-                action="clarify",
-                confidence=0.0,
-                clarification="I had trouble processing your command. Could you try rephrasing?",
-                confirmation="Processing error",
-                ttsText="I had trouble understanding that. Could you try saying it differently?"
-            )
-        
-    except HTTPException:
-        # Re-raise HTTP exceptions (they're already handled)
-        raise
-    except Exception as e:
-        logger.error(f"Voice command processing failed with unexpected error: {e}")
-        return VoiceCommandResponse(
-            action="clarify",
-            confidence=0.0,
-            clarification="Something went wrong. Please try again.",
-            confirmation="System error",
-            ttsText="Sorry, something went wrong. Please try your command again."
-        )
-
-# IMPROVED: Text-to-speech endpoint with better error handling
-@app.post("/text-to-speech")
-async def generate_speech(request: TTSRequest):
-    """Generate speech from text with improved error handling"""
-    try:
-        if not request.text or len(request.text.strip()) == 0:
-            raise HTTPException(status_code=400, detail="Text is required for TTS")
-        
-        # Limit text length for TTS
-        text = request.text.strip()[:500]  # Max 500 characters
-        
-        logger.info(f"Generating TTS for: '{text[:50]}{'...' if len(text) > 50 else ''}'")
-        
-        try:
-            # Generate speech with OpenAI TTS
-            tts_response = openai_client.audio.speech.create(
-                model="tts-1",
-                voice="alloy",  # Good for clear speech while driving
-                input=text,
-                speed=1.0  # Normal speed for driving safety
-            )
-            
-            audio_content = tts_response.content
-            logger.info(f"TTS generated successfully: {len(audio_content)} bytes")
-            
-            return Response(
-                content=audio_content,
-                media_type="audio/mpeg",
-                headers={
-                    "Content-Disposition": "attachment; filename=speech.mp3",
-                    "Content-Length": str(len(audio_content))
-                }
-            )
-            
-        except Exception as e:
-            logger.error(f"OpenAI TTS API call failed: {e}")
-            raise HTTPException(status_code=500, detail=f"TTS generation failed: {str(e)}")
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"TTS generation failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate speech: {str(e)}")
-
-# Simple PDF generation (placeholder for now)
-@app.post("/generate-pdf", response_model=GeneratePDFResponse)
-async def generate_pdf_report(request: GeneratePDFRequest):
-    """Generate PDF report (placeholder for now)"""
+@app.post("/generate-pdf", response_model=GeneratePDFResponse) 
+async def generate_pdf(request: GeneratePDFRequest):
+    """Generate PDF report"""
     try:
         logger.info("PDF generation requested")
-        
-        # For now, return a placeholder response
-        # You can implement actual PDF generation later
+        # Placeholder - implement actual PDF generation as needed
         return GeneratePDFResponse(pdf_url="placeholder_pdf_url")
         
     except Exception as e:
         logger.error(f"PDF generation failed: {e}")
         raise HTTPException(status_code=500, detail="PDF generation failed")
 
-# ADDED: AI Agent specific health check endpoint
+# Health check endpoints
+@app.get("/health")
+async def health_check():
+    """Basic health check"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "service": "Voice Report Backend"
+    }
+
 @app.get("/ai-agent/health")
 async def ai_agent_health():
-    """Health check specifically for AI agent services"""
+    """Enhanced health check for AI agent services"""
     try:
-        # Test OpenAI connectivity with a minimal request
+        # Test OpenAI connectivity
         test_response = openai_client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": "test"}],
@@ -522,7 +501,14 @@ async def ai_agent_health():
                 "tts": "available",
                 "gpt": "available"
             },
-            "openai_test": "success"
+            "agent_persona": "Sam - Field Technician Assistant",
+            "voice_model": "nova",
+            "capabilities": [
+                "field_updates",
+                "wording_suggestions", 
+                "capability_explanations",
+                "natural_conversation"
+            ]
         }
         
     except Exception as e:
@@ -530,16 +516,9 @@ async def ai_agent_health():
         return {
             "status": "unhealthy",
             "timestamp": datetime.now().isoformat(),
-            "error": str(e),
-            "services": {
-                "transcription": "unknown",
-                "voice_agent": "unknown", 
-                "tts": "unknown",
-                "gpt": "unknown"
-            }
+            "error": str(e)
         }
 
-# Debug endpoint to test OpenAI
 @app.get("/debug/openai")
 async def debug_openai():
     """Debug endpoint to test OpenAI connectivity"""
@@ -558,7 +537,7 @@ async def debug_openai():
         # Test TTS
         tts_response = openai_client.audio.speech.create(
             model="tts-1",
-            voice="alloy",
+            voice="nova",
             input="test"
         )
         tts_size = len(tts_response.content)
@@ -569,7 +548,8 @@ async def debug_openai():
             "openai_key_present": bool(OPENAI_API_KEY),
             "openai_key_starts_with": OPENAI_API_KEY[:10] if OPENAI_API_KEY else None,
             "gpt_test": gpt_result,
-            "tts_test_size": tts_size
+            "tts_test_size": tts_size,
+            "voice_model": "nova"
         }
         
     except Exception as e:
@@ -581,17 +561,17 @@ async def debug_openai():
             "openai_key_starts_with": OPENAI_API_KEY[:10] if OPENAI_API_KEY else None
         }
 
-# Root endpoint
 @app.get("/")
 async def root():
     """Root endpoint with API information"""
     return {
-        "message": "Voice Report Backend API",
-        "version": "1.0.0",
+        "message": "Enhanced Voice Report Backend API with Sam AI Agent",
+        "version": "2.0.0",
+        "agent": "Sam - Your AI Assistant for Field Reports",
         "endpoints": {
             "health": "/health",
-            "transcribe": "/transcribe",
-            "summarize": "/summarize", 
+            "transcribe": "/transcribe", 
+            "summarize": "/summarize",
             "generate_pdf": "/generate-pdf",
             "voice_command": "/voice-command",
             "text_to_speech": "/text-to-speech",
