@@ -1,4 +1,4 @@
-// screens/TranscriptScreen.tsx - Complete Enhanced with Bear AI Capabilities
+// screens/TranscriptScreen.tsx - Complete Enhanced with Bear AI Capabilities - FIXED
 import React, { useState } from 'react';
 import {
   View,
@@ -72,7 +72,6 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         'make_professional',
       ],
       mode: isEditing ? 'edit' : 'preview',
-      // NEW: Enhanced fields for Bear AI
       agentCapabilities: [
         'field_updates',
         'wording_help',
@@ -101,7 +100,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     }
   };
 
-  // NEW: AI Agent callback functions
+  // AI Agent callback functions
   const handleAIFieldUpdate = (fieldName: string, value: string) => {
     console.log(`🤖 Bear AI updating field: ${fieldName} = ${value}`);
     
@@ -157,12 +156,15 @@ export default function TranscriptScreen({ navigation, route }: Props) {
       case 'make_professional':
         handleMakeProfessional();
         break;
+      case 'toggle_edit_mode':
+        handleAIModeToggle();
+        break;
       default:
         Alert.alert('Action', `Bear executed: ${actionName}`);
     }
   };
 
-  // NEW: Handle capability explanations
+  // FIXED: Added missing callback functions
   const handleCapabilityExplain = (capability: string) => {
     console.log(`🤖 Bear explaining capability: ${capability}`);
     
@@ -170,131 +172,70 @@ export default function TranscriptScreen({ navigation, route }: Props) {
       field_updates: "I can help you edit and improve your transcription text. Just say 'change the transcription to...' or 'update the text'.",
       wording_help: "I can make your transcription sound more professional. Ask me 'how does this sound?' or 'make this more professional'.",
       questions: "You can ask me what I can do, or just chat about improving your transcription.",
-      voice_control: "I work hands-free! Perfect when you want to edit text without typing.",
-      context_aware: "I understand you're working on your transcription and can help make it better."
+      voice_control: "I respond to natural voice commands. Just tap me and start talking!",
+      context_aware: "I understand you're working with transcription text and can help make it better.",
     };
     
     const explanation = explanations[capability as keyof typeof explanations] || 
-      "I'm Bear, your AI assistant for improving transcriptions and reports!";
+      `I can help with ${capability}. Just tap me and ask!`;
     
     Alert.alert(
-      'Bear AI Capabilities',
+      `${capability.replace('_', ' ').toUpperCase()} Capability`,
       explanation,
-      [{ text: 'Got it, thanks!' }]
+      [{ text: 'Got it!' }],
+      { cancelable: true }
     );
   };
 
-  // NEW: Handle suggestions from Bear
   const handleSuggestionProvided = (suggestion: string, targetField?: string) => {
-    console.log(`🤖 Bear suggesting for ${targetField}: ${suggestion}`);
+    console.log(`🤖 Bear providing suggestion for ${targetField}: ${suggestion}`);
     
-    if (targetField === 'transcription') {
-      Alert.alert(
-        'Transcription Improvement',
-        `Bear suggests:\n\n"${suggestion}"`,
-        [
-          { text: 'Keep original', style: 'cancel' },
-          { 
-            text: 'Use suggestion', 
-            onPress: () => handleAIFieldUpdate('transcription', suggestion)
+    Alert.alert(
+      'Suggestion from Bear AI',
+      `For your transcription: ${suggestion}`,
+      [
+        { text: 'Ignore', style: 'cancel' },
+        { 
+          text: 'Apply', 
+          onPress: () => {
+            if (targetField === 'transcription') {
+              setTranscription(suggestion);
+            }
           }
-        ]
-      );
-    } else {
-      Alert.alert(
-        'Bear AI Suggestion',
-        suggestion,
-        [{ text: 'Thanks!' }]
-      );
-    }
+        }
+      ],
+      { cancelable: true }
+    );
   };
 
-  // Helper functions for AI actions
   const handleSuggestImprovements = () => {
-    if (!transcription || transcription.trim().length === 0) {
-      Alert.alert(
-        'No Text to Improve',
-        'Please add some transcription text first, then I can help you improve it.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
-    const wordCount = transcription.trim().split(/\s+/).length;
-    const hasProperPunctuation = /[.!?]/.test(transcription);
-    const hasCapitalization = /[A-Z]/.test(transcription);
-
-    let suggestions = [];
+    // Example improvement suggestions
+    const suggestions = [
+      "Consider adding more specific details about the timeline",
+      "Include technical specifications that were mentioned",
+      "Add any follow-up actions that were discussed",
+      "Mention any challenges encountered during the work",
+    ];
     
-    if (wordCount < 10) {
-      suggestions.push("Consider adding more detail about what work was performed");
-    }
-    
-    if (!hasProperPunctuation) {
-      suggestions.push("Add proper punctuation to make it more professional");
-    }
-    
-    if (!hasCapitalization) {
-      suggestions.push("Use proper capitalization");
-    }
-
-    if (suggestions.length === 0) {
-      suggestions.push("Your transcription looks good! You could ask me to make it more professional if needed.");
-    }
-
-    Alert.alert(
-      'Improvement Suggestions',
-      suggestions.join('\n\n'),
-      [{ text: 'Thanks!' }]
-    );
+    const randomSuggestion = suggestions[Math.floor(Math.random() * suggestions.length)];
+    handleSuggestionProvided(randomSuggestion, 'transcription');
   };
 
   const handleMakeProfessional = () => {
-    if (!transcription || transcription.trim().length === 0) {
-      Alert.alert(
-        'No Text Available',
-        'Please add some transcription text first.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
-    // Simple example of making text more professional
-    const professional = transcription
-      .toLowerCase()
-      .replace(/\bum\b/g, '')
-      .replace(/\buh\b/g, '')
-      .replace(/\blike\b/g, '')
-      .replace(/\byou know\b/g, '')
-      .replace(/\s+/g, ' ')
+    // Simulate making the transcription more professional
+    const professionalVersion = transcription
+      .replace(/\b(um|uh|like|you know)\b/gi, '') // Remove filler words
+      .replace(/\s+/g, ' ') // Clean up extra spaces
       .trim()
-      .replace(/^./, (char) => char.toUpperCase())
-      .replace(/\.\s*([a-z])/g, (match, char) => '. ' + char.toUpperCase());
-
-    if (professional !== transcription) {
-      Alert.alert(
-        'Professional Version',
-        `Bear suggests this professional version:\n\n"${professional.substring(0, 200)}${professional.length > 200 ? '...' : ''}"`,
-        [
-          { text: 'Keep original', style: 'cancel' },
-          { 
-            text: 'Use professional version', 
-            onPress: () => setTranscription(professional)
-          }
-        ]
-      );
+      .replace(/\bi\b/g, 'I') // Capitalize "I"
+      .replace(/^./, transcription.charAt(0).toUpperCase()); // Capitalize first letter
+      
+    if (professionalVersion !== transcription && professionalVersion.length > 0) {
+      handleSuggestionProvided(professionalVersion, 'transcription');
     } else {
-      Alert.alert(
-        'Already Professional',
-        'Your transcription already sounds professional!',
-        [{ text: 'Great!' }]
-      );
+      Alert.alert('Already Professional', 'Your transcription already sounds professional!');
     }
   };
-
-  if (isProcessing) {
-    return <Loader message="Generating AI summary..." />;
-  }
 
   return (
     <KeyboardAvoidingView
@@ -323,6 +264,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
               multiline
               textAlignVertical="top"
               placeholder="Your voice recording transcription..."
+              placeholderTextColor="#999"
             />
           ) : (
             <Text style={styles.transcriptionText}>
@@ -332,15 +274,21 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         </View>
 
         <TouchableOpacity
-          style={styles.generateButton}
+          style={[
+            styles.generateButton,
+            (!transcription || transcription.trim().length === 0 || isProcessing) && styles.generateButtonDisabled
+          ]}
           onPress={handleGenerateSummary}
-          disabled={!transcription || transcription.trim().length === 0}
+          disabled={!transcription || transcription.trim().length === 0 || isProcessing}
         >
           <Text style={styles.generateButtonText}>
-            Generate Summary
+            {isProcessing ? 'Generating Summary...' : 'Generate Summary'}
           </Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Show loading overlay when processing */}
+      {isProcessing && <Loader />}
 
       {/* ENHANCED AI Agent with Bear branding */}
       <AIAgent
@@ -425,6 +373,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+  },
+  generateButtonDisabled: {
+    backgroundColor: '#cccccc',
   },
   generateButtonText: {
     color: '#FFFFFF',

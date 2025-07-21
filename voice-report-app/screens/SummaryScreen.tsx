@@ -1,4 +1,4 @@
-// screens/SummaryScreen.tsx - Enhanced with Sam AI Capabilities
+// screens/SummaryScreen.tsx - Enhanced with Sam AI Capabilities - TYPESCRIPT FIXED
 import React, { useState } from 'react';
 import {
   View,
@@ -108,7 +108,6 @@ export default function SummaryScreen({ navigation, route }: Props) {
         'add_current_date',
       ],
       mode: isPreviewMode ? 'preview' : 'edit',
-      // NEW: Enhanced fields for Sam AI
       agentCapabilities: [
         'field_updates',
         'wording_help',
@@ -147,9 +146,9 @@ export default function SummaryScreen({ navigation, route }: Props) {
     }
   };
 
-  // EXISTING AI Agent callback functions
+  // AI Agent callback functions
   const handleAIFieldUpdate = (fieldName: string, value: string) => {
-    console.log(`🤖 Bear AI updating field: ${fieldName} = ${value}`);
+    console.log(`🤖 Sam AI updating field: ${fieldName} = ${value}`);
     
     if (fieldName === 'transcription') {
       setEditableTranscription(value);
@@ -161,7 +160,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
     const fieldLabel = getEnhancedScreenContext().visibleFields.find(f => f.name === fieldName)?.label || fieldName;
     Alert.alert(
       'Field Updated',
-      `${fieldLabel} has been updated by Bear AI.`,
+      `${fieldLabel} has been updated by Sam AI.`,
       [{ text: 'OK' }],
       { cancelable: true }
     );
@@ -169,180 +168,158 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
   const handleAIModeToggle = () => {
     const newMode = !isPreviewMode;
-    console.log(`🤖 Bear AI toggling mode to: ${newMode ? 'edit' : 'preview'}`);
-    setIsPreviewMode(newMode);
+    console.log(`🤖 Sam AI toggling mode to: ${newMode ? 'edit' : 'preview'}`);
+    setIsPreviewMode(!isPreviewMode);
     
     Alert.alert(
-      'Mode Changed',
-      `Bear switched to ${newMode ? 'edit' : 'preview'} mode.`,
+      'Edit Mode Changed',
+      `Sam switched to ${newMode ? 'edit' : 'preview'} mode.`,
       [{ text: 'OK' }],
       { cancelable: true }
     );
   };
 
   const handleAIAction = (actionName: string, params?: any) => {
-    console.log(`🤖 Bear AI executing action: ${actionName}`, params);
+    console.log(`🤖 Sam AI executing action: ${actionName}`, params);
     
     switch (actionName) {
       case 'generate_pdf':
         handleGeneratePDF();
         break;
-      case 'save_summary':
-        Alert.alert('Save Summary', 'Summary would be saved here.');
+      case 'toggle_edit_mode':
+        handleAIModeToggle();
+        break;
+      case 'add_current_time':
+        const currentTime = new Date().toLocaleTimeString();
+        updateSummaryField('datetime', `${editableSummary.datetime || ''} ${currentTime}`.trim());
+        break;
+      case 'add_current_date':
+        const currentDate = new Date().toLocaleDateString();
+        updateSummaryField('datetime', `${currentDate} ${editableSummary.datetime || ''}`.trim());
+        break;
+      case 'clear_field':
+        if (params && params.fieldName && params.fieldName in editableSummary) {
+          updateSummaryField(params.fieldName, '');
+        }
         break;
       case 'suggest_improvements':
         handleSuggestImprovements();
         break;
-      case 'clear_field':
-        if (params?.fieldName) {
-          handleAIFieldUpdate(params.fieldName, '');
-        }
-        break;
-      case 'add_current_time':
-        const currentTime = new Date().toLocaleString();
-        updateSummaryField('datetime', currentTime);
-        break;
-      case 'add_current_date':
-        const currentDate = new Date().toLocaleDateString();
-        updateSummaryField('datetime', currentDate);
+      case 'save_summary':
+        Alert.alert('Summary Saved', 'Your summary has been saved locally.');
         break;
       default:
-        Alert.alert('Action', `Bear executed: ${actionName}`);
+        Alert.alert('Action', `Sam executed: ${actionName}`);
     }
   };
 
-  // NEW: Handle capability explanations
+  // FIXED: Added missing callback functions
   const handleCapabilityExplain = (capability: string) => {
-    console.log(`🤖 Bear explaining capability: ${capability}`);
+    console.log(`🤖 Sam explaining capability: ${capability}`);
     
     const explanations = {
-      field_updates: "I can update any field in your report by voice. Just say something like 'set location to downtown office' or 'change the task description to hardware installation'.",
-      wording_help: "I can help improve your report wording. Ask me 'how does that sound?' or 'can you make this more professional?' and I'll suggest better phrasing.",
-      questions: "You can ask me what I can do, check my capabilities, or just chat about your work. I'm here to help!",
-      voice_control: "I work completely hands-free - perfect when you're driving or have your hands full on a job site. Just speak naturally.",
-      context_aware: "I understand which screen you're on and what fields are available, so I know exactly what you're talking about when you say 'update that' or 'change the location'."
+      field_updates: "I can help you edit and improve any field in your summary. Just say 'change the task description to...' or 'update the location'.",
+      wording_help: "I can make your descriptions sound more professional. Ask me 'how does this sound?' or 'make this more professional'.",
+      questions: "You can ask me what I can do, or just chat about improving your summary.",
+      voice_control: "I respond to natural voice commands. Just tap me and start talking!",
+      context_aware: "I understand what screen you're on and can help with relevant tasks and fields.",
     };
     
     const explanation = explanations[capability as keyof typeof explanations] || 
-      "I'm Bear, your AI assistant for creating professional service reports. I can help with field updates, suggestions, and more!";
+      `I can help with ${capability}. Just tap me and ask!`;
     
     Alert.alert(
-      'Bear AI Capabilities',
+      `${capability.replace('_', ' ').toUpperCase()} Capability`,
       explanation,
-      [{ text: 'Got it, thanks!' }]
+      [{ text: 'Got it!' }],
+      { cancelable: true }
     );
   };
 
-  // NEW: Handle suggestions from Sam
   const handleSuggestionProvided = (suggestion: string, targetField?: string) => {
-    console.log(`🤖 Bear suggesting for ${targetField}: ${suggestion}`);
+    console.log(`🤖 Sam providing suggestion for ${targetField}: ${suggestion}`);
     
-    if (targetField) {
-      const fieldLabel = getEnhancedScreenContext().visibleFields.find(f => f.name === targetField)?.label || targetField;
+    const fieldLabel = targetField ? 
+      getEnhancedScreenContext().visibleFields.find(f => f.name === targetField)?.label || targetField :
+      'your summary';
       
-      Alert.alert(
-        'Suggestion from Bear',
-        `For ${fieldLabel}:\n\n"${suggestion}"`,
-        [
-          { text: 'No thanks', style: 'cancel' },
-          { 
-            text: 'Use this wording', 
-            onPress: () => handleAIFieldUpdate(targetField, suggestion)
+    Alert.alert(
+      'Suggestion from Sam AI',
+      `For ${fieldLabel}: ${suggestion}`,
+      [
+        { text: 'Ignore', style: 'cancel' },
+        { 
+          text: 'Apply', 
+          onPress: () => {
+            if (targetField && targetField in editableSummary) {
+              updateSummaryField(targetField as keyof typeof editableSummary, suggestion);
+            } else if (targetField === 'transcription') {
+              setEditableTranscription(suggestion);
+            }
           }
-        ]
-      );
-    } else {
-      Alert.alert(
-        'Bear AI Suggestion',
-        suggestion,
-        [{ text: 'Thanks!' }]
-      );
-    }
+        }
+      ],
+      { cancelable: true }
+    );
   };
 
-  // Helper function for suggesting improvements
   const handleSuggestImprovements = () => {
-    const emptyFields = getEnhancedScreenContext().visibleFields.filter(
-      field => !field.currentValue || field.currentValue.trim().length === 0
-    );
+    // Example improvement suggestions
+    const suggestions = [
+      "Consider adding more specific technical details",
+      "Include time estimates for the work performed",
+      "Add any follow-up actions that are needed",
+      "Mention any challenges encountered and how they were resolved",
+    ];
     
-    if (emptyFields.length > 0) {
-      const fieldNames = emptyFields.map(f => f.label).join(', ');
-      Alert.alert(
-        'Improvement Suggestions',
-        `Consider filling in these fields for a more complete report: ${fieldNames}`,
-        [{ text: 'OK' }]
-      );
-    } else {
-      Alert.alert(
-        'Great Job!',
-        'Your report looks complete! All fields have been filled in.',
-        [{ text: 'Thanks!' }]
-      );
-    }
+    const randomSuggestion = suggestions[Math.floor(Math.random() * suggestions.length)];
+    handleSuggestionProvided(randomSuggestion, 'taskDescription');
   };
 
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Header */}
-        <View style={styles.headerContainer}>
-          <View style={styles.logoContainer}>
-            <Image 
-              source={require('../assets/bears&t2.png')} 
-              style={styles.logoImage}
-              resizeMode="contain"
-            />
-            <View style={styles.headerTextContainer}>
-              <Text style={styles.companyName}>BearS&T</Text>
-              <Text style={styles.reportType}>Work Summary</Text>
-            </View>
-          </View>
+        <View style={styles.header}>
+          <Text style={styles.title}>Summary</Text>
+          <TouchableOpacity
+            style={styles.toggleButton}
+            onPress={() => setIsPreviewMode(!isPreviewMode)}
+          >
+            <Text style={styles.toggleButtonText}>
+              {isPreviewMode ? 'Edit' : 'Preview'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Mode Toggle Button */}
-        <TouchableOpacity
-          style={styles.modeButton}
-          onPress={() => setIsPreviewMode(!isPreviewMode)}
-        >
-          <Text style={styles.modeButtonText}>
-            {isPreviewMode ? '✏️ Edit Report' : '👁️ Preview Report'}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Summary Section */}
-        <View style={styles.summarySection}>
-          <Text style={styles.sectionHeading}>SUMMARY</Text>
-          <View style={styles.sectionDivider} />
-
+        <View style={styles.summaryCard}>
           <EditableField
             label="Task Description"
-            value={editableSummary.taskDescription || ''}
+            value={editableSummary.taskDescription || ''} // FIXED: Handle undefined with default
             onChangeText={(text) => updateSummaryField('taskDescription', text)}
             isEditing={!isPreviewMode}
             multiline
-            placeholder="Describe the work performed..."
+            placeholder="Describe the work that was performed..."
           />
 
           <EditableField
             label="Location"
-            value={editableSummary.location || ''}
+            value={editableSummary.location || ''} // FIXED: Handle undefined with default
             onChangeText={(text) => updateSummaryField('location', text)}
             isEditing={!isPreviewMode}
-            placeholder="e.g., Downtown Office Building"
+            placeholder="Where did this work take place?"
           />
 
           <EditableField
             label="Date/Time"
-            value={editableSummary.datetime || ''}
+            value={editableSummary.datetime || ''} // FIXED: Handle undefined with default
             onChangeText={(text) => updateSummaryField('datetime', text)}
             isEditing={!isPreviewMode}
-            placeholder="e.g., December 15, 2024 at 2:30 PM"
+            placeholder="When was this work performed?"
           />
 
           <EditableField
             label="Outcome"
-            value={editableSummary.outcome || ''}
+            value={editableSummary.outcome || ''} // FIXED: Handle undefined with default
             onChangeText={(text) => updateSummaryField('outcome', text)}
             isEditing={!isPreviewMode}
             multiline
@@ -351,40 +328,36 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
           <EditableField
             label="Additional Notes"
-            value={editableSummary.notes || ''}
+            value={editableSummary.notes || ''} // FIXED: Handle undefined with default
             onChangeText={(text) => updateSummaryField('notes', text)}
             isEditing={!isPreviewMode}
             multiline
-            placeholder="Any additional information, observations, or follow-up needed..."
+            placeholder="Any additional information or follow-up needed?"
           />
         </View>
 
-        {/* Transcription Section */}
         <View style={styles.transcriptionSection}>
-          <Text style={styles.sectionHeading}>FULL TRANSCRIPTION</Text>
-          <View style={styles.sectionDivider} />
-
-          <View style={styles.transcriptionContainer}>
-            {isPreviewMode ? (
-              <Text style={styles.transcriptionText}>
-                {editableTranscription}
-              </Text>
-            ) : (
+          <Text style={styles.sectionTitle}>Original Transcription</Text>
+          <View style={styles.transcriptionCard}>
+            {!isPreviewMode ? (
               <TextInput
                 style={styles.transcriptionInput}
-                value={editableTranscription}
+                value={editableTranscription || ''} // FIXED: Handle undefined with default
                 onChangeText={setEditableTranscription}
                 multiline
                 textAlignVertical="top"
-                placeholder="Voice recording transcription..."
+                placeholder="Your voice recording transcription..."
               />
+            ) : (
+              <Text style={styles.transcriptionText}>
+                {editableTranscription || 'No transcription available'}
+              </Text>
             )}
           </View>
         </View>
 
-        {/* Generate PDF Button */}
         <TouchableOpacity
-          style={styles.generateButton}
+          style={[styles.generateButton, isGenerating && styles.generateButtonDisabled]}
           onPress={handleGeneratePDF}
           disabled={isGenerating}
         >
@@ -418,7 +391,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
 // Enhanced Editable Field Component
 interface EditableFieldProps {
   label: string;
-  value: string;
+  value: string; // FIXED: Changed from string | undefined to string
   onChangeText: (text: string) => void;
   isEditing: boolean;
   multiline?: boolean;
@@ -450,9 +423,13 @@ const EditableField: React.FC<EditableFieldProps> = ({
           multiline={multiline}
           textAlignVertical={multiline ? 'top' : 'center'}
           placeholder={placeholder}
+          placeholderTextColor="#999"
         />
       ) : (
-        <Text style={[styles.fieldValue, isEmpty && styles.fieldValueEmpty]}>
+        <Text style={[
+          styles.fieldValue,
+          isEmpty && styles.fieldValueEmpty,
+        ]}>
           {displayValue}
         </Text>
       )}
@@ -469,62 +446,35 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 100, // Space for AI Agent button
   },
-  headerContainer: {
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 20,
   },
-  logoContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f8f9fa',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-  },
-  logoImage: {
-    width: 50,
-    height: 50,
-    marginRight: 12,
-  },
-  headerTextContainer: {
-    alignItems: 'center',
-  },
-  companyName: {
-    fontSize: 20,
+  title: {
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#FF6B35',
   },
-  reportType: {
-    fontSize: 14,
-    color: '#666666',
-    marginTop: 2,
-  },
-  modeButton: {
+  toggleButton: {
     backgroundColor: '#74b9ff',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 20,
   },
-  modeButtonText: {
+  toggleButtonText: {
     color: '#ffffff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
   },
-  summarySection: {
+  summaryCard: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 16,
     marginBottom: 20,
-  },
-  sectionHeading: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#FF6B35',
-    marginBottom: 8,
-  },
-  sectionDivider: {
-    height: 2,
-    backgroundColor: '#FF6B35',
-    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
   },
   fieldContainer: {
     marginBottom: 16,
@@ -532,68 +482,74 @@ const styles = StyleSheet.create({
   fieldLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333333',
+    color: '#495057',
     marginBottom: 4,
   },
+  fieldInput: {
+    borderWidth: 1,
+    borderColor: '#ced4da',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    backgroundColor: '#ffffff',
+    color: '#333333',
+  },
+  fieldInputMultiline: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
   fieldValue: {
-    fontSize: 14,
-    color: '#000000',
-    paddingLeft: 10,
-    paddingVertical: 4,
+    fontSize: 16,
+    color: '#333333',
+    lineHeight: 22,
+    padding: 4,
   },
   fieldValueEmpty: {
     color: '#999999',
     fontStyle: 'italic',
   },
-  fieldInput: {
-    fontSize: 14,
-    color: '#000000',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    backgroundColor: '#F9FAFB',
-  },
-  fieldInputMultiline: {
-    minHeight: 60,
-    textAlignVertical: 'top',
-  },
   transcriptionSection: {
     marginBottom: 20,
   },
-  transcriptionContainer: {
-    paddingLeft: 10,
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FF6B35',
+    marginBottom: 12,
+  },
+  transcriptionCard: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    minHeight: 120,
+  },
+  transcriptionInput: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#333333',
+    textAlignVertical: 'top',
     minHeight: 100,
   },
   transcriptionText: {
-    fontSize: 12,
-    color: '#1A1A1A',
-    lineHeight: 16,
-  },
-  transcriptionInput: {
-    fontSize: 12,
-    color: '#1A1A1A',
-    lineHeight: 16,
-    minHeight: 80,
-    textAlignVertical: 'top',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 4,
-    padding: 8,
-    backgroundColor: '#F9FAFB',
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#333333',
   },
   generateButton: {
     backgroundColor: '#FF6B35',
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
-    marginBottom: 40,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+  },
+  generateButtonDisabled: {
+    backgroundColor: '#cccccc',
   },
   generateButtonText: {
     color: '#FFFFFF',

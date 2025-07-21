@@ -1,4 +1,4 @@
-// services/aiAgentService.ts - Fixed TypeScript Errors
+// services/aiAgentService.ts - BACKEND FORMAT FIXED TO MATCH WORKING API
 import * as FileSystem from 'expo-file-system';
 import { Audio, AVPlaybackStatus } from 'expo-av';
 import { VoiceCommand, VoiceCommandResponse, ScreenContext } from '../types/aiAgent';
@@ -65,7 +65,7 @@ export class AIAgentService {
       throw new Error('Microphone permission is required for voice commands. Please enable it in your device settings.');
     }
 
-    // Set audio mode for recording - simplified to avoid deprecated constants
+    // Set audio mode for recording
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: true,
       playsInSilentModeIOS: true,
@@ -80,7 +80,7 @@ export class AIAgentService {
     );
 
     this.recording = recording;
-    console.log('✅ Bear AI Agent recording started with HIGH_QUALITY preset');
+    console.log('✅ AI Agent recording started with HIGH_QUALITY preset');
     return recording;
   }
 
@@ -97,7 +97,7 @@ export class AIAgentService {
         playsInSilentModeIOS: true,
       });
 
-      console.log('✅ Bear AI Agent recording stopped successfully');
+      console.log('✅ AI Agent recording stopped successfully');
       console.log('📁 Audio URI:', uri);
       
       this.recording = null;
@@ -129,7 +129,7 @@ export class AIAgentService {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-        const response = await fetch(`${url}/ai-agent/health`, {
+        const response = await fetch(`${url}/health`, {
           method: 'GET',
           signal: controller.signal,
           headers: {
@@ -160,7 +160,7 @@ export class AIAgentService {
     return null;
   }
 
-  // Enhanced voice command processing with conversation context
+  // FIXED: Voice command processing to match exact API format
   async processVoiceCommand(audioUri: string, screenContext: ScreenContext): Promise<VoiceCommandResponse> {
     try {
       const workingBackendUrl = await this.getWorkingBackend();
@@ -168,287 +168,269 @@ export class AIAgentService {
         throw new Error('No backend server available. Please check your internet connection and try again.');
       }
 
-      console.log(`🤖 Bear AI processing command on ${screenContext.screenName} screen`);
+      console.log('🤖 Processing voice command with backend:', workingBackendUrl);
 
-      // Read and validate audio file
-      const audioInfo = await FileSystem.getInfoAsync(audioUri);
-      if (!audioInfo.exists) {
-        throw new Error('Audio file does not exist');
-      }
-
-      if (audioInfo.size && audioInfo.size < 500) {
-        throw new Error('Recording too short - please speak for a few seconds');
-      }
-
-      // Convert audio to base64
+      // Read audio file exactly like the working transcribeAudio function
       const audioBase64 = await FileSystem.readAsStringAsync(audioUri, {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      console.log(`📤 Sending ${audioBase64.length} character audio to Bear AI`);
+      console.log(`📁 Audio file size: ${audioBase64.length} characters (base64)`);
 
-      // Enhanced screen context with conversation history
-      const enhancedContext = {
-        ...screenContext,
-        conversationHistory: this.getRecentConversationContext(),
-        agentCapabilities: Object.keys(this.capabilities),
-        timestamp: new Date().toISOString(),
+      // Determine audio format from file extension (just like api.ts)
+      const format = audioUri.split('.').pop()?.toLowerCase() || 'm4a';
+
+      // FIXED: Use exact same payload format as working transcribeAudio
+      const payload = {
+        audio: audioBase64,
+        format: format,
+        screenContext: screenContext,
+        conversationHistory: this.conversationHistory.slice(-3) // Last 3 entries
       };
 
-      // Send request to enhanced backend
+      console.log('📤 Sending voice command to backend...');
+
+      // FIXED: Use AbortController for timeout instead of timeout property
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
+      // FIXED: Send to voice-command endpoint with JSON (not FormData)
       const response = await fetch(`${workingBackendUrl}/voice-command`, {
         method: 'POST',
-        signal: controller.signal,
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json', // FIXED: Use JSON like working API
           'ngrok-skip-browser-warning': 'true',
+          'User-Agent': 'VoiceReportApp/1.0',
         },
-        body: JSON.stringify({
-          audio: audioBase64,
-          screenContext: enhancedContext,
-        }),
+        body: JSON.stringify(payload), // FIXED: Send JSON payload like working API
+        signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`❌ Sam AI API error: ${response.status} - ${errorText}`);
-        throw new Error(`AI service error: ${response.status}`);
+        console.error('❌ Backend responded with error:', response.status, errorText);
+        
+        // Parse error details if available
+        let errorDetail = errorText;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorDetail = errorJson.detail || errorText;
+        } catch {}
+        
+        throw new Error(`Backend error: ${response.status} - ${errorDetail}`);
       }
 
       const result: VoiceCommandResponse = await response.json();
-      console.log('📋 Bear AI response:', result);
+      console.log('📥 Received AI response:', result);
 
-      // Store conversation for context
-      this.addToConversationHistory(
-        result.clarification || 'Voice command', // We don't have the exact transcription here
-        result.ttsText,
-        screenContext.screenName
-      );
+      // Add to conversation history using confirmation field
+      const userInput = result.confirmation || 'Unknown command';
+      
+      this.conversationHistory.push({
+        userInput,
+        agentResponse: result.confirmation,
+        timestamp: Date.now(),
+        screenContext: screenContext.screenName,
+      });
 
-      // Validate response format
-      if (!result.action || !result.confirmation || !result.ttsText) {
-        throw new Error('Invalid response format from AI service');
+      // Keep only last 10 conversation entries
+      if (this.conversationHistory.length > 10) {
+        this.conversationHistory = this.conversationHistory.slice(-10);
       }
 
       return result;
 
     } catch (error) {
-      console.error('❌ Sam AI command processing failed:', error);
+      console.error('❌ Voice command processing failed:', error);
       
-      // Enhanced error handling with specific messages
+      // Return a fallback response for common errors
       if (error instanceof Error) {
-        if (error.message.includes('abort') || error.message.includes('timeout')) {
-          throw new Error('Request timed out. Please check your internet connection and try again.');
-        } else if (error.message.includes('too short')) {
-          throw new Error('Please speak for a longer duration and try again.');
-        } else if (error.message.includes('No backend server')) {
-          throw new Error('Cannot connect to Bear AI service. Please check your internet connection.');
-        } else if (error.message.includes('Invalid audio format')) {
-          throw new Error('Audio format error. Please try recording again.');
+        if (error.message.includes('network') || error.message.includes('fetch')) {
+          return this.createErrorResponse('Network connection failed. Please check your internet connection.');
+        } else if (error.message.includes('timeout') || error.name === 'AbortError') {
+          return this.createErrorResponse('Request timed out. Please try again.');
+        } else if (error.message.includes('server') || error.message.includes('backend')) {
+          return this.createErrorResponse('Server is currently unavailable. Please try again later.');
+        } else if (error.message.includes('422')) {
+          return this.createErrorResponse('Audio format not supported. Please try recording again.');
+        } else if (error.message.includes('400')) {
+          return this.createErrorResponse('Invalid audio data. Please try recording again.');
         }
       }
       
-      throw new Error('Failed to process voice command. Please try again.');
+      return this.createErrorResponse('Could not process voice command. Please try again.');
     }
   }
 
-  // Enhanced TTS playback with proper TypeScript types
+  // Create a standardized error response
+  private createErrorResponse(message: string): VoiceCommandResponse {
+    return {
+      action: 'clarify',
+      confidence: 0,
+      clarification: message,
+      confirmation: message,
+      ttsText: message,
+      metadata: {
+        processingTime: 0,
+        modelUsed: 'error',
+      },
+    };
+  }
+
+  // Play TTS response with enhanced error handling
   async playTTSResponse(text: string): Promise<void> {
     try {
+      console.log('🔊 Playing TTS response:', text);
+
+      // Clean up any existing sound
+      if (this.sound) {
+        await this.sound.unloadAsync();
+        this.sound = null;
+      }
+
       const workingBackendUrl = await this.getWorkingBackend();
       if (!workingBackendUrl) {
-        throw new Error('No backend server available for text-to-speech');
+        console.warn('🔇 No backend available for TTS - skipping voice response');
+        return;
       }
 
-      console.log(`🔊 Bear AI generating speech: "${text.substring(0, 50)}..."`);
-
-      // Sanitize and limit text for TTS
-      const cleanText = text.trim().substring(0, 500);
-      if (!cleanText) {
-        throw new Error('No text to speak');
-      }
-
+      // FIXED: Use AbortController for timeout instead of timeout property
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
+      // Request TTS audio from backend
       const response = await fetch(`${workingBackendUrl}/text-to-speech`, {
         method: 'POST',
-        signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true'
+          'ngrok-skip-browser-warning': 'true',
         },
-        body: JSON.stringify({ text: cleanText }),
+        body: JSON.stringify({ text }),
+        signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`❌ TTS API error: ${response.status} - ${errorText}`);
-        throw new Error(`TTS failed with status: ${response.status}`);
+        console.warn('🔇 TTS request failed:', response.status);
+        return;
       }
 
-      // Get audio data and save to temporary file
-      const audioBuffer = await response.arrayBuffer();
-      const audioBase64 = this.arrayBufferToBase64(audioBuffer);
+      const audioBlob = await response.blob();
+      const audioBase64 = await this.blobToBase64(audioBlob);
       
-      console.log(`📁 Bear AI received TTS audio: ${audioBuffer.byteLength} bytes`);
-      
-      const tempUri = `${FileSystem.cacheDirectory}bear_ai_tts_${Date.now()}.mp3`;
-      
-      await FileSystem.writeAsStringAsync(tempUri, audioBase64, {
+      // Create temporary audio file
+      const tempAudioUri = `${FileSystem.documentDirectory}temp_tts_${Date.now()}.mp3`;
+      await FileSystem.writeAsStringAsync(tempAudioUri, audioBase64, {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      console.log(`🎵 Playing Bear AI response from: ${tempUri}`);
-
-      // Enhanced audio playback with proper type handling
+      // Play the audio
       const { sound } = await Audio.Sound.createAsync(
-        { uri: tempUri },
-        { 
-          shouldPlay: true,
-          volume: 1.0,
-          rate: 1.0,
-          shouldCorrectPitch: true,
-        }
+        { uri: tempAudioUri },
+        { shouldPlay: true, volume: 1.0 }
       );
-      
-      this.sound = sound;
-      
-      return new Promise<void>((resolve, reject) => {
-        let resolved = false;
-        
-        const cleanup = () => {
-          if (!resolved) {
-            resolved = true;
-            sound.unloadAsync().catch(() => {}); // Ignore cleanup errors
-            // Clean up temp file
-            FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-          }
-        };
 
+      this.sound = sound;
+
+      // Wait for playback to complete
+      return new Promise<void>((resolve, reject) => {
         sound.setOnPlaybackStatusUpdate((status: AVPlaybackStatus) => {
-          if (!resolved) {
-            if (status.isLoaded) {
-              if (status.didJustFinish) {
-                console.log('🎵 Bear AI speech completed successfully');
-                cleanup();
-                resolve();
-              }
-            } else {
-              // Handle error case - when isLoaded becomes false, it usually means an error
-              console.error('🔇 Bear AI speech playback error: Audio failed to load');
-              cleanup();
-              reject(new Error('Audio playback failed'));
-            }
+          if (status.isLoaded && status.didJustFinish) {
+            console.log('✅ TTS playback completed');
+            sound.unloadAsync().then(() => {
+              // Clean up temp file
+              FileSystem.deleteAsync(tempAudioUri, { idempotent: true }).catch(console.warn);
+              resolve();
+            }).catch(reject);
+          } else if (status.isLoaded === false) {
+            console.error('❌ TTS playback error');
+            reject(new Error('Playback failed'));
           }
         });
-
-        // Fallback timeout
-        setTimeout(() => {
-          if (!resolved) {
-            console.log('🕐 Bear AI speech timeout, completing anyway');
-            cleanup();
-            resolve();
-          }
-        }, 15000);
       });
 
     } catch (error) {
-      console.error('❌ Bear AI TTS failed:', error);
-      throw new Error('Text-to-speech failed. The message will be shown as text instead.');
+      console.error('❌ TTS playback failed:', error);
+      // Don't throw - TTS failure shouldn't break the voice command flow
     }
   }
 
-  // Conversation history management
-  private addToConversationHistory(userInput: string, agentResponse: string, screenContext: string) {
-    this.conversationHistory.push({
-      userInput,
-      agentResponse,
-      timestamp: Date.now(),
-      screenContext,
+  // Helper method to convert blob to base64
+  private async blobToBase64(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = (reader.result as string).split(',')[1];
+        resolve(base64String);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
     });
+  }
 
-    // Keep only recent conversation (last 5 exchanges)
-    if (this.conversationHistory.length > 5) {
-      this.conversationHistory = this.conversationHistory.slice(-5);
+  // Health check with proper typing
+  async checkHealth(): Promise<{
+    status: 'healthy' | 'degraded' | 'unhealthy';
+    backend: boolean;
+    audio: boolean;
+    message: string;
+  }> {
+    const health = {
+      status: 'healthy' as 'healthy' | 'degraded' | 'unhealthy',
+      backend: false,
+      audio: false,
+      message: 'AI Agent is ready',
+    };
+
+    try {
+      // Check backend connectivity
+      const backend = await this.getWorkingBackend();
+      health.backend = !!backend;
+
+      // Check audio permissions
+      const { status } = await Audio.getPermissionsAsync();
+      health.audio = status === 'granted';
+
+      // Determine overall status
+      if (!health.backend && !health.audio) {
+        health.status = 'unhealthy';
+        health.message = 'Backend and microphone unavailable';
+      } else if (!health.backend) {
+        health.status = 'degraded';
+        health.message = 'Backend unavailable - voice commands disabled';
+      } else if (!health.audio) {
+        health.status = 'degraded';
+        health.message = 'Microphone permission required';
+      }
+
+    } catch (error) {
+      health.status = 'unhealthy';
+      health.message = `Health check failed: ${error}`;
     }
+
+    return health;
   }
 
-  private getRecentConversationContext(): string[] {
-    return this.conversationHistory
-      .slice(-3) // Last 3 exchanges
-      .map(entry => `User: "${entry.userInput}" | Sam: "${entry.agentResponse}"`);
+  // Get conversation history for debugging
+  getConversationHistory() {
+    return [...this.conversationHistory];
   }
 
-  // Get agent capabilities for self-explanation
-  getCapabilities(): Record<string, string> {
+  // Clear conversation history
+  clearConversationHistory() {
+    this.conversationHistory = [];
+    console.log('🧹 Conversation history cleared');
+  }
+
+  // Get available capabilities
+  getCapabilities() {
     return { ...this.capabilities };
   }
 
-  // Clear conversation history (for privacy/reset)
-  clearConversationHistory(): void {
-    this.conversationHistory = [];
-    console.log('🧹 Bear AI conversation history cleared');
-  }
-
-  // Check agent health and capabilities
-  async checkHealth(): Promise<{
-    status: string;
-    capabilities: string[];
-    backendAvailable: boolean;
-    agentPersona: string;
-  }> {
-    try {
-      const workingBackendUrl = await this.getWorkingBackend();
-      
-      if (!workingBackendUrl) {
-        return {
-          status: 'offline',
-          capabilities: [],
-          backendAvailable: false,
-          agentPersona: 'Bear AI Assistant (Offline)',
-        };
-      }
-
-      const response = await fetch(`${workingBackendUrl}/ai-agent/health`);
-      const healthData = await response.json();
-
-      return {
-        status: healthData.status || 'unknown',
-        capabilities: healthData.capabilities || Object.keys(this.capabilities),
-        backendAvailable: true,
-        agentPersona: healthData.agent_persona || 'Bear - Field Technician Assistant',
-      };
-
-    } catch (error) {
-      console.error('❌ Health check failed:', error);
-      return {
-        status: 'error',
-        capabilities: [],
-        backendAvailable: false,
-        agentPersona: 'Bear AI Assistant (Error)',
-      };
-    }
-  }
-
-  // Utility: Convert ArrayBuffer to base64
-  private arrayBufferToBase64(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer);
-    let binary = '';
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-  }
-
-  // Enhanced cleanup method
+  // Cleanup method
   async cleanup(): Promise<void> {
     try {
       // Stop any ongoing recording
@@ -469,41 +451,9 @@ export class AIAgentService {
         playsInSilentModeIOS: true,
       });
 
-      console.log('🧹 Bear AI Agent cleanup completed');
+      console.log('🧹 AI Agent service cleaned up');
     } catch (error) {
       console.warn('⚠️ Cleanup warning:', error);
     }
   }
-
-  // Test method for debugging
-  async testConnectivity(): Promise<{
-    backendReachable: boolean;
-    audioPermissions: boolean;
-    lastError?: string;
-  }> {
-    try {
-      // Test backend connectivity
-      const backendUrl = await this.getWorkingBackend();
-      const backendReachable = !!backendUrl;
-
-      // Test audio permissions
-      const { status } = await Audio.requestPermissionsAsync();
-      const audioPermissions = status === 'granted';
-
-      return {
-        backendReachable,
-        audioPermissions,
-      };
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      return {
-        backendReachable: false,
-        audioPermissions: false,
-        lastError: errorMessage,
-      };
-    }
-  }
 }
-
-export default AIAgentService;
