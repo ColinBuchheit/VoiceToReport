@@ -1,6 +1,6 @@
 // types/aiAgent.ts - Enhanced Types for Natural AI Agent
 export interface ScreenContext {
-  screenName: 'home' | 'transcript' | 'summary' | 'pdfPreview';
+  screenName: 'home' | 'transcript' | 'summary' | 'pdfPreview' | 'closeout_summary' | 'emailConfirmation';
   visibleFields: FieldInfo[];
   currentValues: Record<string, any>;
   availableActions: string[];
@@ -85,6 +85,7 @@ export interface AIAgentProps {
   onModeToggle?: () => void;
   onNavigate?: (screen: string, params?: any) => void;
   onAction?: (actionName: string, params?: any) => void;
+  onCustomAction?: (action: string) => void; // Added this missing prop
   onCapabilityExplain?: (capability: string) => void;
   onSuggestionProvided?: (suggestion: string, targetField?: string) => void;
   position?: 'bottom-right' | 'bottom-left' | 'bottom-center';
@@ -118,6 +119,49 @@ export interface AgentHealthStatus {
     tts: 'available' | 'unavailable';
     gpt: 'available' | 'unavailable';
   };
+}
+
+// Updated summary structure for closeout reports
+export interface CloseoutSummary {
+  // Closeout Notes
+  onsite_contact?: string;
+  support_contact?: string;
+  work_completed?: string;
+  delays?: string;
+  troubleshooting_steps?: string;
+  scope_completed?: string;
+  released_by?: string;
+  release_code?: string;
+  return_tracking?: string;
+  
+  // Expenses
+  expenses?: string;
+  materials_used?: string;
+  
+  // Out of Scope
+  out_of_scope_work?: string;
+  
+  // Photos
+  photos_uploaded?: string;
+  
+  // Additional context
+  location?: string;
+  datetime?: string;
+  technician_name?: string;
+  
+  // Legacy fields for backward compatibility
+  taskDescription?: string;
+  outcome?: string;
+  notes?: string;
+}
+
+// Maintain backward compatibility with legacy summary structure
+export interface LegacySummary {
+  taskDescription: string;
+  location?: string;
+  datetime?: string;
+  outcome?: string;
+  notes?: string;
 }
 
 export interface ConnectivityTestResult {
@@ -212,98 +256,6 @@ export class TTSError extends AIAgentError {
     this.name = 'TTSError';
   }
 }
-
-// Configuration interfaces
-export interface AIAgentConfig {
-  apiEndpoints: {
-    transcription: string;
-    voiceCommand: string;
-    textToSpeech: string;
-    health: string;
-  };
-  audio: {
-    recordingPreset: any; // Audio.RecordingOptionsPresets
-    maxRecordingDuration: number;
-    minRecordingDuration: number;
-  };
-  networking: {
-    timeout: number;
-    retryAttempts: number;
-    connectionCacheDuration: number;
-  };
-  conversation: {
-    maxHistoryEntries: number;
-    contextWindowSize: number;
-  };
-  ui: {
-    animationDuration: number;
-    feedbackHaptics: boolean;
-    showDebugLogs: boolean;
-  };
-}
-
-// Default configuration
-export const DEFAULT_AI_AGENT_CONFIG: AIAgentConfig = {
-  apiEndpoints: {
-    transcription: '/transcribe',
-    voiceCommand: '/voice-command',
-    textToSpeech: '/text-to-speech',
-    health: '/ai-agent/health',
-  },
-  audio: {
-    recordingPreset: 'HIGH_QUALITY',
-    maxRecordingDuration: 30000, // 30 seconds
-    minRecordingDuration: 500, // 0.5 seconds
-  },
-  networking: {
-    timeout: 30000, // 30 seconds
-    retryAttempts: 3,
-    connectionCacheDuration: 60000, // 1 minute
-  },
-  conversation: {
-    maxHistoryEntries: 5,
-    contextWindowSize: 3,
-  },
-  ui: {
-    animationDuration: 300,
-    feedbackHaptics: true,
-    showDebugLogs: false,
-  },
-};
-
-// Agent persona definition
-export const SAM_AI_PERSONA: AgentPersonality = {
-  name: 'Sam',
-  role: 'Field Technician AI Assistant',
-  traits: [
-    'helpful',
-    'efficient',
-    'understanding',
-    'patient',
-    'knowledgeable',
-    'conversational'
-  ],
-  communicationStyle: {
-    formality: 'professional',
-    verbosity: 'adaptive',
-    empathy: 'high',
-  },
-  expertise: [
-    'hardware replacement',
-    'installations',
-    'cable routing',
-    'network setup',
-    'IT services',
-    'technical documentation',
-    'report writing'
-  ],
-  limitations: [
-    'cannot perform physical tasks',
-    'requires internet connection',
-    'voice recognition dependent on audio quality',
-    'limited to provided field information'
-  ],
-};
 
 // Validation helpers
 export const validateScreenContext = (context: any): context is ScreenContext => {

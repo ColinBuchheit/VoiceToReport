@@ -1,4 +1,4 @@
-// screens/TranscriptScreen.tsx - SILENT VOICE UPDATES (NO ANNOYING POPUPS)
+// screens/TranscriptScreen.tsx - FIXED FOR CLOSEOUT COMPATIBILITY
 import React, { useState } from 'react';
 import {
   View,
@@ -35,7 +35,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Enhanced screen context for Bear AI
+  // Enhanced screen context for AI
   const getEnhancedScreenContext = (): ScreenContext => {
     const fields: FieldInfo[] = [
       {
@@ -72,25 +72,26 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         'make_professional',
       ],
       mode: isEditing ? 'edit' : 'preview',
-      agentCapabilities: [
-        'field_updates',
-        'wording_help',
-        'questions',
-        'voice_control',
-        'context_aware',
-      ],
-      timestamp: new Date().toISOString(),
     };
   };
 
   const handleGenerateSummary = async () => {
     try {
       setIsProcessing(true);
-      const result = await generateSummary(transcription);
+      const response = await generateSummary(transcription);
+      
+      // The API returns legacy format, so use it directly
+      const legacySummary = {
+        taskDescription: response.summary.taskDescription || '',
+        location: response.summary.location || '',
+        datetime: response.summary.datetime || '',
+        outcome: response.summary.outcome || '',
+        notes: response.summary.notes || ''
+      };
       
       navigation.navigate('Summary', {
         transcription,
-        summary: result.summary,
+        summary: legacySummary,
       });
     } catch (error) {
       console.error('Error generating summary:', error);
@@ -100,174 +101,33 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     }
   };
 
-  // FIXED: Silent AI field updates (no annoying popups)
-  const handleAIFieldUpdate = (fieldName: string, value: string) => {
-    console.log(`🤖 Bear AI silently updating field: ${fieldName} = ${value}`);
-    
+  const handleFieldUpdate = (fieldName: string, value: string) => {
     if (fieldName === 'transcription') {
       setTranscription(value);
-      // REMOVED: No more annoying popup notifications for voice updates
-      // The AI's voice response is confirmation enough
     }
   };
 
-  // FIXED: Silent mode toggle (no popup)
-  const handleAIModeToggle = () => {
-    const newMode = !isEditing;
-    console.log(`🤖 Bear AI silently toggling edit mode to: ${newMode}`);
-    setIsEditing(newMode);
-    
-    // REMOVED: No popup - the AI's voice response is confirmation enough
-    // Plus the user can see the mode change visually
+  const handleModeToggle = () => {
+    setIsEditing(!isEditing);
   };
 
-  const handleAIAction = (actionName: string, params?: any) => {
-    console.log(`🤖 Bear AI executing action: ${actionName}`, params);
-    
-    switch (actionName) {
-      case 'generate_summary':
-        handleGenerateSummary();
-        break;
-      case 'clear_transcription':
-        // Only show confirmation for destructive actions
-        Alert.alert(
-          'Clear Transcription',
-          'Are you sure you want to clear all transcription text?',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Clear', 
-              style: 'destructive',
-              onPress: () => setTranscription('')
-            }
-          ]
-        );
-        break;
-      case 'suggest_improvements':
-        handleSuggestImprovements();
-        break;
-      case 'make_professional':
-        handleMakeProfessional();
-        break;
-      case 'toggle_edit_mode':
-        handleAIModeToggle();
-        break;
-      default:
-        // REMOVED: No generic action popup
-        console.log(`🤖 Bear executed: ${actionName}`);
-    }
-  };
-
-  // FIXED: Only show capability explanations when explicitly asked
-  const handleCapabilityExplain = (capability: string) => {
-    console.log(`🤖 Bear explaining capability: ${capability}`);
-    
-    const explanations = {
-      field_updates: "I can help you edit and improve your transcription text. Just say 'change the transcription to...' or 'update the text'.",
-      wording_help: "I can make your transcription sound more professional. Ask me 'how does this sound?' or 'make this more professional'.",
-      questions: "You can ask me what I can do, or just chat about improving your transcription.",
-      voice_control: "I respond to natural voice commands. Just tap me and start talking!",
-      context_aware: "I understand you're working with transcription text and can help make it better.",
-    };
-    
-    const explanation = explanations[capability as keyof typeof explanations] || 
-      `I can help with ${capability}. Just tap me and ask!`;
-    
-    // Only show popup for explicit capability requests
-    Alert.alert(
-      `${capability.replace('_', ' ').toUpperCase()} Capability`,
-      explanation,
-      [{ text: 'Got it!' }],
-      { cancelable: true }
-    );
-  };
-
-  // FIXED: Smart suggestion handling - only popup for major changes
-  const handleSuggestionProvided = (suggestion: string, targetField?: string) => {
-    console.log(`🤖 Bear providing suggestion for ${targetField}: ${suggestion}`);
-    
-    // Check if this is a minor improvement (small text changes) or major rewrite
-    const currentText = transcription || '';
-    const similarityRatio = calculateSimilarity(currentText, suggestion);
-    const isMinorChange = similarityRatio > 0.7 || suggestion.length < 100;
-    
-    if (isMinorChange && targetField === 'transcription') {
-      // Apply minor improvements silently
-      setTranscription(suggestion);
-      console.log(`✅ Applied minor transcription improvement silently`);
-    } else {
-      // Only show popup for major changes
-      Alert.alert(
-        'Suggestion from Bear AI',
-        `For your transcription: ${suggestion}`,
-        [
-          { text: 'Ignore', style: 'cancel' },
-          { 
-            text: 'Apply', 
-            onPress: () => {
-              if (targetField === 'transcription') {
-                setTranscription(suggestion);
-              }
-            }
-          }
-        ],
-        { cancelable: true }
-      );
-    }
-  };
-
-  // Helper function to calculate text similarity
-  const calculateSimilarity = (text1: string, text2: string): number => {
-    const words1 = text1.toLowerCase().split(/\s+/);
-    const words2 = text2.toLowerCase().split(/\s+/);
-    const commonWords = words1.filter(word => words2.includes(word));
-    return commonWords.length / Math.max(words1.length, words2.length);
-  };
-
-  const handleSuggestImprovements = () => {
-    // Example improvement suggestions
-    const suggestions = [
-      "Consider adding more specific details about the timeline",
-      "Include technical specifications that were mentioned",
-      "Add any follow-up actions that were discussed",
-      "Mention any challenges encountered during the work",
-    ];
-    
-    const randomSuggestion = suggestions[Math.floor(Math.random() * suggestions.length)];
-    handleSuggestionProvided(randomSuggestion, 'transcription');
-  };
-
-  const handleMakeProfessional = () => {
-    // Simulate making the transcription more professional
-    const professionalVersion = transcription
-      .replace(/\b(um|uh|like|you know)\b/gi, '') // Remove filler words
-      .replace(/\s+/g, ' ') // Clean up extra spaces
-      .trim()
-      .replace(/\bi\b/g, 'I') // Capitalize "I"
-      .replace(/^./, transcription.charAt(0).toUpperCase()); // Capitalize first letter
-      
-    if (professionalVersion !== transcription && professionalVersion.length > 0) {
-      // This is usually a minor improvement, apply silently
-      handleSuggestionProvided(professionalVersion, 'transcription');
-    } else {
-      // Only show this if no improvement was possible
-      console.log('📝 Transcription is already professional');
-    }
-  };
+  if (isProcessing) {
+    return <Loader message="Generating summary..." />;
+  }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
+    <KeyboardAvoidingView 
+      style={styles.container} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={styles.scrollContainer}>
         <View style={styles.header}>
-          <Text style={styles.title}>Transcription</Text>
+          <Text style={styles.title}>Voice Transcription</Text>
           <TouchableOpacity
-            style={styles.editButton}
+            style={[styles.editButton, isEditing && styles.editButtonActive]}
             onPress={() => setIsEditing(!isEditing)}
           >
-            <Text style={styles.editButtonText}>
+            <Text style={[styles.editButtonText, isEditing && styles.editButtonTextActive]}>
               {isEditing ? 'Done' : 'Edit'}
             </Text>
           </TouchableOpacity>
@@ -281,8 +141,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
               onChangeText={setTranscription}
               multiline
               textAlignVertical="top"
-              placeholder="Your voice recording transcription..."
-              placeholderTextColor="#999"
+              placeholder="Your voice recording transcription will appear here..."
             />
           ) : (
             <Text style={styles.transcriptionText}>
@@ -291,39 +150,31 @@ export default function TranscriptScreen({ navigation, route }: Props) {
           )}
         </View>
 
-        <TouchableOpacity
-          style={[
-            styles.generateButton,
-            (!transcription || transcription.trim().length === 0 || isProcessing) && styles.generateButtonDisabled
-          ]}
-          onPress={handleGenerateSummary}
-          disabled={!transcription || transcription.trim().length === 0 || isProcessing}
-        >
-          <Text style={styles.generateButtonText}>
-            {isProcessing ? 'Generating Summary...' : 'Generate Summary'}
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.actionButtons}>
+          <TouchableOpacity
+            style={styles.generateButton}
+            onPress={handleGenerateSummary}
+            disabled={!transcription || isProcessing}
+          >
+            <Text style={styles.generateButtonText}>
+              Generate Closeout Summary
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.clearButton}
+            onPress={() => setTranscription('')}
+          >
+            <Text style={styles.clearButtonText}>Clear</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
 
-      {/* Show loading overlay when processing */}
-      {isProcessing && <Loader />}
-
-      {/* ENHANCED AI Agent with silent operation */}
+      {/* AI VOICE ASSISTANT */}
       <AIAgent
         screenContext={getEnhancedScreenContext()}
-        onFieldUpdate={handleAIFieldUpdate}
-        onModeToggle={handleAIModeToggle}
-        onAction={handleAIAction}
-        onCapabilityExplain={handleCapabilityExplain}
-        onSuggestionProvided={handleSuggestionProvided}
-        position="bottom-right"
-        disabled={isProcessing}
-        showDebugInfo={__DEV__}
-        customStyle={{
-          buttonColor: '#00b894',
-          iconColor: '#ffffff',
-          size: 60,
-        }}
+        onFieldUpdate={handleFieldUpdate}
+        onModeToggle={handleModeToggle}
       />
     </KeyboardAvoidingView>
   );
@@ -332,72 +183,104 @@ export default function TranscriptScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#f8f9fa',
   },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 100, // Space for Bear AI button
+  scrollContainer: {
+    flex: 1,
+    paddingHorizontal: 20,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginVertical: 20,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#FF6B35',
+    color: '#2c3e50',
+    flex: 1,
   },
   editButton: {
-    backgroundColor: '#74b9ff',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    backgroundColor: '#3498db',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
     borderRadius: 8,
+    marginLeft: 10,
+  },
+  editButtonActive: {
+    backgroundColor: '#27ae60',
   },
   editButtonText: {
-    color: '#ffffff',
-    fontSize: 14,
+    color: 'white',
     fontWeight: '600',
+    fontSize: 14,
+  },
+  editButtonTextActive: {
+    color: 'white',
   },
   transcriptionCard: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: 'white',
     borderRadius: 12,
-    padding: 16,
+    padding: 20,
     marginBottom: 20,
-    minHeight: 200,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   transcriptionInput: {
     fontSize: 16,
-    lineHeight: 24,
-    color: '#333333',
+    color: '#2c3e50',
+    minHeight: 200,
     textAlignVertical: 'top',
-    minHeight: 150,
+    borderWidth: 1,
+    borderColor: '#bdc3c7',
+    borderRadius: 8,
+    padding: 12,
   },
   transcriptionText: {
     fontSize: 16,
+    color: '#2c3e50',
     lineHeight: 24,
-    color: '#333333',
+    minHeight: 200,
+  },
+  actionButtons: {
+    marginBottom: 20,
   },
   generateButton: {
-    backgroundColor: '#FF6B35',
-    borderRadius: 12,
+    backgroundColor: '#e74c3c',
     paddingVertical: 16,
+    borderRadius: 12,
     alignItems: 'center',
+    marginBottom: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  generateButtonDisabled: {
-    backgroundColor: '#cccccc',
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   generateButtonText: {
-    color: '#FFFFFF',
+    color: 'white',
     fontSize: 18,
+    fontWeight: 'bold',
+  },
+  clearButton: {
+    backgroundColor: '#95a5a6',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  clearButtonText: {
+    color: 'white',
+    fontSize: 14,
     fontWeight: '600',
   },
 });

@@ -1,26 +1,6 @@
 import axios from 'axios';
 import * as FileSystem from 'expo-file-system';
-
-// Try to import API_CONFIG, fallback to default config if not available
-let API_CONFIG: {
-  NGROK_URL: string;
-  LOCAL_URL: string;
-  BACKEND_URLS: string[];
-};
-
-try {
-  const config = require('./api-config');
-  API_CONFIG = config.API_CONFIG;
-} catch (error) {
-  console.warn('⚠️ API config not found, using fallback configuration');
-  API_CONFIG = {
-    NGROK_URL: 'http://localhost:8000',
-    LOCAL_URL: 'http://localhost:8000',
-    BACKEND_URLS: [
-      'http://localhost:8000'
-    ]
-  };
-}
+import { API_CONFIG } from './api-config';
 
 interface TranscriptionResponse {
   transcription: string;
@@ -34,6 +14,46 @@ interface SummaryResponse {
     outcome?: string;
     notes?: string;
   };
+}
+
+// Updated summary structure for closeout reports
+interface CloseoutSummary {
+  // Closeout Notes
+  onsite_contact?: string;
+  support_contact?: string;
+  work_completed?: string;
+  delays?: string;
+  troubleshooting_steps?: string;
+  scope_completed?: string;
+  released_by?: string;
+  release_code?: string;
+  return_tracking?: string;
+  
+  // Expenses
+  expenses?: string;
+  materials_used?: string;
+  
+  // Out of Scope
+  out_of_scope_work?: string;
+  
+  // Photos
+  photos_uploaded?: string;
+  
+  // Additional context
+  location?: string;
+  datetime?: string;
+  technician_name?: string;
+  
+  // Legacy fields for backward compatibility
+  taskDescription?: string;
+  outcome?: string;
+  notes?: string;
+}
+
+interface EmailResponse {
+  success: boolean;
+  message: string;
+  recipients: string[];
 }
 
 // Test network connectivity to all possible backends
@@ -52,7 +72,7 @@ async function findWorkingBackend(): Promise<string | null> {
         signal: controller.signal,
         headers: {
           'Accept': 'application/json',
-          'User-Agent': 'VoiceReportApp/1.0',
+          'User-Agent': 'VoiceReportApp/2.0',
         },
       });
       
@@ -106,7 +126,7 @@ export async function transcribeAudio(audioUri: string): Promise<TranscriptionRe
     const response = await axios.post(`${workingBackendUrl}/transcribe`, payload, {
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'VoiceReportApp/1.0',
+        'User-Agent': 'VoiceReportApp/2.0',
       },
       timeout: 60000,
     });
@@ -150,7 +170,7 @@ export async function generateSummary(transcription: string): Promise<SummaryRes
     const response = await axios.post(`${workingBackendUrl}/summarize`, payload, {
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'VoiceReportApp/1.0',
+        'User-Agent': 'VoiceReportApp/2.0',
       },
       timeout: 30000,
     });
@@ -190,7 +210,7 @@ export async function generatePDF(data: {
     const response = await axios.post(`${workingBackendUrl}/generate-pdf`, payload, {
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'VoiceReportApp/1.0',
+        'User-Agent': 'VoiceReportApp/2.0',
       },
       timeout: 30000,
       responseType: 'arraybuffer', // Important: PDF comes as binary data
@@ -212,6 +232,44 @@ export async function generatePDF(data: {
   } catch (error) {
     console.error('PDF generation failed:', error);
     throw new Error('Failed to generate PDF. Please check your connection and try again.');
+  }
+}
+
+// NEW: Send closeout email function
+export async function sendCloseoutEmail(data: {
+  summary: CloseoutSummary;
+  transcription: string;
+  technician_name?: string;
+}): Promise<EmailResponse> {
+  const workingBackendUrl = await findWorkingBackend();
+  
+  if (!workingBackendUrl) {
+    throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
+  }
+
+  try {
+    console.log(`📧 Sending closeout email using: ${workingBackendUrl}`);
+    
+    // Create request payload matching backend expectations (/send-email endpoint)
+    const payload = {
+      summary: data.summary,
+      transcription: data.transcription,
+      technician_name: data.technician_name
+    };
+    
+    const response = await axios.post(`${workingBackendUrl}/send-email`, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'VoiceReportApp/2.0',
+      },
+      timeout: 30000,
+    });
+
+    console.log(`📧 Email sent successfully to ${response.data.recipients.length} recipients`);
+    return response.data;
+  } catch (error) {
+    console.error('Email sending failed:', error);
+    throw new Error('Failed to send closeout email. Please check your connection and try again.');
   }
 }
 
@@ -245,6 +303,24 @@ export async function getBackendInfo(): Promise<any> {
   } catch (error) {
     console.error('Failed to get backend info:', error);
     throw new Error('Failed to get backend information');
+  }
+}
+
+export async function testEmailConfiguration(): Promise<any> {
+  const workingBackendUrl = await findWorkingBackend();
+  
+  if (!workingBackendUrl) {
+    throw new Error('No backend server available');
+  }
+
+  try {
+    const response = await axios.get(`${workingBackendUrl}/test-email`, {
+      timeout: 10000,
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Email test failed:', error);
+    throw new Error('Failed to test email configuration');
   }
 }
 

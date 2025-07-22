@@ -1,4 +1,4 @@
-// screens/SummaryScreen.tsx - SILENT VOICE UPDATES (NO ANNOYING POPUPS)
+// screens/SummaryScreen.tsx - UPDATED FOR CLOSEOUT REPORTS
 import React, { useState } from 'react';
 import {
   View,
@@ -8,16 +8,20 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
-  Image,
+  ActivityIndicator,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
-import { generatePDF } from '../services/api';
+import { sendCloseoutEmail, generatePDF } from '../services/api';
 import AIAgent from '../components/AIAgent';
-import { ScreenContext, FieldInfo } from '../types/aiAgent';
+import { useSummaryScreenContext } from '../hooks/useScreenContext';
+import { CloseoutSummary } from '../types/aiAgent';
 
-type SummaryScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Summary'>;
+type SummaryScreenNavigationProp = NativeStackNavigationProp<
+  RootStackParamList,
+  'Summary'
+>;
 type SummaryScreenRouteProp = RouteProp<RootStackParamList, 'Summary'>;
 
 interface Props {
@@ -25,110 +29,133 @@ interface Props {
   route: SummaryScreenRouteProp;
 }
 
+interface EditableFieldProps {
+  label: string;
+  value: string;
+  onChangeText: (text: string) => void;
+  isEditing: boolean;
+  multiline?: boolean;
+  placeholder?: string;
+}
+
+const EditableField: React.FC<EditableFieldProps> = ({
+  label,
+  value,
+  onChangeText,
+  isEditing,
+  multiline = false,
+  placeholder = '',
+}) => (
+  <View style={styles.fieldContainer}>
+    <Text style={styles.fieldLabel}>{label}</Text>
+    {isEditing ? (
+      <TextInput
+        style={[styles.fieldInput, multiline && styles.multilineInput]}
+        value={value}
+        onChangeText={onChangeText}
+        multiline={multiline}
+        textAlignVertical={multiline ? 'top' : 'center'}
+        placeholder={placeholder}
+      />
+    ) : (
+      <Text style={styles.fieldValue}>
+        {value || 'Not specified'}
+      </Text>
+    )}
+  </View>
+);
+
 export default function SummaryScreen({ navigation, route }: Props) {
-  const { transcription, summary } = route.params;
-  const [editableSummary, setEditableSummary] = useState(summary);
-  const [editableTranscription, setEditableTranscription] = useState(transcription);
-  const [isPreviewMode, setIsPreviewMode] = useState(true);
-  const [isGenerating, setIsGenerating] = useState(false);
+  // Convert legacy summary to closeout summary format with defaults
+  const initializeCloseoutSummary = (summary: any): CloseoutSummary => ({
+    // Map legacy fields to new structure
+    work_completed: summary.taskDescription || '',
+    scope_completed: summary.outcome || '',
+    notes: summary.notes || '',
+    location: summary.location || '',
+    datetime: summary.datetime || '',
+    
+    // Initialize new closeout fields
+    onsite_contact: summary.onsite_contact || '',
+    support_contact: summary.support_contact || '',
+    delays: summary.delays || '',
+    troubleshooting_steps: summary.troubleshooting_steps || '',
+    released_by: summary.released_by || '',
+    release_code: summary.release_code || '',
+    return_tracking: summary.return_tracking || '',
+    expenses: summary.expenses || '',
+    materials_used: summary.materials_used || '',
+    out_of_scope_work: summary.out_of_scope_work || '',
+    photos_uploaded: summary.photos_uploaded || '',
+    technician_name: summary.technician_name || '',
+    
+    // Keep legacy fields for backward compatibility
+    taskDescription: summary.taskDescription || '',
+    outcome: summary.outcome || '',
+  });
 
-  // Enhanced screen context for Sam AI
-  const getEnhancedScreenContext = (): ScreenContext => {
-    const fields: FieldInfo[] = [
-      {
-        name: 'taskDescription',
-        label: 'Task Description',
-        currentValue: editableSummary.taskDescription || '',
-        type: 'multiline',
-        isEditable: !isPreviewMode,
-        synonyms: ['task', 'description', 'work', 'job', 'what did you do', 'what was done', 'service'],
-        placeholder: 'Describe the work performed...',
-      },
-      {
-        name: 'location',
-        label: 'Location',
-        currentValue: editableSummary.location || '',
-        type: 'text',
-        isEditable: !isPreviewMode,
-        synonyms: ['location', 'place', 'where', 'site', 'address', 'client site'],
-        placeholder: 'e.g., Downtown Office Building',
-      },
-      {
-        name: 'datetime',
-        label: 'Date/Time',
-        currentValue: editableSummary.datetime || '',
-        type: 'text',
-        isEditable: !isPreviewMode,
-        synonyms: ['time', 'date', 'when', 'datetime', 'timestamp'],
-        placeholder: 'e.g., December 15, 2024 at 2:30 PM',
-      },
-      {
-        name: 'outcome',
-        label: 'Outcome',
-        currentValue: editableSummary.outcome || '',
-        type: 'multiline',
-        isEditable: !isPreviewMode,
-        synonyms: ['outcome', 'result', 'status', 'how did it go', 'completion status', 'success'],
-        placeholder: 'How did the task go? Was it completed successfully?',
-      },
-      {
-        name: 'notes',
-        label: 'Additional Notes',
-        currentValue: editableSummary.notes || '',
-        type: 'multiline',
-        isEditable: !isPreviewMode,
-        synonyms: ['notes', 'comments', 'additional', 'other', 'extra info', 'remarks'],
-        placeholder: 'Any additional information, observations, or follow-up needed...',
-      },
-      {
-        name: 'transcription',
-        label: 'Transcription',
-        currentValue: editableTranscription || '',
-        type: 'multiline',
-        isEditable: !isPreviewMode,
-        synonyms: ['transcription', 'transcript', 'recording', 'what I said', 'original recording'],
-        placeholder: 'Voice recording transcription...',
-      },
-    ];
+  const [editableSummary, setEditableSummary] = useState<CloseoutSummary>(
+    initializeCloseoutSummary(route.params.summary)
+  );
+  const [editableTranscription, setEditableTranscription] = useState(route.params.transcription);
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
-    return {
-      screenName: 'summary',
-      visibleFields: fields,
-      currentValues: {
-        ...editableSummary,
-        transcription: editableTranscription,
-      },
-      availableActions: [
-        'toggle_edit_mode',
-        'generate_pdf',
-        'save_summary',
-        'suggest_improvements',
-        'clear_field',
-        'add_current_time',
-        'add_current_date',
-      ],
-      mode: isPreviewMode ? 'preview' : 'edit',
-      agentCapabilities: [
-        'field_updates',
-        'wording_help',
-        'questions',
-        'voice_control',
-        'context_aware',
-      ],
-      timestamp: new Date().toISOString(),
-    };
-  };
+  // Enhanced screen context for AI
+  const screenContext = useSummaryScreenContext(
+    editableSummary,
+    isPreviewMode,
+    editableTranscription
+  );
 
-  const updateSummaryField = (field: keyof typeof editableSummary, value: string) => {
+  const updateSummaryField = (field: keyof CloseoutSummary, value: string) => {
     setEditableSummary(prev => ({
       ...prev,
       [field]: value
     }));
   };
 
+  const handleSendEmail = async () => {
+    try {
+      setIsSendingEmail(true);
+      
+      const emailResponse = await sendCloseoutEmail({
+        summary: editableSummary,
+        transcription: editableTranscription,
+        technician_name: editableSummary.technician_name
+      });
+      
+      Alert.alert(
+        'Email Sent Successfully! 📧',
+        `Closeout report has been sent to:\n\n${emailResponse.recipients.join('\n')}\n\nMessage: ${emailResponse.message}`,
+        [
+          {
+            text: 'Create New Report',
+            onPress: () => navigation.navigate('Home'),
+          },
+          {
+            text: 'Close',
+            style: 'cancel',
+          },
+        ]
+      );
+    } catch (error) {
+      console.error('Error sending email:', error);
+      Alert.alert(
+        'Email Failed',
+        error instanceof Error ? error.message : 'Failed to send email. Please check your connection and try again.',
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
+  // Keep PDF generation for backward compatibility
   const handleGeneratePDF = async () => {
     try {
-      setIsGenerating(true);
+      setIsGeneratingPDF(true);
       const pdfUrl = await generatePDF({
         summary: editableSummary,
         transcription: editableTranscription,
@@ -142,181 +169,196 @@ export default function SummaryScreen({ navigation, route }: Props) {
       console.error('Error generating PDF:', error);
       Alert.alert('Error', 'Failed to generate PDF');
     } finally {
-      setIsGenerating(false);
+      setIsGeneratingPDF(false);
     }
   };
 
-  // FIXED: Silent AI field updates (no annoying popups)
+  // AI field updates
   const handleAIFieldUpdate = (fieldName: string, value: string) => {
-    console.log(`🤖 Sam AI silently updating field: ${fieldName} = ${value}`);
+    console.log(`🤖 AI updating field: ${fieldName} = ${value}`);
     
     if (fieldName === 'transcription') {
       setEditableTranscription(value);
     } else if (fieldName in editableSummary) {
-      updateSummaryField(fieldName as keyof typeof editableSummary, value);
+      updateSummaryField(fieldName as keyof CloseoutSummary, value);
     }
-    
-    // REMOVED: No more annoying popup notifications for voice updates
-    // Voice AI should work seamlessly in the background
-    // The TTS response from the AI is confirmation enough
   };
 
-  // FIXED: Silent mode toggle (no popup)
+  // AI mode toggle
   const handleAIModeToggle = () => {
     const newMode = !isPreviewMode;
-    console.log(`🤖 Sam AI silently toggling mode to: ${newMode ? 'edit' : 'preview'}`);
-    setIsPreviewMode(!isPreviewMode);
-    
-    // REMOVED: No popup - the AI's voice response is confirmation enough
-    // Plus the user can see the mode change visually
+    console.log(`🤖 AI toggling mode to: ${newMode ? 'preview' : 'edit'}`);
+    setIsPreviewMode(newMode);
   };
 
-  const handleAIAction = (actionName: string, params?: any) => {
-    console.log(`🤖 Sam AI executing action: ${actionName}`, params);
-    
-    switch (actionName) {
-      case 'generate_pdf':
-        handleGeneratePDF();
-        break;
-      case 'toggle_edit_mode':
-        handleAIModeToggle();
-        break;
-      case 'add_current_time':
-        const currentTime = new Date().toLocaleTimeString();
-        updateSummaryField('datetime', `${editableSummary.datetime || ''} ${currentTime}`.trim());
-        break;
-      case 'add_current_date':
-        const currentDate = new Date().toLocaleDateString();
-        updateSummaryField('datetime', `${currentDate} ${editableSummary.datetime || ''}`.trim());
-        break;
-      case 'clear_field':
-        if (params && params.fieldName && params.fieldName in editableSummary) {
-          updateSummaryField(params.fieldName, '');
-        }
-        break;
-      case 'suggest_improvements':
-        handleSuggestImprovements();
-        break;
-      case 'save_summary':
-        // FIXED: Silent save (no popup)
-        console.log('📝 Summary saved by AI');
-        break;
-      default:
-        // REMOVED: No generic action popup
-        console.log(`🤖 Sam executed: ${actionName}`);
+  // AI custom actions
+  const handleAICustomAction = (action: string) => {
+    console.log(`🤖 AI custom action: ${action}`);
+    if (action === 'send_email') {
+      handleSendEmail();
+    } else if (action === 'generate_pdf') {
+      handleGeneratePDF();
+    } else if (action === 'add_current_time') {
+      const now = new Date().toLocaleString();
+      updateSummaryField('datetime', now);
     }
-  };
-
-  // FIXED: Only show capability explanations when explicitly asked
-  const handleCapabilityExplain = (capability: string) => {
-    console.log(`🤖 Sam explaining capability: ${capability}`);
-    
-    const explanations = {
-      field_updates: "I can help you edit and improve any field in your summary. Just say 'change the task description to...' or 'update the location'.",
-      wording_help: "I can make your descriptions sound more professional. Ask me 'how does this sound?' or 'make this more professional'.",
-      questions: "You can ask me what I can do, or just chat about improving your summary.",
-      voice_control: "I respond to natural voice commands. Just tap me and start talking!",
-      context_aware: "I understand what screen you're on and can help with relevant tasks and fields.",
-    };
-    
-    const explanation = explanations[capability as keyof typeof explanations] || 
-      `I can help with ${capability}. Just tap me and ask!`;
-    
-    // Only show popup for explicit capability requests
-    Alert.alert(
-      `${capability.replace('_', ' ').toUpperCase()} Capability`,
-      explanation,
-      [{ text: 'Got it!' }],
-      { cancelable: true }
-    );
-  };
-
-  // FIXED: Only show suggestion popup if user needs to approve major changes
-  const handleSuggestionProvided = (suggestion: string, targetField?: string) => {
-    console.log(`🤖 Sam providing suggestion for ${targetField}: ${suggestion}`);
-    
-    const fieldLabel = targetField ? 
-      getEnhancedScreenContext().visibleFields.find(f => f.name === targetField)?.label || targetField :
-      'your summary';
-    
-    // Only show suggestion popup for major changes that need approval
-    const isMinorUpdate = suggestion.length < 50 && targetField !== 'taskDescription';
-    
-    if (isMinorUpdate) {
-      // Apply minor suggestions silently
-      if (targetField && targetField in editableSummary) {
-        updateSummaryField(targetField as keyof typeof editableSummary, suggestion);
-      } else if (targetField === 'transcription') {
-        setEditableTranscription(suggestion);
-      }
-      console.log(`✅ Applied minor suggestion silently: ${suggestion.substring(0, 30)}...`);
-    } else {
-      // Only show popup for major suggestions
-      Alert.alert(
-        'Suggestion from Sam AI',
-        `For ${fieldLabel}: ${suggestion}`,
-        [
-          { text: 'Ignore', style: 'cancel' },
-          { 
-            text: 'Apply', 
-            onPress: () => {
-              if (targetField && targetField in editableSummary) {
-                updateSummaryField(targetField as keyof typeof editableSummary, suggestion);
-              } else if (targetField === 'transcription') {
-                setEditableTranscription(suggestion);
-              }
-            }
-          }
-        ],
-        { cancelable: true }
-      );
-    }
-  };
-
-  const handleSuggestImprovements = () => {
-    // Example improvement suggestions
-    const suggestions = [
-      "Consider adding more specific technical details",
-      "Include time estimates for the work performed", 
-      "Add any follow-up actions that are needed",
-      "Mention any challenges encountered and how they were resolved",
-    ];
-    
-    const randomSuggestion = suggestions[Math.floor(Math.random() * suggestions.length)];
-    handleSuggestionProvided(randomSuggestion, 'taskDescription');
   };
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={styles.scrollContainer} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <Text style={styles.title}>Summary</Text>
+          <Text style={styles.title}>Field Service Closeout Report</Text>
           <TouchableOpacity
-            style={styles.toggleButton}
+            style={[styles.modeButton, isPreviewMode && styles.previewModeButton]}
             onPress={() => setIsPreviewMode(!isPreviewMode)}
           >
-            <Text style={styles.toggleButtonText}>
-              {isPreviewMode ? 'Edit' : 'Preview'}
+            <Text style={[styles.modeButtonText, isPreviewMode && styles.previewModeText]}>
+              {isPreviewMode ? 'Preview' : 'Edit'}
             </Text>
           </TouchableOpacity>
         </View>
 
-        <View style={styles.summaryCard}>
+        {/* CLOSEOUT NOTES SECTION */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>📋 CLOSEOUT NOTES</Text>
+          
           <EditableField
-            label="Task Description"
-            value={editableSummary.taskDescription || ''}
-            onChangeText={(text) => updateSummaryField('taskDescription', text)}
+            label="Who did you meet with on-site?"
+            value={editableSummary.onsite_contact || ''}
+            onChangeText={(text) => updateSummaryField('onsite_contact', text)}
             isEditing={!isPreviewMode}
-            multiline
-            placeholder="Describe the work that was performed..."
+            placeholder="Name and role of on-site contact person..."
           />
 
+          <EditableField
+            label="Who did you work with for support?"
+            value={editableSummary.support_contact || ''}
+            onChangeText={(text) => updateSummaryField('support_contact', text)}
+            isEditing={!isPreviewMode}
+            placeholder="Support team members or remote assistance..."
+          />
+
+          <EditableField
+            label="What work was completed?"
+            value={editableSummary.work_completed || ''}
+            onChangeText={(text) => updateSummaryField('work_completed', text)}
+            isEditing={!isPreviewMode}
+            multiline
+            placeholder="Describe all tasks and work that was completed..."
+          />
+
+          <EditableField
+            label="Were there any delays?"
+            value={editableSummary.delays || ''}
+            onChangeText={(text) => updateSummaryField('delays', text)}
+            isEditing={!isPreviewMode}
+            multiline
+            placeholder="Any delays encountered and reasons..."
+          />
+
+          <EditableField
+            label="What troubleshooting steps did you take?"
+            value={editableSummary.troubleshooting_steps || ''}
+            onChangeText={(text) => updateSummaryField('troubleshooting_steps', text)}
+            isEditing={!isPreviewMode}
+            multiline
+            placeholder="Describe troubleshooting steps and problem-solving approaches..."
+          />
+
+          <EditableField
+            label="Was the scope completed successfully?"
+            value={editableSummary.scope_completed || ''}
+            onChangeText={(text) => updateSummaryField('scope_completed', text)}
+            isEditing={!isPreviewMode}
+            placeholder="Yes/No and any additional details..."
+          />
+
+          <EditableField
+            label="Who released you?"
+            value={editableSummary.released_by || ''}
+            onChangeText={(text) => updateSummaryField('released_by', text)}
+            isEditing={!isPreviewMode}
+            placeholder="Name and role of person who released you..."
+          />
+
+          <EditableField
+            label="Release code (if any)"
+            value={editableSummary.release_code || ''}
+            onChangeText={(text) => updateSummaryField('release_code', text)}
+            isEditing={!isPreviewMode}
+            placeholder="Authorization or release code..."
+          />
+
+          <EditableField
+            label="Return tracking number (if any)"
+            value={editableSummary.return_tracking || ''}
+            onChangeText={(text) => updateSummaryField('return_tracking', text)}
+            isEditing={!isPreviewMode}
+            placeholder="Tracking number for returned items..."
+          />
+        </View>
+
+        {/* EXPENSES SECTION */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>💰 EXPENSES</Text>
+          
+          <EditableField
+            label="Any expenses (parking fees, etc)?"
+            value={editableSummary.expenses || ''}
+            onChangeText={(text) => updateSummaryField('expenses', text)}
+            isEditing={!isPreviewMode}
+            multiline
+            placeholder="Parking fees, tolls, meals, or other expenses..."
+          />
+
+          <EditableField
+            label="What materials did you use?"
+            value={editableSummary.materials_used || ''}
+            onChangeText={(text) => updateSummaryField('materials_used', text)}
+            isEditing={!isPreviewMode}
+            multiline
+            placeholder="Parts, supplies, equipment used during service..."
+          />
+        </View>
+
+        {/* OUT OF SCOPE SECTION */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>⚠️ OUT OF SCOPE</Text>
+          
+          <EditableField
+            label="Out of scope work and who approved it"
+            value={editableSummary.out_of_scope_work || ''}
+            onChangeText={(text) => updateSummaryField('out_of_scope_work', text)}
+            isEditing={!isPreviewMode}
+            multiline
+            placeholder="Any additional work performed and approval details..."
+          />
+        </View>
+
+        {/* PHOTOS SECTION */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>📸 PHOTOS</Text>
+          
+          <EditableField
+            label="How many photos did you upload?"
+            value={editableSummary.photos_uploaded || ''}
+            onChangeText={(text) => updateSummaryField('photos_uploaded', text)}
+            isEditing={!isPreviewMode}
+            placeholder="Number of photos and brief description..."
+          />
+        </View>
+
+        {/* ADDITIONAL INFO SECTION */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>ℹ️ ADDITIONAL INFO</Text>
+          
           <EditableField
             label="Location"
             value={editableSummary.location || ''}
             onChangeText={(text) => updateSummaryField('location', text)}
             isEditing={!isPreviewMode}
-            placeholder="Where did this work take place?"
+            placeholder="Service location address or description..."
           />
 
           <EditableField
@@ -324,16 +366,15 @@ export default function SummaryScreen({ navigation, route }: Props) {
             value={editableSummary.datetime || ''}
             onChangeText={(text) => updateSummaryField('datetime', text)}
             isEditing={!isPreviewMode}
-            placeholder="When was this work performed?"
+            placeholder="Date and time of service..."
           />
 
           <EditableField
-            label="Outcome"
-            value={editableSummary.outcome || ''}
-            onChangeText={(text) => updateSummaryField('outcome', text)}
+            label="Technician Name"
+            value={editableSummary.technician_name || ''}
+            onChangeText={(text) => updateSummaryField('technician_name', text)}
             isEditing={!isPreviewMode}
-            multiline
-            placeholder="How did the task go? Was it completed successfully?"
+            placeholder="Your name..."
           />
 
           <EditableField
@@ -342,12 +383,13 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('notes', text)}
             isEditing={!isPreviewMode}
             multiline
-            placeholder="Any additional information or follow-up needed?"
+            placeholder="Any additional information or follow-up needed..."
           />
         </View>
 
+        {/* ORIGINAL TRANSCRIPTION SECTION */}
         <View style={styles.transcriptionSection}>
-          <Text style={styles.sectionTitle}>Original Transcription</Text>
+          <Text style={styles.sectionTitle}>🎙️ ORIGINAL TRANSCRIPTION</Text>
           <View style={styles.transcriptionCard}>
             {!isPreviewMode ? (
               <TextInput
@@ -366,125 +408,123 @@ export default function SummaryScreen({ navigation, route }: Props) {
           </View>
         </View>
 
-        <TouchableOpacity
-          style={[styles.generateButton, isGenerating && styles.generateButtonDisabled]}
-          onPress={handleGeneratePDF}
-          disabled={isGenerating}
-        >
-          <Text style={styles.generateButtonText}>
-            {isGenerating ? 'Generating PDF...' : 'Generate PDF Report'}
+        {/* ACTION BUTTONS */}
+        <View style={styles.actionButtonsContainer}>
+          {/* PRIMARY: Send Email Button */}
+          <TouchableOpacity
+            style={[styles.sendButton, isSendingEmail && styles.sendButtonDisabled]}
+            onPress={handleSendEmail}
+            disabled={isSendingEmail}
+          >
+            {isSendingEmail ? (
+              <View style={styles.sendingContainer}>
+                <ActivityIndicator size="small" color="#fff" />
+                <Text style={styles.sendButtonText}>Sending Email...</Text>
+              </View>
+            ) : (
+              <Text style={styles.sendButtonText}>📧 Send Closeout Email</Text>
+            )}
+          </TouchableOpacity>
+
+          {/* SECONDARY: Generate PDF Button (for backward compatibility) */}
+          <TouchableOpacity
+            style={[styles.pdfButton, isGeneratingPDF && styles.pdfButtonDisabled]}
+            onPress={handleGeneratePDF}
+            disabled={isGeneratingPDF}
+          >
+            {isGeneratingPDF ? (
+              <View style={styles.sendingContainer}>
+                <ActivityIndicator size="small" color="#fff" />
+                <Text style={styles.pdfButtonText}>Generating PDF...</Text>
+              </View>
+            ) : (
+              <Text style={styles.pdfButtonText}>📄 Generate PDF (Legacy)</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.recipientsInfo}>
+          <Text style={styles.recipientsTitle}>Email Recipients:</Text>
+          <Text style={styles.recipientsText}>
+            • russell.dummerth@beartechs.com{'\n'}
+            • austin.davenport@beartechs.com{'\n'}
+            • todd.davenport@beartechs.com
           </Text>
-        </TouchableOpacity>
+        </View>
       </ScrollView>
 
-      {/* ENHANCED AI Agent with silent operation */}
+      {/* AI VOICE ASSISTANT */}
       <AIAgent
-        screenContext={getEnhancedScreenContext()}
+        screenContext={screenContext}
         onFieldUpdate={handleAIFieldUpdate}
         onModeToggle={handleAIModeToggle}
-        onAction={handleAIAction}
-        onCapabilityExplain={handleCapabilityExplain}
-        onSuggestionProvided={handleSuggestionProvided}
-        position="bottom-right"
-        disabled={isGenerating}
-        showDebugInfo={__DEV__}
-        customStyle={{
-          buttonColor: '#00b894',
-          iconColor: '#ffffff',
-          size: 60,
-        }}
+        onCustomAction={handleAICustomAction}
       />
     </View>
   );
 }
 
-// Enhanced Editable Field Component
-interface EditableFieldProps {
-  label: string;
-  value: string;
-  onChangeText: (text: string) => void;
-  isEditing: boolean;
-  multiline?: boolean;
-  placeholder?: string;
-}
-
-const EditableField: React.FC<EditableFieldProps> = ({
-  label,
-  value,
-  onChangeText,
-  isEditing,
-  multiline = false,
-  placeholder = '',
-}) => {
-  const displayValue = value || placeholder;
-  const isEmpty = !value;
-
-  return (
-    <View style={styles.fieldContainer}>
-      <Text style={styles.fieldLabel}>{label}:</Text>
-      {isEditing ? (
-        <TextInput
-          style={[
-            styles.fieldInput,
-            multiline && styles.fieldInputMultiline,
-          ]}
-          value={value}
-          onChangeText={onChangeText}
-          multiline={multiline}
-          textAlignVertical={multiline ? 'top' : 'center'}
-          placeholder={placeholder}
-          placeholderTextColor="#999"
-        />
-      ) : (
-        <Text style={[
-          styles.fieldValue,
-          isEmpty && styles.fieldValueEmpty,
-        ]}>
-          {displayValue}
-        </Text>
-      )}
-    </View>
-  );
-};
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#f8f9fa',
   },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 100, // Space for AI Agent button
+  scrollContainer: {
+    flex: 1,
+    paddingHorizontal: 20,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginVertical: 20,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#FF6B35',
+    color: '#2c3e50',
+    flex: 1,
   },
-  toggleButton: {
-    backgroundColor: '#74b9ff',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+  modeButton: {
+    backgroundColor: '#3498db',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
     borderRadius: 8,
+    marginLeft: 10,
   },
-  toggleButtonText: {
-    color: '#ffffff',
-    fontSize: 14,
+  previewModeButton: {
+    backgroundColor: '#27ae60',
+  },
+  modeButtonText: {
+    color: 'white',
     fontWeight: '600',
+    fontSize: 14,
   },
-  summaryCard: {
-    backgroundColor: '#f8f9fa',
+  previewModeText: {
+    color: 'white',
+  },
+  sectionContainer: {
+    backgroundColor: 'white',
     borderRadius: 12,
     padding: 16,
     marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 16,
+    borderBottomWidth: 2,
+    borderBottomColor: '#ecf0f1',
+    paddingBottom: 8,
   },
   fieldContainer: {
     marginBottom: 16,
@@ -492,78 +532,122 @@ const styles = StyleSheet.create({
   fieldLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#495057',
-    marginBottom: 4,
+    color: '#34495e',
+    marginBottom: 8,
   },
   fieldInput: {
     borderWidth: 1,
-    borderColor: '#ced4da',
+    borderColor: '#bdc3c7',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#ffffff',
-    color: '#333333',
+    backgroundColor: '#fff',
+    minHeight: 44,
   },
-  fieldInputMultiline: {
+  multilineInput: {
     minHeight: 80,
     textAlignVertical: 'top',
   },
   fieldValue: {
     fontSize: 16,
-    color: '#333333',
-    lineHeight: 22,
-    padding: 4,
-  },
-  fieldValueEmpty: {
-    color: '#999999',
-    fontStyle: 'italic',
+    color: '#2c3e50',
+    padding: 12,
+    backgroundColor: '#ecf0f1',
+    borderRadius: 8,
+    minHeight: 44,
   },
   transcriptionSection: {
     marginBottom: 20,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FF6B35',
-    marginBottom: 12,
-  },
   transcriptionCard: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: 'white',
     borderRadius: 12,
     padding: 16,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-    minHeight: 120,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   transcriptionInput: {
     fontSize: 14,
-    lineHeight: 20,
-    color: '#333333',
+    color: '#2c3e50',
+    minHeight: 120,
     textAlignVertical: 'top',
-    minHeight: 100,
+    borderWidth: 1,
+    borderColor: '#bdc3c7',
+    borderRadius: 8,
+    padding: 12,
   },
   transcriptionText: {
     fontSize: 14,
+    color: '#2c3e50',
     lineHeight: 20,
-    color: '#333333',
+    minHeight: 120,
   },
-  generateButton: {
-    backgroundColor: '#FF6B35',
-    borderRadius: 12,
+  actionButtonsContainer: {
+    marginBottom: 16,
+  },
+  sendButton: {
+    backgroundColor: '#e74c3c',
     paddingVertical: 16,
+    borderRadius: 12,
     alignItems: 'center',
+    marginBottom: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
-  generateButtonDisabled: {
-    backgroundColor: '#cccccc',
+  sendButtonDisabled: {
+    backgroundColor: '#bdc3c7',
   },
-  generateButtonText: {
-    color: '#FFFFFF',
+  sendButtonText: {
+    color: 'white',
     fontSize: 18,
+    fontWeight: 'bold',
+  },
+  pdfButton: {
+    backgroundColor: '#95a5a6',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  pdfButtonDisabled: {
+    backgroundColor: '#bdc3c7',
+  },
+  pdfButtonText: {
+    color: 'white',
+    fontSize: 14,
     fontWeight: '600',
+  },
+  sendingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  recipientsInfo: {
+    backgroundColor: '#e8f4fd',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 20,
+  },
+  recipientsTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 8,
+  },
+  recipientsText: {
+    fontSize: 12,
+    color: '#34495e',
+    lineHeight: 18,
   },
 });

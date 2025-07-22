@@ -1,27 +1,73 @@
-from pydantic import BaseModel, Field
-from typing import Optional
-from datetime import datetime
+# backend/models.py
+from pydantic import BaseModel
+from typing import Optional, Dict, Any, List
 
 class TranscribeRequest(BaseModel):
-    audio: str = Field(..., description="Base64 encoded audio data")
-    format: str = Field(default="m4a", description="Audio format (m4a, mp3, wav)")
+    audio: str  # base64 encoded audio
+    format: str = "m4a"
 
-class TranscribeResponse(BaseModel):
+class TranscriptionResponse(BaseModel):
     transcription: str
-
-class Summary(BaseModel):
-    taskDescription: str
-    location: Optional[str] = None
-    datetime: Optional[str] = None
-    outcome: Optional[str] = None
-    notes: Optional[str] = None
 
 class SummarizeRequest(BaseModel):
     transcription: str
 
-class SummarizeResponse(BaseModel):
-    summary: Summary
+# Updated summary structure for closeout reports
+class CloseoutSummary(BaseModel):
+    # Closeout Notes
+    onsite_contact: Optional[str] = None
+    support_contact: Optional[str] = None  
+    work_completed: Optional[str] = None
+    delays: Optional[str] = None
+    troubleshooting_steps: Optional[str] = None
+    scope_completed: Optional[str] = None
+    released_by: Optional[str] = None
+    release_code: Optional[str] = None
+    return_tracking: Optional[str] = None
+    
+    # Expenses
+    expenses: Optional[str] = None
+    materials_used: Optional[str] = None
+    
+    # Out of Scope
+    out_of_scope_work: Optional[str] = None
+    
+    # Photos
+    photos_uploaded: Optional[str] = None
+    
+    # Additional fields for context
+    location: Optional[str] = None
+    datetime: Optional[str] = None
+    technician_name: Optional[str] = None
 
-class GeneratePDFRequest(BaseModel):
-    summary: Summary
+class SummaryResponse(BaseModel):
+    summary: CloseoutSummary
+
+class SendEmailRequest(BaseModel):
+    summary: CloseoutSummary
     transcription: str
+    technician_name: Optional[str] = None
+
+class EmailResponse(BaseModel):
+    success: bool
+    message: str
+    recipients: List[str]
+
+# Voice command models (keeping existing)
+class VoiceCommandRequest(BaseModel):
+    audio: str  # base64 encoded audio
+    format: str = "m4a"
+    screenContext: Dict[str, Any]
+
+class VoiceCommandResponse(BaseModel):
+    action: str
+    fieldUpdates: Optional[Dict[str, str]] = None
+    confirmation: str
+    ttsText: str
+    success: bool = True
+
+# Health check response
+class HealthResponse(BaseModel):
+    status: str
+    version: str
+    services: Dict[str, str]

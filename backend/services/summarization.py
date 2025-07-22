@@ -1,140 +1,143 @@
-import json
+# backend/services/summarization.py
 import logging
-from datetime import datetime
 from typing import Dict, Any
 from openai import OpenAI
-
-from config import settings
+from models import CloseoutSummary
 
 logger = logging.getLogger(__name__)
 
 class SummarizationService:
-    """Service for generating structured summaries using OpenAI GPT"""
+    """Service for extracting structured closeout data from transcriptions"""
     
-    def __init__(self):
-        self.client = OpenAI(api_key=settings.openai_api_key)
+    def __init__(self, openai_client: OpenAI):
+        self.client = openai_client
     
-    async def generate_summary(self, transcription: str) -> Dict[str, Any]:
-        """
-        Generate structured summary from transcription text
+    def extract_closeout_data(self, transcription: str) -> CloseoutSummary:
+        """Extract structured closeout information from voice transcription"""
         
-        Args:
-            transcription: Text to summarize
-            
-        Returns:
-            Dictionary containing structured summary data
-            
-        Raises:
-            ValueError: If transcription is invalid
-            Exception: If summarization fails
-        """
-        if not transcription or len(transcription.strip()) < 10:
-            raise ValueError("Transcription text too short to summarize")
-        
-        logger.info(f"Starting summarization for {len(transcription)} character transcription")
-        
-        # Create structured prompt for GPT
-        system_prompt = self._get_system_prompt()
-        user_prompt = self._get_user_prompt(transcription)
-        
+        # Enhanced prompt for closeout data extraction
+        prompt = f"""You are an AI assistant helping to extract structured closeout information from a field technician's voice report.
+
+Please analyze the following transcription and extract information for these specific categories. If information is not mentioned, leave the field empty or mark as "Not mentioned".
+
+TRANSCRIPTION:
+"{transcription}"
+
+Please extract and format the following information in JSON format:
+
+CLOSEOUT NOTES:
+- onsite_contact: Who did you meet with on-site?
+- support_contact: Who did you work with for support?
+- work_completed: What work was completed?
+- delays: Were there any delays?
+- troubleshooting_steps: What troubleshooting steps did you take?
+- scope_completed: Was the scope completed successfully?
+- released_by: Who released you?
+- release_code: Is there a release code? If so, what is it?
+- return_tracking: Is there a return tracking number? If so, what is it?
+
+EXPENSES:
+- expenses: Did you have any expenses (parking fees, etc)?
+- materials_used: What materials did you use?
+
+OUT OF SCOPE:
+- out_of_scope_work: Was there any out of scope work? If so, what is it and who approved the work?
+
+PHOTOS:
+- photos_uploaded: How many photos did you upload?
+
+ADDITIONAL CONTEXT:
+- location: Any location mentioned
+- datetime: Any date/time mentioned
+- technician_name: Any technician name mentioned
+
+Please respond with ONLY a JSON object containing these fields. Use "Not mentioned" for fields that aren't discussed in the transcription."""
+
         try:
-            # Call OpenAI GPT
-            logger.info("Calling OpenAI GPT API...")
+            logger.info("Extracting closeout data from transcription")
+            
             response = self.client.chat.completions.create(
-                model=settings.gpt_model,
+                model="gpt-4-turbo-preview",
                 messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
+                    {
+                        "role": "system",
+                        "content": "You are a specialized AI for extracting field service closeout information. Always respond with valid JSON only."
+                    },
+                    {
+                        "role": "user", 
+                        "content": prompt
+                    }
                 ],
-                temperature=settings.gpt_temperature,
-                max_tokens=settings.gpt_max_tokens,
-                response_format={"type": "json_object"}
+                max_tokens=800,
+                temperature=0.1  # Lower temperature for more consistent extraction
             )
             
-            # Extract the response content
-            summary_text = response.choices[0].message.content.strip()
-            logger.info("GPT summarization completed")
+            response_text = response.choices[0].message.content.strip()
+            logger.info(f"GPT response: {response_text[:200]}...")
             
             # Parse JSON response
-            summary_data = self._parse_summary_response(summary_text)
+            import json
+            try:
+                extracted_data = json.loads(response_text)
+                
+                # Create CloseoutSummary object
+                closeout_summary = CloseoutSummary(**extracted_data)
+                logger.info("Successfully extracted closeout data")
+                return closeout_summary
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON from GPT response: {e}")
+                # Return empty summary if parsing fails
+                return CloseoutSummary()
+                
+        except Exception as e:
+            logger.error(f"Closeout data extraction failed: {e}")
+            # Return empty summary on any error
+            return CloseoutSummary()
+    
+    def enhance_closeout_data(self, closeout_data: CloseoutSummary, additional_context: str = None) -> CloseoutSummary:
+        """Enhance closeout data with additional context or corrections"""
+        
+        if not additional_context:
+            return closeout_data
+        
+        try:
+            # Convert current data to dict for the prompt
+            current_data = closeout_data.dict()
             
-            return {
-                'summary': summary_data,
-                'timestamp': datetime.now().isoformat(),
-                'model_used': settings.gpt_model
-            }
+            prompt = f"""You have existing closeout data and additional context. Please update the closeout data with any new or corrected information.
+
+CURRENT CLOSEOUT DATA:
+{json.dumps(current_data, indent=2)}
+
+ADDITIONAL CONTEXT:
+"{additional_context}"
+
+Please provide the updated closeout data in JSON format, incorporating any new information while preserving existing data that's still valid."""
+
+            response = self.client.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a specialized AI for updating field service closeout information. Always respond with valid JSON only."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                max_tokens=800,
+                temperature=0.1
+            )
+            
+            response_text = response.choices[0].message.content.strip()
+            
+            # Parse and return updated data
+            import json
+            updated_data = json.loads(response_text)
+            return CloseoutSummary(**updated_data)
             
         except Exception as e:
-            logger.error(f"Error during GPT summarization: {e}")
-            # Return fallback summary
-            return self._create_fallback_summary(transcription)
-    
-    def _get_system_prompt(self) -> str:
-        """Get the system prompt for GPT"""
-        return """You are an AI assistant that analyzes work activity transcriptions and extracts structured information. 
-
-Your task is to analyze the given transcription and extract the following information in JSON format:
-- taskDescription: A clear, concise description of the main task or activity described
-- location: Where this activity took place (if mentioned, otherwise null)
-- datetime: When this occurred (if mentioned, otherwise null)
-- outcome: The result, completion status, or achievement described
-- notes: Any additional relevant details, insights, or next steps mentioned
-
-Be precise and only include information that is actually mentioned in the transcription. If something isn't mentioned, use null for that field.
-Always respond with valid JSON only, no additional text or formatting."""
-    
-    def _get_user_prompt(self, transcription: str) -> str:
-        """Get the user prompt with transcription"""
-        return f"""Please analyze this work activity transcription and provide a structured summary:
-
-Transcription: "{transcription}"
-
-Return your response as a valid JSON object with the fields: taskDescription, location, datetime, outcome, and notes."""
-    
-    def _parse_summary_response(self, summary_text: str) -> Dict[str, Any]:
-        """Parse and validate GPT response"""
-        try:
-            # Remove markdown code blocks if present
-            if summary_text.startswith('```json'):
-                summary_text = summary_text.replace('```json', '').replace('```', '').strip()
-            elif summary_text.startswith('```'):
-                summary_text = summary_text.replace('```', '').strip()
-            
-            summary_data = json.loads(summary_text)
-            
-            # Validate and ensure required fields exist
-            required_fields = ['taskDescription', 'location', 'datetime', 'outcome', 'notes']
-            for field in required_fields:
-                if field not in summary_data:
-                    summary_data[field] = None
-            
-            # Ensure taskDescription is not empty
-            if not summary_data.get('taskDescription'):
-                summary_data['taskDescription'] = "Work activity completed"
-            
-            logger.info("Summary parsing successful")
-            return summary_data
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse GPT response as JSON: {e}")
-            logger.error(f"GPT response was: {summary_text}")
-            raise ValueError("Failed to parse AI response")
-    
-    def _create_fallback_summary(self, transcription: str) -> Dict[str, Any]:
-        """Create fallback summary when AI parsing fails"""
-        logger.warning("Creating fallback summary due to AI parsing failure")
-        
-        fallback_summary = {
-            'taskDescription': transcription[:200] + "..." if len(transcription) > 200 else transcription,
-            'location': None,
-            'datetime': None,
-            'outcome': "Summary generation failed - manual review needed",
-            'notes': "AI was unable to parse this transcription into structured format"
-        }
-        
-        return {
-            'summary': fallback_summary,
-            'timestamp': datetime.now().isoformat(),
-            'model_used': settings.gpt_model,
-            'warning': 'Fallback summary used due to parsing error'
-        }
+            logger.error(f"Failed to enhance closeout data: {e}")
+            return closeout_data  # Return original data on error
