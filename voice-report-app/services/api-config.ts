@@ -1,33 +1,25 @@
+// Auto-generated API configuration
+// This file is automatically updated by ngrok_manager.py
+// Last updated: 2025-07-30 12:28:36
+
 import { Platform } from 'react-native';
-
-// Function to get local IP address (you'll need to update this manually)
-const getLocalIP = () => {
-  // Update this with your actual local IP address
-  // You can find it by running 'ipconfig' (Windows) or 'ifconfig' (Mac/Linux)
-  return '192.168.1.100'; // Replace with your actual IP
-};
-
-// Function to read ngrok URL from file (if available)
-const getNgrokURL = async (): Promise<string | null> => {
-  try {
-    // In a real implementation, you might read this from AsyncStorage
-    // or fetch it from a local endpoint
-    return null; // Placeholder
-  } catch (error) {
-    console.log('No ngrok URL available');
-    return null;
-  }
-};
 
 // API Configuration
 export const API_CONFIG = {
   // Backend URLs in order of preference
   BACKEND_URLS: [
-    'https://your-ngrok-url.ngrok.io', // Replace with actual ngrok URL
-    `http://${getLocalIP()}:8000`,     // Local network IP
-    'http://localhost:8000',           // Localhost (for emulator)
-    'http://10.0.2.2:8000',           // Android emulator host
+    'https://47a1ccadf56a.ngrok-free.app',
+    'http://192.168.1.171:8000',
+    'http://localhost:8000',
+    'http://10.0.2.2:8000'
   ],
+  
+  // Current ngrok URL (null if not available)
+  NGROK_URL: 'https://47a1ccadf56a.ngrok-free.app',
+  
+  // Local network IP
+  LOCAL_IP: '192.168.1.171',
+  LOCAL_PORT: 8000,
   
   // Connection settings
   CONNECTION: {
@@ -44,12 +36,12 @@ export const API_CONFIG = {
   },
 };
 
-// Helper function to test backend connectivity without timeout property
+// Helper function to test backend connectivity
 export const testBackendConnection = async (url: string): Promise<boolean> => {
   try {
     console.log(`Testing connection to: ${url}`);
     
-    // Use AbortController for timeout instead of timeout property
+    // Use AbortController for timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
     
@@ -99,6 +91,7 @@ export const findWorkingBackend = async (): Promise<string | null> => {
 export const updateNgrokURL = (newUrl: string) => {
   // Update the first URL in the array with new ngrok URL
   API_CONFIG.BACKEND_URLS[0] = newUrl;
+  API_CONFIG.NGROK_URL = newUrl;
   console.log(`Updated ngrok URL to: ${newUrl}`);
 };
 

@@ -5,7 +5,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import List, Dict, Any
 from datetime import datetime
-import os
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -13,10 +13,10 @@ class EmailService:
     """Service for sending closeout report emails"""
     
     def __init__(self):
-        self.smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
-        self.smtp_port = int(os.getenv('SMTP_PORT', '587'))
-        self.email_user = os.getenv('EMAIL_USER')
-        self.email_password = os.getenv('EMAIL_PASSWORD')
+        self.smtp_server = settings.smtp_server
+        self.smtp_port = int(settings.smtp_port)
+        self.email_user = settings.email_user
+        self.email_password = settings.email_password
         
         # Fixed recipient list as specified
         self.recipients = [

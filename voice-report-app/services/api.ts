@@ -1,6 +1,6 @@
 import axios from 'axios';
 import * as FileSystem from 'expo-file-system';
-import { API_CONFIG } from './api-config';
+import { findWorkingBackend, testBackendConnection, API_CONFIG } from './api-config';
 
 interface TranscriptionResponse {
   transcription: string;
@@ -16,89 +16,43 @@ interface SummaryResponse {
   };
 }
 
-// Updated summary structure for closeout reports
-interface CloseoutSummary {
-  // Closeout Notes
-  onsite_contact?: string;
-  support_contact?: string;
-  work_completed?: string;
-  delays?: string;
-  troubleshooting_steps?: string;
-  scope_completed?: string;
-  released_by?: string;
-  release_code?: string;
-  return_tracking?: string;
-  
-  // Expenses
-  expenses?: string;
-  materials_used?: string;
-  
-  // Out of Scope
-  out_of_scope_work?: string;
-  
-  // Photos
-  photos_uploaded?: string;
-  
-  // Additional context
-  location?: string;
-  datetime?: string;
-  technician_name?: string;
-  
-  // Legacy fields for backward compatibility
-  taskDescription?: string;
-  outcome?: string;
-  notes?: string;
-}
-
 interface EmailResponse {
   success: boolean;
   message: string;
   recipients: string[];
 }
 
-// Test network connectivity to all possible backends
-async function findWorkingBackend(): Promise<string | null> {
-  console.log('🔍 Testing backend connectivity...');
+// Cache for working backend URL to reduce redundant testing
+let cachedBackendUrl: string | null = null;
+let lastConnectivityCheck = 0;
+const CONNECTIVITY_CACHE_DURATION = 30000; // 30 seconds
+
+async function getWorkingBackend(): Promise<string | null> {
+  const now = Date.now();
   
-  for (const url of API_CONFIG.BACKEND_URLS) {
-    try {
-      console.log(`Testing: ${url}`);
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-      
-      const response = await fetch(`${url}/health`, {
-        method: 'GET',
-        signal: controller.signal,
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'VoiceReportApp/2.0',
-        },
-      });
-      
-      clearTimeout(timeoutId);
-      
-      console.log(`📡 ${url} responded with status: ${response.status}`);
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log(`✅ Backend found at ${url}:`, data);
-        return url;
-      } else {
-        console.log(`❌ ${url} returned status ${response.status}`);
-      }
-      
-    } catch (error) {
-      console.log(`❌ ${url} failed:`, error instanceof Error ? error.message : String(error));
+  // Use cached URL if it's recent and still working
+  if (cachedBackendUrl && (now - lastConnectivityCheck) < CONNECTIVITY_CACHE_DURATION) {
+    const isStillWorking = await testBackendConnection(cachedBackendUrl);
+    if (isStillWorking) {
+      return cachedBackendUrl;
+    } else {
+      console.log('🔄 Cached backend URL no longer working, finding new one...');
+      cachedBackendUrl = null;
     }
   }
   
-  console.log('❌ No working backend found');
-  return null;
+  // Use the function from api-config.ts to find working backend
+  const workingUrl = await findWorkingBackend();
+  if (workingUrl) {
+    cachedBackendUrl = workingUrl;
+    lastConnectivityCheck = now;
+  }
+  
+  return workingUrl;
 }
 
 export async function transcribeAudio(audioUri: string): Promise<TranscriptionResponse> {
-  const workingBackendUrl = await findWorkingBackend();
+  const workingBackendUrl = await getWorkingBackend();
   
   if (!workingBackendUrl) {
     throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
@@ -128,13 +82,15 @@ export async function transcribeAudio(audioUri: string): Promise<TranscriptionRe
         'Content-Type': 'application/json',
         'User-Agent': 'VoiceReportApp/2.0',
       },
-      timeout: 60000,
+      timeout: API_CONFIG.CONNECTION.TIMEOUT,
     });
 
     console.log('✅ Transcription successful');
     return response.data;
   } catch (error) {
     console.error('Transcription failed:', error);
+    // Clear cache on error to force re-discovery
+    cachedBackendUrl = null;
     
     if (axios.isAxiosError(error)) {
       if (error.response?.status === 400) {
@@ -152,17 +108,17 @@ export async function transcribeAudio(audioUri: string): Promise<TranscriptionRe
   }
 }
 
-export async function generateSummary(transcription: string): Promise<SummaryResponse> {
-  const workingBackendUrl = await findWorkingBackend();
+export async function summarizeText(transcription: string): Promise<SummaryResponse> {
+  const workingBackendUrl = await getWorkingBackend();
   
   if (!workingBackendUrl) {
     throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
   }
 
   try {
-    console.log(`📝 Generating summary using: ${workingBackendUrl}`);
+    console.log(`📝 Summarizing text using: ${workingBackendUrl}`);
     
-    // Create request payload matching backend expectations (/summarize endpoint)
+    // Create request payload matching backend expectations
     const payload = {
       transcription: transcription
     };
@@ -172,27 +128,29 @@ export async function generateSummary(transcription: string): Promise<SummaryRes
         'Content-Type': 'application/json',
         'User-Agent': 'VoiceReportApp/2.0',
       },
-      timeout: 30000,
+      timeout: API_CONFIG.CONNECTION.TIMEOUT,
     });
 
     console.log('✅ Summary generation successful');
     return response.data;
   } catch (error) {
-    console.error('Summary generation failed:', error);
-    throw new Error('Failed to generate summary. Please check your connection and try again.');
+    console.error('Summarization failed:', error);
+    // Clear cache on error
+    cachedBackendUrl = null;
+    throw new Error('Failed to summarize text. Please check your connection and try again.');
   }
 }
 
-// Alias for backward compatibility
-export async function summarizeText(transcription: string): Promise<SummaryResponse> {
-  return generateSummary(transcription);
+// Export generateSummary function (alias for summarizeText) - FIXES THE MISSING FUNCTION ERROR
+export async function generateSummary(transcription: string): Promise<SummaryResponse> {
+  return await summarizeText(transcription);
 }
 
 export async function generatePDF(data: {
   summary: any;
   transcription: string;
 }): Promise<string> {
-  const workingBackendUrl = await findWorkingBackend();
+  const workingBackendUrl = await getWorkingBackend();
   
   if (!workingBackendUrl) {
     throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
@@ -201,7 +159,7 @@ export async function generatePDF(data: {
   try {
     console.log(`📄 Generating PDF using: ${workingBackendUrl}`);
     
-    // Create request payload matching backend expectations (/generate-pdf endpoint)
+    // Create request payload matching backend expectations
     const payload = {
       summary: data.summary,
       transcription: data.transcription
@@ -212,7 +170,7 @@ export async function generatePDF(data: {
         'Content-Type': 'application/json',
         'User-Agent': 'VoiceReportApp/2.0',
       },
-      timeout: 30000,
+      timeout: API_CONFIG.CONNECTION.TIMEOUT,
       responseType: 'arraybuffer', // Important: PDF comes as binary data
     });
 
@@ -231,17 +189,44 @@ export async function generatePDF(data: {
     return fileUri;
   } catch (error) {
     console.error('PDF generation failed:', error);
+    cachedBackendUrl = null;
     throw new Error('Failed to generate PDF. Please check your connection and try again.');
   }
 }
 
-// NEW: Send closeout email function
+export async function sendEmail(emailData: any): Promise<EmailResponse> {
+  const workingBackendUrl = await getWorkingBackend();
+  
+  if (!workingBackendUrl) {
+    throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
+  }
+
+  try {
+    console.log(`📧 Sending email using: ${workingBackendUrl}`);
+    const response = await axios.post(`${workingBackendUrl}/send-email`, emailData, {
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'VoiceReportApp/2.0',
+      },
+      timeout: API_CONFIG.CONNECTION.TIMEOUT,
+    });
+
+    console.log(`📧 Email sent successfully`);
+    return response.data;
+  } catch (error) {
+    console.error('Email sending failed:', error);
+    cachedBackendUrl = null;
+    throw new Error('Failed to send email. Please check your connection and try again.');
+  }
+}
+
+// Send closeout email function
 export async function sendCloseoutEmail(data: {
-  summary: CloseoutSummary;
+  summary: any;
   transcription: string;
   technician_name?: string;
 }): Promise<EmailResponse> {
-  const workingBackendUrl = await findWorkingBackend();
+  const workingBackendUrl = await getWorkingBackend();
   
   if (!workingBackendUrl) {
     throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
@@ -250,7 +235,7 @@ export async function sendCloseoutEmail(data: {
   try {
     console.log(`📧 Sending closeout email using: ${workingBackendUrl}`);
     
-    // Create request payload matching backend expectations (/send-email endpoint)
+    // Create request payload matching backend expectations
     const payload = {
       summary: data.summary,
       transcription: data.transcription,
@@ -262,13 +247,14 @@ export async function sendCloseoutEmail(data: {
         'Content-Type': 'application/json',
         'User-Agent': 'VoiceReportApp/2.0',
       },
-      timeout: 30000,
+      timeout: API_CONFIG.CONNECTION.TIMEOUT,
     });
 
     console.log(`📧 Email sent successfully to ${response.data.recipients.length} recipients`);
     return response.data;
   } catch (error) {
     console.error('Email sending failed:', error);
+    cachedBackendUrl = null;
     throw new Error('Failed to send closeout email. Please check your connection and try again.');
   }
 }
@@ -276,7 +262,7 @@ export async function sendCloseoutEmail(data: {
 // Additional utility functions for debugging
 export async function checkBackendHealth(): Promise<boolean> {
   try {
-    const workingBackendUrl = await findWorkingBackend();
+    const workingBackendUrl = await getWorkingBackend();
     return workingBackendUrl !== null;
   } catch (error) {
     console.error('Health check failed:', error);
@@ -285,7 +271,7 @@ export async function checkBackendHealth(): Promise<boolean> {
 }
 
 export async function getBackendInfo(): Promise<any> {
-  const workingBackendUrl = await findWorkingBackend();
+  const workingBackendUrl = await getWorkingBackend();
   
   if (!workingBackendUrl) {
     throw new Error('No backend server available');
@@ -302,12 +288,13 @@ export async function getBackendInfo(): Promise<any> {
     };
   } catch (error) {
     console.error('Failed to get backend info:', error);
+    cachedBackendUrl = null;
     throw new Error('Failed to get backend information');
   }
 }
 
 export async function testEmailConfiguration(): Promise<any> {
-  const workingBackendUrl = await findWorkingBackend();
+  const workingBackendUrl = await getWorkingBackend();
   
   if (!workingBackendUrl) {
     throw new Error('No backend server available');
@@ -320,9 +307,22 @@ export async function testEmailConfiguration(): Promise<any> {
     return response.data;
   } catch (error) {
     console.error('Email test failed:', error);
+    cachedBackendUrl = null;
     throw new Error('Failed to test email configuration');
   }
 }
 
+// Function to manually refresh backend connection
+export async function refreshBackendConnection(): Promise<string | null> {
+  console.log('🔄 Manually refreshing backend connection...');
+  cachedBackendUrl = null;
+  lastConnectivityCheck = 0;
+  return await getWorkingBackend();
+}
+
 // Export the current configuration for debugging
-export const getAPIConfig = () => API_CONFIG;
+export const getAPIConfig = () => ({
+  ...API_CONFIG,
+  cachedBackendUrl,
+  lastConnectivityCheck: new Date(lastConnectivityCheck).toISOString(),
+});

@@ -1,3 +1,4 @@
+# backend/services/transcription.py
 import base64
 import tempfile
 import os
@@ -13,19 +14,28 @@ logger = logging.getLogger(__name__)
 class TranscriptionService:
     """Service for handling audio transcription using OpenAI Whisper"""
     
-    def __init__(self):
-        self.client = OpenAI(api_key=settings.openai_api_key)
-    
-    async def transcribe_audio(self, audio_data: str, audio_format: str = 'm4a') -> Dict[str, Any]:
+    def __init__(self, openai_client: OpenAI = None):
         """
-        Transcribe base64 encoded audio data using Whisper
+        Initialize transcription service
         
         Args:
-            audio_data: Base64 encoded audio data
+            openai_client: OpenAI client instance, if None will create from settings
+        """
+        if openai_client:
+            self.client = openai_client
+        else:
+            self.client = OpenAI(api_key=settings.openai_api_key)
+    
+    async def transcribe_audio(self, audio_data: bytes, audio_format: str = 'm4a') -> str:
+        """
+        Transcribe audio bytes using Whisper
+        
+        Args:
+            audio_data: Audio data as bytes
             audio_format: Audio file format (m4a, mp4, wav, etc.)
             
         Returns:
-            Dictionary containing transcription and metadata
+            Transcription text
             
         Raises:
             ValueError: If audio data is invalid
@@ -39,15 +49,8 @@ class TranscriptionService:
         
         logger.info(f"Starting transcription for {audio_format} audio")
         
-        # Decode base64 audio data
-        try:
-            audio_bytes = base64.b64decode(audio_data)
-        except Exception as e:
-            logger.error(f"Failed to decode base64 audio: {e}")
-            raise ValueError("Invalid base64 audio data")
-        
         # Check file size
-        audio_size_mb = len(audio_bytes) / (1024 * 1024)
+        audio_size_mb = len(audio_data) / (1024 * 1024)
         if audio_size_mb > settings.max_audio_size_mb:
             raise ValueError(f"Audio file too large: {audio_size_mb:.1f}MB (max: {settings.max_audio_size_mb}MB)")
         
@@ -55,7 +58,7 @@ class TranscriptionService:
         temp_file_path = None
         try:
             with tempfile.NamedTemporaryFile(suffix=f'.{audio_format}', delete=False) as temp_file:
-                temp_file.write(audio_bytes)
+                temp_file.write(audio_data)
                 temp_file_path = temp_file.name
             
             # Transcribe using Whisper
@@ -70,38 +73,33 @@ class TranscriptionService:
             transcription_text = transcript.text
             logger.info(f"Transcription completed. Length: {len(transcription_text)} characters")
             
-            return {
-                'transcription': transcription_text,
-                'timestamp': datetime.now().isoformat(),
-                'audio_format': audio_format,
-                'audio_size_mb': round(audio_size_mb, 2)
-            }
+            return transcription_text
+            
+        except Exception as e:
+            logger.error(f"Transcription failed: {e}")
+            raise Exception(f"Failed to transcribe audio: {str(e)}")
             
         finally:
             # Clean up temporary file
             if temp_file_path and os.path.exists(temp_file_path):
                 try:
                     os.unlink(temp_file_path)
-                except OSError as e:
-                    logger.warning(f"Failed to delete temp file {temp_file_path}: {e}")
+                    logger.debug(f"Cleaned up temporary file: {temp_file_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temporary file {temp_file_path}: {e}")
     
-    # Legacy method name for backward compatibility
-    async def transcribe(self, audio_file_path: str) -> str:
-        """
-        Legacy method for file-based transcription
-        """
+    def test_connection(self) -> Dict[str, Any]:
+        """Test OpenAI API connection"""
         try:
-            with open(audio_file_path, "rb") as audio_file:
-                response = self.client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    response_format="text",
-                    language="en"
-                )
-            
-            logger.info(f"Successfully transcribed audio: {len(response)} characters")
-            return response
-            
+            # Test with a minimal API call
+            models = self.client.models.list()
+            return {
+                "status": "success",
+                "message": "OpenAI API connection successful",
+                "models_available": len(models.data) > 0
+            }
         except Exception as e:
-            logger.error(f"Whisper API error: {str(e)}")
-            raise
+            return {
+                "status": "error",
+                "message": f"OpenAI API connection failed: {str(e)}"
+            }

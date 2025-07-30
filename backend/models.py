@@ -53,7 +53,7 @@ class EmailResponse(BaseModel):
     message: str
     recipients: List[str]
 
-# Voice command models (keeping existing)
+# Voice command models - THESE ARE REQUIRED FOR THE /voice-command ENDPOINT
 class VoiceCommandRequest(BaseModel):
     audio: str  # base64 encoded audio
     format: str = "m4a"

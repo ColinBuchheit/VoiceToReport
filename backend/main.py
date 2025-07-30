@@ -3,6 +3,7 @@ import os
 import tempfile
 import base64
 import logging
+import json
 from datetime import datetime
 from typing import Dict, Any
 
@@ -60,10 +61,27 @@ if OPENAI_API_KEY:
 else:
     logger.warning("OpenAI API key not found")
 
-# Initialize services
-transcription_service = TranscriptionService(openai_client) if openai_client else None
-summarization_service = SummarizationService(openai_client) if openai_client else None
-email_service = EmailService()
+# Initialize services with proper error handling
+try:
+    transcription_service = TranscriptionService(openai_client) if openai_client else None
+    logger.info("Transcription service initialized")
+except Exception as e:
+    logger.error(f"Failed to initialize transcription service: {e}")
+    transcription_service = None
+
+try:
+    summarization_service = SummarizationService(openai_client) if openai_client else None
+    logger.info("Summarization service initialized")
+except Exception as e:
+    logger.error(f"Failed to initialize summarization service: {e}")
+    summarization_service = None
+
+try:
+    email_service = EmailService()
+    logger.info("Email service initialized")
+except Exception as e:
+    logger.error(f"Failed to initialize email service: {e}")
+    email_service = None
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
@@ -136,6 +154,9 @@ async def summarize_transcription(request: SummarizeRequest):
 async def send_closeout_email(request: SendEmailRequest):
     """Send closeout report via email"""
     
+    if not email_service:
+        raise HTTPException(status_code=500, detail="Email service not available")
+    
     try:
         logger.info("Processing email send request")
         
@@ -164,6 +185,12 @@ async def send_closeout_email(request: SendEmailRequest):
 async def test_email_configuration():
     """Test email configuration"""
     
+    if not email_service:
+        return {
+            "status": "error",
+            "message": "Email service not available"
+        }
+    
     try:
         result = email_service.test_email_connection()
         return result
@@ -174,62 +201,58 @@ async def test_email_configuration():
             "message": f"Email test failed: {str(e)}"
         }
 
-# Keep existing voice command endpoint for AI assistant functionality
 @app.post("/voice-command", response_model=VoiceCommandResponse)
 async def process_voice_command(request: VoiceCommandRequest):
     """Process voice command with enhanced AI understanding"""
     try:
         if not openai_client:
-            raise HTTPException(status_code=500, detail="OpenAI client not configured")
+            raise HTTPException(status_code=500, detail="OpenAI client not available")
         
-        logger.info("Voice command processing started")
+        logger.info("Processing voice command request")
         
-        # First transcribe the audio
+        # Decode base64 audio
         audio_bytes = base64.b64decode(request.audio)
         audio_size_mb = len(audio_bytes) / (1024 * 1024)
         
+        logger.info(f"Voice command audio size: {audio_size_mb:.2f} MB")
+        
         if audio_size_mb > 25:
-            raise HTTPException(status_code=400, detail="Audio file too large")
+            raise HTTPException(status_code=400, detail="Audio file too large (max 25MB)")
         
-        # Create temporary file for transcription
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.m4a') as temp_file:
-            temp_file.write(audio_bytes)
-            temp_file_path = temp_file.name
+        # Step 1: Transcribe the audio
+        if not transcription_service:
+            raise HTTPException(status_code=500, detail="Transcription service not available")
         
-        try:
-            # Transcribe audio
-            with open(temp_file_path, 'rb') as audio_file:
-                transcription_response = openai_client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    language="en"
+        transcription = await transcription_service.transcribe_audio(audio_bytes, request.format)
+        logger.info(f"Voice command transcribed: '{transcription[:100]}...'")
+        
+        # Step 2: Process the voice command with screen context
+        screen_context = request.screenContext
+        screen_name = screen_context.get('screenName', 'unknown')
+        available_actions = screen_context.get('availableActions', [])
+        visible_fields = screen_context.get('visibleFields', [])
+        
+        # Format field information for the AI
+        fields_info = ""
+        if visible_fields:
+            field_descriptions = []
+            for field in visible_fields:
+                synonyms = ', '.join(field.get('synonyms', []))
+                field_descriptions.append(
+                    f"- {field['label']} ('{field['name']}'): "
+                    f"Current='{field.get('currentValue', '')}', "
+                    f"Editable={field.get('isEditable', False)}, "
+                    f"Synonyms=[{synonyms}]"
                 )
-                transcription = transcription_response.text
-            
-            # Clean up temp file
-            os.unlink(temp_file_path)
-            
-            logger.info(f"Voice transcribed: '{transcription}'")
-            
-            # Build enhanced context for GPT
-            screen_context = request.screenContext
-            screen_name = screen_context.get('screenName', 'unknown')
-            visible_fields = screen_context.get('visibleFields', [])
-            current_values = screen_context.get('currentValues', {})
-            available_actions = screen_context.get('availableActions', [])
-            
-            # Format fields information
-            fields_info = "\n".join([
-                f"- {field.get('name', '')}: {field.get('label', '')} (current: '{current_values.get(field.get('name', ''), 'empty')}')"
-                for field in visible_fields
-            ])
-            
-            # Enhanced prompt for better understanding
-            prompt = f"""You are Sam, an AI assistant helping with voice commands for a field technician's closeout report app.
+            fields_info = '\n'.join(field_descriptions)
+        else:
+            fields_info = "No editable fields available"
+        
+        # Create a detailed prompt for the AI
+        prompt = f"""You are an AI assistant helping a user interact with their mobile voice report app via voice commands.
 
-CONTEXT:
-- Current screen: {screen_name}
-- User said: "{transcription}"
+CURRENT SCREEN: {screen_name}
+USER COMMAND: "{transcription}"
 
 AVAILABLE FIELDS:
 {fields_info}
@@ -240,44 +263,77 @@ Your task is to interpret the voice command and respond appropriately:
 
 1. If the user wants to update a field, determine which field and the new value
 2. If the user wants to perform an action, identify the action
-3. Always provide a natural, helpful response
+3. If unclear, ask for clarification
+4. Always provide a natural, helpful response
 
 Respond in JSON format:
 {{
-    "action": "field_update" or "action_command" or "question",
+    "action": "field_update" or "action_command" or "clarify",
     "fieldUpdates": {{"fieldName": "newValue"}} or null,
     "confirmation": "Brief confirmation of what you understood",
     "ttsText": "Natural response to speak back to user",
     "success": true
-}}"""
+}}
 
-            # Process with GPT
-            response = openai_client.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are a helpful AI assistant for field service reports. Always respond with valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=300,
-                temperature=0.3
-            )
-            
-            import json
+Examples:
+- User says "set location to downtown office" → {{"action": "field_update", "fieldUpdates": {{"location": "downtown office"}}, "confirmation": "Updated location to downtown office", "ttsText": "Location set to downtown office", "success": true}}
+- User says "save the report" → {{"action": "action_command", "fieldUpdates": null, "confirmation": "Saving report", "ttsText": "Saving your report now", "success": true}}
+- User says unclear command → {{"action": "clarify", "fieldUpdates": null, "confirmation": "Could you please clarify?", "ttsText": "I didn't understand that. Could you please try again?", "success": false}}
+"""
+
+        # Step 3: Get AI response
+        response = openai_client.chat.completions.create(
+            model="gpt-4-turbo-preview",
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "You are a helpful AI assistant for field service reports. Always respond with valid JSON."
+                },
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=300,
+            temperature=0.3
+        )
+        
+        # Step 4: Parse the response
+        try:
             response_data = json.loads(response.choices[0].message.content)
             
-            return VoiceCommandResponse(**response_data)
+            # Ensure all required fields are present
+            voice_response = VoiceCommandResponse(
+                action=response_data.get('action', 'clarify'),
+                fieldUpdates=response_data.get('fieldUpdates'),
+                confirmation=response_data.get('confirmation', 'Command processed'),
+                ttsText=response_data.get('ttsText', 'Command processed'),
+                success=response_data.get('success', True)
+            )
             
-        except Exception as file_error:
-            # Clean up temp file if it exists
-            if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
-            raise file_error
+            logger.info(f"Voice command processed successfully: {voice_response.action}")
+            return voice_response
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse AI response as JSON: {e}")
+            # Return a fallback response
+            return VoiceCommandResponse(
+                action="clarify",
+                fieldUpdates=None,
+                confirmation="Could not process command",
+                ttsText="Sorry, I didn't understand that. Please try again.",
+                success=False
+            )
             
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Voice command processing failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Voice command processing failed: {str(e)}")
+        # Return error response instead of raising exception
+        return VoiceCommandResponse(
+            action="clarify",
+            fieldUpdates=None,
+            confirmation="Error processing command",
+            ttsText="Sorry, there was an error processing your command. Please try again.",
+            success=False
+        )
 
 # Debug endpoint for OpenAI connectivity
 @app.get("/debug/openai")
@@ -299,13 +355,16 @@ async def debug_openai():
         )
         gpt_result = gpt_response.choices[0].message.content
         
-        # Test Whisper (with a small test)
-        whisper_status = "available"
+        # Test Whisper status
+        whisper_status = "available" if transcription_service else "unavailable"
         
         return {
             "status": "success",
             "gpt_test": gpt_result,
             "whisper_status": whisper_status,
+            "transcription_service": "available" if transcription_service else "unavailable",
+            "summarization_service": "available" if summarization_service else "unavailable",
+            "email_service": "available" if email_service else "unavailable",
             "openai_key_present": bool(OPENAI_API_KEY)
         }
         
