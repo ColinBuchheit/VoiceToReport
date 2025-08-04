@@ -1,4 +1,4 @@
-# backend/services/transcription.py
+# backend/services/transcription.py - FIXED: Remove async from transcribe_audio
 import base64
 import tempfile
 import os
@@ -71,9 +71,9 @@ class TranscriptionService:
             logger.error(f"Unexpected error parsing voice command AI response: {e}")
             return None
     
-    async def transcribe_audio(self, audio_data: bytes, audio_format: str = 'm4a') -> str:
+    def transcribe_audio(self, audio_data: bytes, audio_format: str = 'm4a') -> str:
         """
-        Transcribe audio bytes using Whisper
+        Transcribe audio bytes using Whisper - FIXED: Removed async
         
         Args:
             audio_data: Audio data as bytes
@@ -106,6 +106,8 @@ class TranscriptionService:
                 temp_file.write(audio_data)
                 temp_file_path = temp_file.name
             
+            logger.info(f"Created temporary audio file: {temp_file_path}")
+            
             # Transcribe using Whisper
             logger.info("Calling OpenAI Whisper API...")
             with open(temp_file_path, 'rb') as audio_file:
@@ -117,11 +119,15 @@ class TranscriptionService:
             
             transcription_text = transcript.text
             logger.info(f"Transcription completed. Length: {len(transcription_text)} characters")
+            logger.info(f"Transcription preview: {transcription_text[:100]}...")
             
             return transcription_text
             
         except Exception as e:
             logger.error(f"Transcription failed: {e}")
+            # Log more details about the error
+            if hasattr(e, 'response'):
+                logger.error(f"OpenAI API response: {e.response}")
             raise Exception(f"Failed to transcribe audio: {str(e)}")
             
         finally:
@@ -133,7 +139,7 @@ class TranscriptionService:
                 except Exception as e:
                     logger.warning(f"Failed to clean up temporary file {temp_file_path}: {e}")
     
-    async def process_voice_command(self, transcription: str, screen_context: Dict[str, Any] = None) -> Dict[str, Any]:
+    def process_voice_command(self, transcription: str, screen_context: Dict[str, Any] = None) -> Dict[str, Any]:
         """Process voice commands for editing text with better context understanding"""
         
         try:
@@ -190,7 +196,9 @@ Common field names and their correct system names:
 - "photos", "pictures", "how many photos" → photos_uploaded
 - "location", "place", "where" → location
 
-Analyze this command and determine what the user wants to change. Respond with ONLY valid JSON in this exact format:
+Analyze this command and determine what the user wants to change.
+
+Respond with ONLY valid JSON in this exact format:
 {{
     "action": "update_field|clarify|error",
     "target": "correct_field_name",

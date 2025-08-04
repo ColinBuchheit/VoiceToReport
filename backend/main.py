@@ -1,4 +1,4 @@
-# backend/main.py
+# backend/main.py - COMPLETE FIXED VERSION
 import os
 import tempfile
 import base64
@@ -131,6 +131,23 @@ def parse_ai_response(response) -> Dict[str, Any]:
         logger.error(f"Unexpected error parsing AI response: {e}")
         return None
 
+@app.get("/", response_model=HealthResponse)
+async def root():
+    """Root endpoint with service status"""
+    services = {
+        "transcription": "available" if transcription_service else "unavailable",
+        "voice_agent": "available" if transcription_service else "unavailable", 
+        "tts": "available",
+        "gpt": "available" if openai_client else "unavailable",
+        "email": "available" if email_service else "unavailable"
+    }
+    
+    return HealthResponse(
+        status="healthy",
+        version="2.0.0",
+        services=services
+    )
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint"""
@@ -156,26 +173,40 @@ async def transcribe_audio(request: TranscribeRequest):
     
     try:
         logger.info("Processing transcription request")
+        logger.info(f"Audio format: {request.format}")
+        logger.info(f"Audio data length: {len(request.audio)} characters")
         
         # Decode base64 audio
-        audio_bytes = base64.b64decode(request.audio)
-        audio_size_mb = len(audio_bytes) / (1024 * 1024)
-        
-        logger.info(f"Audio size: {audio_size_mb:.2f} MB")
+        try:
+            audio_bytes = base64.b64decode(request.audio)
+            audio_size_mb = len(audio_bytes) / (1024 * 1024)
+            logger.info(f"Audio size: {audio_size_mb:.2f} MB")
+        except Exception as e:
+            logger.error(f"Failed to decode base64 audio: {e}")
+            raise HTTPException(status_code=400, detail="Invalid base64 audio data")
         
         if audio_size_mb > 25:
             raise HTTPException(status_code=400, detail="Audio file too large (max 25MB)")
         
-        # Transcribe audio
-        transcription = await transcription_service.transcribe_audio(audio_bytes, request.format)
+        # FIXED: Remove await since transcribe_audio is no longer async
+        transcription = transcription_service.transcribe_audio(audio_bytes, request.format)
         
         logger.info("Transcription completed successfully")
+        logger.info(f"Transcription length: {len(transcription)} characters")
+        
         return TranscriptionResponse(transcription=transcription)
         
     except HTTPException:
         raise
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Transcription failed: {e}")
+        # Log additional debug info
+        logger.error(f"Error type: {type(e)}")
+        if hasattr(e, '__dict__'):
+            logger.error(f"Error details: {e.__dict__}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
 
 @app.post("/summarize", response_model=SummaryResponse)
@@ -200,60 +231,31 @@ async def summarize_transcription(request: SummarizeRequest):
 
 @app.post("/voice-command", response_model=VoiceCommandResponse)
 async def process_voice_command(request: VoiceCommandRequest):
-    """Process voice commands for editing text"""
+    """Process voice commands for form interaction"""
     
     if not transcription_service:
-        raise HTTPException(status_code=500, detail="Transcription service not available")
+        raise HTTPException(status_code=500, detail="Voice command service not available")
     
     try:
         logger.info("Processing voice command request")
         
-        # Decode and transcribe audio
-        audio_bytes = base64.b64decode(request.audio)
-        audio_size_mb = len(audio_bytes) / (1024 * 1024)
+        # Decode base64 audio first
+        try:
+            audio_bytes = base64.b64decode(request.audio)
+            logger.info(f"Voice command audio size: {len(audio_bytes)} bytes")
+        except Exception as e:
+            logger.error(f"Failed to decode voice command audio: {e}")
+            raise HTTPException(status_code=400, detail="Invalid base64 audio data")
         
-        logger.info(f"Voice command audio size: {audio_size_mb:.2f} MB")
+        # First transcribe the audio
+        transcription = transcription_service.transcribe_audio(audio_bytes, request.format)
+        logger.info(f"Voice command transcription: {transcription}")
         
-        if audio_size_mb > 10:  # Smaller limit for voice commands
-            raise HTTPException(status_code=400, detail="Voice command audio too large (max 10MB)")
+        # Then process the voice command with screen context
+        result = transcription_service.process_voice_command(transcription, request.screenContext)
         
-        # Transcribe the voice command
-        transcription = await transcription_service.transcribe_audio(audio_bytes, request.format)
-        logger.info(f"Voice command transcribed: '{transcription}...'")
-        
-        # Log screen context for debugging
-        screen_context = request.screenContext
-        logger.info(f"Screen context keys: {list(screen_context.keys())}")
-        if 'visibleFields' in screen_context:
-            field_count = len(screen_context['visibleFields'])
-            logger.info(f"Visible fields count: {field_count}")
-            if field_count > 0:
-                field_names = [f.get('name', 'unknown') for f in screen_context['visibleFields']]
-                logger.info(f"Field names: {field_names}")
-        
-        # Process the voice command using the transcription service
-        result = await transcription_service.process_voice_command(transcription, request.screenContext)
-        
-        logger.info(f"Voice command result: {result}")
-        
-        # Convert the result to match our VoiceCommandResponse model and frontend expectations
-        response = VoiceCommandResponse(
-            action=result.get("action", "clarify"),
-            target=result.get("target", ""),
-            value=result.get("value", ""),  # Frontend expects this field
-            replacement=result.get("value", ""),  # Also set replacement for compatibility
-            fieldUpdates=result.get("fieldUpdates", {}),
-            needs_clarification=not result.get("success", False),
-            clarification=result.get("ttsText", "") if not result.get("success", False) else "",
-            clarification_question=result.get("ttsText", "") if not result.get("success", False) else "",
-            confirmation=result.get("confirmation", ""),
-            ttsText=result.get("ttsText", ""),
-            confidence=result.get("confidence", 0.0),
-            success=result.get("success", False),
-            metadata={}
-        )
-        
-        return response
+        logger.info("Voice command processed successfully")
+        return VoiceCommandResponse(**result)
         
     except HTTPException:
         raise
@@ -262,19 +264,16 @@ async def process_voice_command(request: VoiceCommandRequest):
         return VoiceCommandResponse(
             action="error",
             target="",
-            replacement="",
-            needs_clarification=True,
-            clarification_question="I encountered an error processing your request. Please try again.",
+            value="",
+            confidence=0.0,
             confirmation="Error occurred",
             ttsText="I encountered an error processing your request. Please try again.",
-            confidence=0.0,
             success=False
         )
 
 @app.post("/text-to-speech")
 async def text_to_speech(request: Dict[str, str]):
     """Convert text to speech (placeholder endpoint)"""
-    # This endpoint was missing and causing 404 errors
     try:
         logger.info("Processing text-to-speech request")
         text = request.get("text", "")
@@ -344,3 +343,9 @@ async def test_email_configuration():
             "status": "error",
             "message": f"Email test failed: {str(e)}"
         }
+
+# REMOVED: PDF generation endpoint completely
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

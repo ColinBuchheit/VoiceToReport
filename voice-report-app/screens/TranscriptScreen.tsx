@@ -1,4 +1,4 @@
-// screens/TranscriptScreen.tsx - FIXED FOR CLOSEOUT COMPATIBILITY
+// voice-report-app/screens/TranscriptScreen.tsx - FIXED FOR PROPER FIELD MAPPING
 import React, { useState } from 'react';
 import {
   View,
@@ -17,7 +17,7 @@ import { RootStackParamList } from '../App';
 import Loader from '../components/Loader';
 import { generateSummary } from '../services/api';
 import AIAgent from '../components/AIAgent';
-import { ScreenContext, FieldInfo } from '../types/aiAgent';
+import { ScreenContext, FieldInfo, CloseoutSummary } from '../types/aiAgent';
 
 type TranscriptScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -78,24 +78,47 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   const handleGenerateSummary = async () => {
     try {
       setIsProcessing(true);
+      console.log('🔄 Generating summary from transcription:', transcription.substring(0, 100) + '...');
+      
       const response = await generateSummary(transcription);
+      console.log('📥 Raw API response:', response);
       
-      // The API returns legacy format, so use it directly
-      const legacySummary = {
-        taskDescription: response.summary.taskDescription || '',
-        location: response.summary.location || '',
-        datetime: response.summary.datetime || '',
-        outcome: response.summary.outcome || '',
-        notes: response.summary.notes || ''
-      };
+      // FIXED: Handle the new CloseoutSummary response format correctly
+      let closeoutSummary: CloseoutSummary;
       
+      if (response.summary) {
+        // The API returns { summary: CloseoutSummary }
+        closeoutSummary = response.summary;
+        console.log('✅ Using CloseoutSummary from response.summary');
+      } else {
+        // Fallback: treat response as CloseoutSummary directly
+        closeoutSummary = response as any;
+        console.log('✅ Using response as CloseoutSummary directly');
+      }
+      
+      console.log('📋 Extracted closeout summary:', closeoutSummary);
+      
+      // FIXED: Log individual fields to debug what's extracted
+      console.log('🔍 Field extraction check:');
+      console.log('  - onsite_contact:', closeoutSummary.onsite_contact);
+      console.log('  - support_contact:', closeoutSummary.support_contact);
+      console.log('  - work_completed:', closeoutSummary.work_completed);
+      console.log('  - location:', closeoutSummary.location);
+      console.log('  - technician_name:', closeoutSummary.technician_name);
+      
+      // FIXED: Pass the CloseoutSummary directly to Summary screen
+      // No need to convert to legacy format anymore
       navigation.navigate('Summary', {
         transcription,
-        summary: legacySummary,
+        summary: closeoutSummary, // Pass the full CloseoutSummary object
       });
+      
     } catch (error) {
-      console.error('Error generating summary:', error);
-      Alert.alert('Error', 'Failed to generate summary');
+      console.error('❌ Error generating summary:', error);
+      Alert.alert(
+        'Error', 
+        `Failed to generate summary: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     } finally {
       setIsProcessing(false);
     }
@@ -170,11 +193,20 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         </View>
       </ScrollView>
 
-      {/* AI VOICE ASSISTANT */}
+      {/* AI Agent for voice commands */}
       <AIAgent
         screenContext={getEnhancedScreenContext()}
         onFieldUpdate={handleFieldUpdate}
         onModeToggle={handleModeToggle}
+        onAction={(action) => {
+          if (action === 'generate_summary') {
+            handleGenerateSummary();
+          } else if (action === 'clear_transcription') {
+            setTranscription('');
+          }
+        }}
+        position="bottom-right"
+        showDebugInfo={false}
       />
     </KeyboardAvoidingView>
   );
@@ -183,47 +215,45 @@ export default function TranscriptScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#ffffff',
   },
   scrollContainer: {
     flex: 1,
-    paddingHorizontal: 20,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginVertical: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 10,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#2c3e50',
-    flex: 1,
   },
   editButton: {
-    backgroundColor: '#3498db',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-    marginLeft: 10,
+    backgroundColor: '#ecf0f1',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
   },
   editButtonActive: {
-    backgroundColor: '#27ae60',
+    backgroundColor: '#FF6B35',
   },
   editButtonText: {
-    color: 'white',
+    color: '#2c3e50',
     fontWeight: '600',
-    fontSize: 14,
   },
   editButtonTextActive: {
     color: 'white',
   },
   transcriptionCard: {
     backgroundColor: 'white',
+    margin: 20,
     borderRadius: 12,
     padding: 20,
-    marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -235,52 +265,47 @@ const styles = StyleSheet.create({
   },
   transcriptionInput: {
     fontSize: 16,
+    lineHeight: 24,
     color: '#2c3e50',
-    minHeight: 200,
+    minHeight: 300,
     textAlignVertical: 'top',
-    borderWidth: 1,
-    borderColor: '#bdc3c7',
-    borderRadius: 8,
-    padding: 12,
+    borderWidth: 0,
+    padding: 0,
   },
   transcriptionText: {
     fontSize: 16,
-    color: '#2c3e50',
     lineHeight: 24,
+    color: '#2c3e50',
     minHeight: 200,
   },
   actionButtons: {
-    marginBottom: 20,
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+    gap: 15,
   },
   generateButton: {
-    backgroundColor: '#e74c3c',
+    flex: 2,
+    backgroundColor: '#FF6B35',
     paddingVertical: 16,
-    borderRadius: 12,
+    borderRadius: 8,
     alignItems: 'center',
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
   },
   generateButtonText: {
     color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '600',
   },
   clearButton: {
-    backgroundColor: '#95a5a6',
-    paddingVertical: 12,
+    flex: 1,
+    backgroundColor: '#e74c3c',
+    paddingVertical: 16,
     borderRadius: 8,
     alignItems: 'center',
   },
   clearButtonText: {
     color: 'white',
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
   },
 });

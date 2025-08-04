@@ -1,4 +1,4 @@
-// screens/SummaryScreen.tsx - UPDATED FOR CLOSEOUT REPORTS
+// voice-report-app/screens/SummaryScreen.tsx - COMPLETE VERSION WITHOUT PDF GENERATION
 import React, { useState } from 'react';
 import {
   View,
@@ -13,7 +13,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
-import { sendCloseoutEmail, generatePDF } from '../services/api';
+import { sendCloseoutEmail } from '../services/api'; // REMOVED: generatePDF import
 import AIAgent from '../components/AIAgent';
 import { useSummaryScreenContext } from '../hooks/useScreenContext';
 import { CloseoutSummary } from '../types/aiAgent';
@@ -66,33 +66,55 @@ const EditableField: React.FC<EditableFieldProps> = ({
 );
 
 export default function SummaryScreen({ navigation, route }: Props) {
-  // Convert legacy summary to closeout summary format with defaults
-  const initializeCloseoutSummary = (summary: any): CloseoutSummary => ({
-    // Map legacy fields to new structure
-    work_completed: summary.taskDescription || '',
-    scope_completed: summary.outcome || '',
-    notes: summary.notes || '',
-    location: summary.location || '',
-    datetime: summary.datetime || '',
+  // Initialize CloseoutSummary with proper field mapping
+  const initializeCloseoutSummary = (summary: CloseoutSummary): CloseoutSummary => {
+    console.log('🔧 Initializing CloseoutSummary from:', summary);
+    console.log('🔧 Summary type:', typeof summary);
+    console.log('🔧 Summary keys:', Object.keys(summary || {}));
     
-    // Initialize new closeout fields
-    onsite_contact: summary.onsite_contact || '',
-    support_contact: summary.support_contact || '',
-    delays: summary.delays || '',
-    troubleshooting_steps: summary.troubleshooting_steps || '',
-    released_by: summary.released_by || '',
-    release_code: summary.release_code || '',
-    return_tracking: summary.return_tracking || '',
-    expenses: summary.expenses || '',
-    materials_used: summary.materials_used || '',
-    out_of_scope_work: summary.out_of_scope_work || '',
-    photos_uploaded: summary.photos_uploaded || '',
-    technician_name: summary.technician_name || '',
+    const result: CloseoutSummary = {
+      // Primary closeout fields
+      onsite_contact: summary?.onsite_contact || '',
+      support_contact: summary?.support_contact || '',
+      work_completed: summary?.work_completed || summary?.taskDescription || '',
+      delays: summary?.delays || '',
+      troubleshooting_steps: summary?.troubleshooting_steps || '',
+      scope_completed: summary?.scope_completed || summary?.outcome || '',
+      released_by: summary?.released_by || '',
+      release_code: summary?.release_code || '',
+      return_tracking: summary?.return_tracking || '',
+      
+      // Expenses and materials
+      expenses: summary?.expenses || '',
+      materials_used: summary?.materials_used || '',
+      
+      // Out of scope work
+      out_of_scope_work: summary?.out_of_scope_work || '',
+      
+      // Photos
+      photos_uploaded: summary?.photos_uploaded || '',
+      
+      // Additional context
+      location: summary?.location || '',
+      datetime: summary?.datetime || '',
+      technician_name: summary?.technician_name || '',
+      
+      // Legacy fields for backward compatibility
+      taskDescription: summary?.taskDescription || summary?.work_completed || '',
+      outcome: summary?.outcome || summary?.scope_completed || '',
+      notes: summary?.notes || '',
+    };
     
-    // Keep legacy fields for backward compatibility
-    taskDescription: summary.taskDescription || '',
-    outcome: summary.outcome || '',
-  });
+    // DEBUGGING: Log what we extracted
+    console.log('✅ Initialized CloseoutSummary:');
+    console.log('  - onsite_contact:', result.onsite_contact);
+    console.log('  - support_contact:', result.support_contact);
+    console.log('  - work_completed:', result.work_completed);
+    console.log('  - location:', result.location);
+    console.log('  - technician_name:', result.technician_name);
+    
+    return result;
+  };
 
   const [editableSummary, setEditableSummary] = useState<CloseoutSummary>(
     initializeCloseoutSummary(route.params.summary)
@@ -100,7 +122,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const [editableTranscription, setEditableTranscription] = useState(route.params.transcription);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
-  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  // REMOVED: isGeneratingPDF state
 
   // Enhanced screen context for AI
   const screenContext = useSummaryScreenContext(
@@ -127,88 +149,38 @@ export default function SummaryScreen({ navigation, route }: Props) {
       });
       
       Alert.alert(
-        'Email Sent Successfully! 📧',
-        `Closeout report has been sent to:\n\n${emailResponse.recipients.join('\n')}\n\nMessage: ${emailResponse.message}`,
-        [
-          {
-            text: 'Create New Report',
-            onPress: () => navigation.navigate('Home'),
-          },
-          {
-            text: 'Close',
-            style: 'cancel',
-          },
-        ]
+        'Email Sent Successfully!',
+        `Report has been sent to ${emailResponse.recipients.join(', ')}`,
+        [{ text: 'OK', onPress: () => navigation.navigate('Home') }]
       );
     } catch (error) {
-      console.error('Error sending email:', error);
-      Alert.alert(
-        'Email Failed',
-        error instanceof Error ? error.message : 'Failed to send email. Please check your connection and try again.',
-        [{ text: 'OK' }]
-      );
+      console.error('Email sending failed:', error);
+      Alert.alert('Error', 'Failed to send email. Please try again.');
     } finally {
       setIsSendingEmail(false);
     }
   };
 
-  // Keep PDF generation for backward compatibility
-  const handleGeneratePDF = async () => {
-    try {
-      setIsGeneratingPDF(true);
-      const pdfUrl = await generatePDF({
-        summary: editableSummary,
-        transcription: editableTranscription,
-      });
-      
-      navigation.navigate('PDFPreview', {
-        pdfUrl,
-        summary: editableSummary,
-      });
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-      Alert.alert('Error', 'Failed to generate PDF');
-    } finally {
-      setIsGeneratingPDF(false);
-    }
-  };
+  // REMOVED: handleGeneratePDF function
 
-  // AI field updates
-  const handleAIFieldUpdate = (fieldName: string, value: string) => {
-    console.log(`🤖 AI updating field: ${fieldName} = ${value}`);
-    
-    if (fieldName === 'transcription') {
-      setEditableTranscription(value);
-    } else if (fieldName in editableSummary) {
+  const handleFieldUpdate = (fieldName: string, value: string) => {
+    if (fieldName in editableSummary) {
       updateSummaryField(fieldName as keyof CloseoutSummary, value);
+    } else if (fieldName === 'transcription') {
+      setEditableTranscription(value);
     }
   };
 
-  // AI mode toggle
-  const handleAIModeToggle = () => {
-    const newMode = !isPreviewMode;
-    console.log(`🤖 AI toggling mode to: ${newMode ? 'preview' : 'edit'}`);
-    setIsPreviewMode(newMode);
-  };
-
-  // AI custom actions
-  const handleAICustomAction = (action: string) => {
-    console.log(`🤖 AI custom action: ${action}`);
-    if (action === 'send_email') {
-      handleSendEmail();
-    } else if (action === 'generate_pdf') {
-      handleGeneratePDF();
-    } else if (action === 'add_current_time') {
-      const now = new Date().toLocaleString();
-      updateSummaryField('datetime', now);
-    }
+  const handleModeToggle = () => {
+    setIsPreviewMode(!isPreviewMode);
   };
 
   return (
     <View style={styles.container}>
-      <ScrollView style={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scrollContainer}>
+        {/* Header with Mode Toggle */}
         <View style={styles.header}>
-          <Text style={styles.title}>Field Service Closeout Report</Text>
+          <Text style={styles.title}>Closeout Report Summary</Text>
           <TouchableOpacity
             style={[styles.modeButton, isPreviewMode && styles.previewModeButton]}
             onPress={() => setIsPreviewMode(!isPreviewMode)}
@@ -221,7 +193,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
         {/* CLOSEOUT NOTES SECTION */}
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>📋 CLOSEOUT NOTES</Text>
+          <Text style={styles.sectionTitle}>CLOSEOUT NOTES</Text>
           
           <EditableField
             label="Who did you meet with on-site?"
@@ -301,7 +273,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
         {/* EXPENSES SECTION */}
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>💰 EXPENSES</Text>
+          <Text style={styles.sectionTitle}>EXPENSES</Text>
           
           <EditableField
             label="Any expenses (parking fees, etc)?"
@@ -324,7 +296,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
         {/* OUT OF SCOPE SECTION */}
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>⚠️ OUT OF SCOPE</Text>
+          <Text style={styles.sectionTitle}>OUT OF SCOPE</Text>
           
           <EditableField
             label="Out of scope work and who approved it"
@@ -338,27 +310,27 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
         {/* PHOTOS SECTION */}
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>📸 PHOTOS</Text>
+          <Text style={styles.sectionTitle}>PHOTOS</Text>
           
           <EditableField
             label="How many photos did you upload?"
             value={editableSummary.photos_uploaded || ''}
             onChangeText={(text) => updateSummaryField('photos_uploaded', text)}
             isEditing={!isPreviewMode}
-            placeholder="Number of photos and brief description..."
+            placeholder="Number of photos taken and uploaded..."
           />
         </View>
 
-        {/* ADDITIONAL INFO SECTION */}
+        {/* ADDITIONAL CONTEXT SECTION */}
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>ℹ️ ADDITIONAL INFO</Text>
+          <Text style={styles.sectionTitle}>ADDITIONAL CONTEXT</Text>
           
           <EditableField
             label="Location"
             value={editableSummary.location || ''}
             onChangeText={(text) => updateSummaryField('location', text)}
             isEditing={!isPreviewMode}
-            placeholder="Service location address or description..."
+            placeholder="Work location, address, or site..."
           />
 
           <EditableField
@@ -366,7 +338,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             value={editableSummary.datetime || ''}
             onChangeText={(text) => updateSummaryField('datetime', text)}
             isEditing={!isPreviewMode}
-            placeholder="Date and time of service..."
+            placeholder="When the work was completed..."
           />
 
           <EditableField
@@ -374,7 +346,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             value={editableSummary.technician_name || ''}
             onChangeText={(text) => updateSummaryField('technician_name', text)}
             isEditing={!isPreviewMode}
-            placeholder="Your name..."
+            placeholder="Your name as the technician..."
           />
 
           <EditableField
@@ -383,82 +355,73 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('notes', text)}
             isEditing={!isPreviewMode}
             multiline
-            placeholder="Any additional information or follow-up needed..."
+            placeholder="Any additional notes or comments..."
           />
         </View>
 
-        {/* ORIGINAL TRANSCRIPTION SECTION */}
+        {/* TRANSCRIPTION SECTION */}
         <View style={styles.transcriptionSection}>
-          <Text style={styles.sectionTitle}>🎙️ ORIGINAL TRANSCRIPTION</Text>
           <View style={styles.transcriptionCard}>
-            {!isPreviewMode ? (
-              <TextInput
-                style={styles.transcriptionInput}
-                value={editableTranscription || ''}
-                onChangeText={setEditableTranscription}
-                multiline
-                textAlignVertical="top"
-                placeholder="Your voice recording transcription..."
-              />
-            ) : (
-              <Text style={styles.transcriptionText}>
-                {editableTranscription || 'No transcription available'}
-              </Text>
-            )}
+            <Text style={styles.sectionTitle}>ORIGINAL TRANSCRIPTION</Text>
+            <EditableField
+              label="Voice Recording Transcription"
+              value={editableTranscription}
+              onChangeText={setEditableTranscription}
+              isEditing={!isPreviewMode}
+              multiline
+              placeholder="Original voice recording transcription..."
+            />
           </View>
         </View>
 
-        {/* ACTION BUTTONS */}
-        <View style={styles.actionButtonsContainer}>
-          {/* PRIMARY: Send Email Button */}
+        {/* SIMPLIFIED ACTION BUTTONS - Only Email */}
+        <View style={styles.actionButtons}>
           <TouchableOpacity
-            style={[styles.sendButton, isSendingEmail && styles.sendButtonDisabled]}
+            style={[styles.emailButton, isSendingEmail && styles.emailButtonDisabled]}
             onPress={handleSendEmail}
             disabled={isSendingEmail}
           >
             {isSendingEmail ? (
               <View style={styles.sendingContainer}>
-                <ActivityIndicator size="small" color="#fff" />
-                <Text style={styles.sendButtonText}>Sending Email...</Text>
+                <ActivityIndicator size="small" color="white" />
+                <Text style={styles.emailButtonText}>Sending Email...</Text>
               </View>
             ) : (
-              <Text style={styles.sendButtonText}>📧 Send Closeout Email</Text>
+              <Text style={styles.emailButtonText}>Send Email Report</Text>
             )}
           </TouchableOpacity>
 
-          {/* SECONDARY: Generate PDF Button (for backward compatibility) */}
           <TouchableOpacity
-            style={[styles.pdfButton, isGeneratingPDF && styles.pdfButtonDisabled]}
-            onPress={handleGeneratePDF}
-            disabled={isGeneratingPDF}
+            style={styles.homeButton}
+            onPress={() => navigation.navigate('Home')}
           >
-            {isGeneratingPDF ? (
-              <View style={styles.sendingContainer}>
-                <ActivityIndicator size="small" color="#fff" />
-                <Text style={styles.pdfButtonText}>Generating PDF...</Text>
-              </View>
-            ) : (
-              <Text style={styles.pdfButtonText}>📄 Generate PDF (Legacy)</Text>
-            )}
+            <Text style={styles.homeButtonText}>Create New Report</Text>
           </TouchableOpacity>
         </View>
 
+        {/* Email Recipients Info */}
         <View style={styles.recipientsInfo}>
-          <Text style={styles.recipientsTitle}>Email Recipients:</Text>
-          <Text style={styles.recipientsText}>
-            • russell.dummerth@beartechs.com{'\n'}
-            • austin.davenport@beartechs.com{'\n'}
-            • todd.davenport@beartechs.com
-          </Text>
+          <Text style={styles.recipientsTitle}>Email will be sent to:</Text>
+          <Text style={styles.recipientsText}>colbol42@gmail.com</Text>
         </View>
+
+        {/* Bottom spacing */}
+        <View style={styles.bottomSpacing} />
       </ScrollView>
 
-      {/* AI VOICE ASSISTANT */}
+      {/* AI Agent for voice commands */}
       <AIAgent
         screenContext={screenContext}
-        onFieldUpdate={handleAIFieldUpdate}
-        onModeToggle={handleAIModeToggle}
-        onCustomAction={handleAICustomAction}
+        onFieldUpdate={handleFieldUpdate}
+        onModeToggle={handleModeToggle}
+        onAction={(action) => {
+          if (action === 'send_email_report') {
+            handleSendEmail();
+          }
+          // REMOVED: PDF generation action
+        }}
+        position="bottom-right"
+        showDebugInfo={false}
       />
     </View>
   );
@@ -467,29 +430,30 @@ export default function SummaryScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#f5f5f5',
   },
   scrollContainer: {
     flex: 1,
-    paddingHorizontal: 20,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginVertical: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 10,
+    backgroundColor: 'white',
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#2c3e50',
-    flex: 1,
   },
   modeButton: {
-    backgroundColor: '#3498db',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
+    backgroundColor: '#e74c3c',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
     marginLeft: 10,
   },
   previewModeButton: {
@@ -508,6 +472,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 20,
+    marginHorizontal: 20,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -558,6 +523,7 @@ const styles = StyleSheet.create({
   },
   transcriptionSection: {
     marginBottom: 20,
+    marginHorizontal: 20,
   },
   transcriptionCard: {
     backgroundColor: 'white',
@@ -572,82 +538,64 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
-  transcriptionInput: {
-    fontSize: 14,
-    color: '#2c3e50',
-    minHeight: 120,
-    textAlignVertical: 'top',
-    borderWidth: 1,
-    borderColor: '#bdc3c7',
-    borderRadius: 8,
-    padding: 12,
+  actionButtons: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    gap: 15,
+    marginBottom: 20,
   },
-  transcriptionText: {
-    fontSize: 14,
-    color: '#2c3e50',
-    lineHeight: 20,
-    minHeight: 120,
-  },
-  actionButtonsContainer: {
-    marginBottom: 16,
-  },
-  sendButton: {
-    backgroundColor: '#e74c3c',
+  emailButton: {
+    flex: 2,
+    backgroundColor: '#FF6B35',
     paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  sendButtonDisabled: {
-    backgroundColor: '#bdc3c7',
-  },
-  sendButtonText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  pdfButton: {
-    backgroundColor: '#95a5a6',
-    paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
-    marginBottom: 12,
   },
-  pdfButtonDisabled: {
-    backgroundColor: '#bdc3c7',
+  emailButtonDisabled: {
+    opacity: 0.7,
   },
-  pdfButtonText: {
+  emailButtonText: {
     color: 'white',
-    fontSize: 14,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  homeButton: {
+    flex: 1,
+    backgroundColor: '#6B7280',
+    paddingVertical: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  homeButtonText: {
+    color: 'white',
+    fontSize: 16,
     fontWeight: '600',
   },
   sendingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
   },
   recipientsInfo: {
-    backgroundColor: '#e8f4fd',
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+    borderRadius: 8,
     padding: 16,
-    borderRadius: 12,
+    marginHorizontal: 20,
     marginBottom: 20,
   },
   recipientsTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#2c3e50',
+    color: '#1E40AF',
     marginBottom: 8,
   },
   recipientsText: {
-    fontSize: 12,
-    color: '#34495e',
-    lineHeight: 18,
+    fontSize: 14,
+    color: '#1E40AF',
+  },
+  bottomSpacing: {
+    height: 100,
   },
 });

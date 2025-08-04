@@ -1,3 +1,4 @@
+// voice-report-app/services/api.ts - REVERTED TO ORIGINAL WORKING VERSION (PDF REMOVED)
 import axios from 'axios';
 import * as FileSystem from 'expo-file-system';
 import { findWorkingBackend, testBackendConnection, API_CONFIG } from './api-config';
@@ -7,13 +8,7 @@ interface TranscriptionResponse {
 }
 
 interface SummaryResponse {
-  summary: {
-    taskDescription: string;
-    location?: string;
-    datetime?: string;
-    outcome?: string;
-    notes?: string;
-  };
+  summary: any; // CloseoutSummary format from backend
 }
 
 interface EmailResponse {
@@ -81,6 +76,7 @@ export async function transcribeAudio(audioUri: string): Promise<TranscriptionRe
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'VoiceReportApp/2.0',
+        'ngrok-skip-browser-warning': 'true',
       },
       timeout: API_CONFIG.CONNECTION.TIMEOUT,
     });
@@ -127,6 +123,7 @@ export async function summarizeText(transcription: string): Promise<SummaryRespo
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'VoiceReportApp/2.0',
+        'ngrok-skip-browser-warning': 'true',
       },
       timeout: API_CONFIG.CONNECTION.TIMEOUT,
     });
@@ -146,53 +143,7 @@ export async function generateSummary(transcription: string): Promise<SummaryRes
   return await summarizeText(transcription);
 }
 
-export async function generatePDF(data: {
-  summary: any;
-  transcription: string;
-}): Promise<string> {
-  const workingBackendUrl = await getWorkingBackend();
-  
-  if (!workingBackendUrl) {
-    throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
-  }
-
-  try {
-    console.log(`📄 Generating PDF using: ${workingBackendUrl}`);
-    
-    // Create request payload matching backend expectations
-    const payload = {
-      summary: data.summary,
-      transcription: data.transcription
-    };
-    
-    const response = await axios.post(`${workingBackendUrl}/generate-pdf`, payload, {
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'VoiceReportApp/2.0',
-      },
-      timeout: API_CONFIG.CONNECTION.TIMEOUT,
-      responseType: 'arraybuffer', // Important: PDF comes as binary data
-    });
-
-    console.log(`📁 PDF received: ${response.data.byteLength} bytes`);
-    
-    // Convert binary data to base64 and save to file
-    const bytes = new Uint8Array(response.data);
-    const base64 = btoa(String.fromCharCode(...bytes));
-
-    const fileUri = `${FileSystem.documentDirectory}report_${Date.now()}.pdf`;
-    await FileSystem.writeAsStringAsync(fileUri, base64, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-
-    console.log('✅ PDF saved to:', fileUri);
-    return fileUri;
-  } catch (error) {
-    console.error('PDF generation failed:', error);
-    cachedBackendUrl = null;
-    throw new Error('Failed to generate PDF. Please check your connection and try again.');
-  }
-}
+// REMOVED: generatePDF function completely
 
 export async function sendEmail(emailData: any): Promise<EmailResponse> {
   const workingBackendUrl = await getWorkingBackend();
@@ -207,6 +158,7 @@ export async function sendEmail(emailData: any): Promise<EmailResponse> {
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'VoiceReportApp/2.0',
+        'ngrok-skip-browser-warning': 'true',
       },
       timeout: API_CONFIG.CONNECTION.TIMEOUT,
     });
@@ -246,6 +198,7 @@ export async function sendCloseoutEmail(data: {
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'VoiceReportApp/2.0',
+        'ngrok-skip-browser-warning': 'true',
       },
       timeout: API_CONFIG.CONNECTION.TIMEOUT,
     });
@@ -279,6 +232,9 @@ export async function getBackendInfo(): Promise<any> {
 
   try {
     const response = await axios.get(`${workingBackendUrl}/health`, {
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+      },
       timeout: 5000,
     });
     return {
@@ -302,6 +258,9 @@ export async function testEmailConfiguration(): Promise<any> {
 
   try {
     const response = await axios.get(`${workingBackendUrl}/test-email`, {
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+      },
       timeout: 10000,
     });
     return response.data;
