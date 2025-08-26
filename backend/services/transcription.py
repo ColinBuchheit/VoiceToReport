@@ -1,4 +1,4 @@
-# backend/services/transcription.py - FIXED: Remove async from transcribe_audio
+# backend/services/transcription.py - FIXED VERSION
 import base64
 import tempfile
 import os
@@ -71,53 +71,51 @@ class TranscriptionService:
             logger.error(f"Unexpected error parsing voice command AI response: {e}")
             return None
     
-    def transcribe_audio(self, audio_data: bytes, audio_format: str = 'm4a') -> str:
+    def transcribe_audio(self, audio_file_path: str) -> str:
         """
-        Transcribe audio bytes using Whisper - FIXED: Removed async
+        FIXED: Transcribe audio file using Whisper - accepts file path
         
         Args:
-            audio_data: Audio data as bytes
-            audio_format: Audio file format (m4a, mp4, wav, etc.)
+            audio_file_path: Path to the audio file
             
         Returns:
             Transcription text
             
         Raises:
-            ValueError: If audio data is invalid
+            ValueError: If audio file path is invalid
             Exception: If transcription fails
         """
-        if not audio_data:
-            raise ValueError("No audio data provided")
+        if not audio_file_path or not os.path.exists(audio_file_path):
+            raise ValueError("Invalid audio file path")
         
-        if audio_format not in settings.supported_audio_formats:
-            raise ValueError(f"Unsupported audio format: {audio_format}")
+        logger.info(f"Starting transcription for audio file: {audio_file_path}")
         
-        logger.info(f"Starting transcription for {audio_format} audio")
+        # Get file info
+        file_size = os.path.getsize(audio_file_path)
+        file_size_mb = file_size / (1024 * 1024)
+        logger.info(f"Audio file size: {file_size_mb:.2f} MB")
         
-        # Check file size
-        audio_size_mb = len(audio_data) / (1024 * 1024)
-        if audio_size_mb > settings.max_audio_size_mb:
-            raise ValueError(f"Audio file too large: {audio_size_mb:.1f}MB (max: {settings.max_audio_size_mb}MB)")
+        # Check file size limit (25MB for OpenAI Whisper)
+        if file_size_mb > 25:
+            raise ValueError(f"Audio file too large: {file_size_mb:.1f}MB (max: 25MB)")
         
-        # Create temporary file for audio
-        temp_file_path = None
         try:
-            with tempfile.NamedTemporaryFile(suffix=f'.{audio_format}', delete=False) as temp_file:
-                temp_file.write(audio_data)
-                temp_file_path = temp_file.name
-            
-            logger.info(f"Created temporary audio file: {temp_file_path}")
-            
             # Transcribe using Whisper
             logger.info("Calling OpenAI Whisper API...")
-            with open(temp_file_path, 'rb') as audio_file:
+            with open(audio_file_path, 'rb') as audio_file:
                 transcript = self.client.audio.transcriptions.create(
                     model="whisper-1",
                     file=audio_file,
-                    language="en"
+                    language="en",  # You can remove this to auto-detect language
+                    response_format="text"  # Get plain text response
                 )
             
-            transcription_text = transcript.text
+            # Handle different response formats
+            if hasattr(transcript, 'text'):
+                transcription_text = transcript.text
+            else:
+                transcription_text = str(transcript)
+            
             logger.info(f"Transcription completed. Length: {len(transcription_text)} characters")
             logger.info(f"Transcription preview: {transcription_text[:100]}...")
             
@@ -129,15 +127,6 @@ class TranscriptionService:
             if hasattr(e, 'response'):
                 logger.error(f"OpenAI API response: {e.response}")
             raise Exception(f"Failed to transcribe audio: {str(e)}")
-            
-        finally:
-            # Clean up temporary file
-            if temp_file_path and os.path.exists(temp_file_path):
-                try:
-                    os.unlink(temp_file_path)
-                    logger.debug(f"Cleaned up temporary file: {temp_file_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to clean up temporary file {temp_file_path}: {e}")
     
     def process_voice_command(self, transcription: str, screen_context: Dict[str, Any] = None) -> Dict[str, Any]:
         """Process voice commands for editing text with better context understanding"""
@@ -163,133 +152,169 @@ class TranscriptionService:
                     for field in visible_fields:
                         field_name = field.get('name', '')
                         field_label = field.get('label', '')
-                        synonyms = field.get('synonyms', [])
+                        field_type = field.get('type', 'text')
                         current_value = field.get('currentValue', '')
-                        is_editable = field.get('isEditable', False)
+                        synonyms = field.get('synonyms', [])
                         
-                        # Only include editable fields
-                        if is_editable:
-                            # Add to mapping
-                            field_mapping[field_name] = field_name
-                            for synonym in synonyms:
-                                field_mapping[synonym.lower()] = field_name
-                            
-                            field_descriptions.append(
-                                f"- {field_label} ('{field_name}'): Current='{current_value[:50]}...'"
-                            )
+                        # Add to field mapping
+                        field_mapping[field_name.lower()] = field_name
+                        field_mapping[field_label.lower()] = field_name
+                        for synonym in synonyms:
+                            field_mapping[synonym.lower()] = field_name
+                        
+                        # Build description
+                        desc = f"- {field_label} ({field_name}): {field_type}"
+                        if current_value:
+                            desc += f" = '{current_value[:50]}'"
+                        if synonyms:
+                            desc += f" [synonyms: {', '.join(synonyms)}]"
+                        field_descriptions.append(desc)
                     
-                    context_description += f"Available editable fields:\n" + "\n".join(field_descriptions) + "\n"
-                    context_description += f"Field mapping: {field_mapping}\n"
+                    context_description += "Available fields:\n" + "\n".join(field_descriptions)
             
-            prompt = f"""
-You are processing a voice command for editing a field service closeout form. The user said: "{transcription}"
+            # Create system prompt for voice command processing
+            system_prompt = f"""You are an AI assistant helping a user interact with a mobile form via voice commands.
 
 CONTEXT:
-{context_description if context_description else "No screen context provided"}
+{context_description}
 
-FIELD MAPPING:
-Common field names and their correct system names:
-- "support team", "support person", "support contact" → support_contact
-- "onsite contact", "who did you meet", "met with" → onsite_contact  
-- "work completed", "work done", "task description" → work_completed
-- "expenses", "parking", "costs" → expenses
-- "photos", "pictures", "how many photos" → photos_uploaded
-- "location", "place", "where" → location
+VOICE COMMAND: "{transcription}"
 
-Analyze this command and determine what the user wants to change.
+Your task is to determine the appropriate action based on the voice command. Respond with a JSON object containing:
+- "action": one of ["update_field", "navigate", "clarify", "help", "acknowledge"]
+- "target": field name or navigation target (if applicable)
+- "value": new value to set (if updating a field)
+- "confidence": confidence score 0.0-1.0
+- "clarification": question to ask user if unclear (optional)
+- "confirmation": brief confirmation of what you understood
 
-Respond with ONLY valid JSON in this exact format:
-{{
-    "action": "update_field|clarify|error",
-    "target": "correct_field_name",
-    "value": "new_value_as_string",
-    "fieldUpdates": {{
-        "correct_field_name": "new_value_as_string"
-    }},
-    "confidence": 0.0-1.0,
-    "confirmation": "What I understood and will do",
-    "ttsText": "Text to speak back to user",
-    "success": true
-}}
+Examples:
+- "Set location to downtown office" → {{"action": "update_field", "target": "location", "value": "downtown office", "confidence": 0.9, "confirmation": "Setting location to downtown office"}}
+- "What can you help me with?" → {{"action": "help", "confidence": 1.0, "confirmation": "I can help you fill out forms by voice"}}
+- "Change the description" → {{"action": "clarify", "clarification": "What would you like to change the description to?", "confidence": 0.7, "confirmation": "I need more details about the description change"}}
 
-CRITICAL RULES:
-1. Always respond with valid JSON only
-2. Use action "update_field" for successful edits
-3. Use EXACT field names from the available fields (support_contact NOT support_team)
-4. ALL field values MUST be strings, even for numbers (use "4" not 4)
-5. If unclear, use action "clarify" and set success to false
-6. Keep ttsText conversational and brief
-
-EXAMPLES:
-Input: "change support team to Pavlov, the company"
-Output: {{"action": "update_field", "target": "support_contact", "value": "Pavlov, the company", "fieldUpdates": {{"support_contact": "Pavlov, the company"}}, "confidence": 0.9, "confirmation": "Updated support contact to Pavlov, the company", "ttsText": "Support contact updated to Pavlov, the company", "success": true}}
-
-Input: "we took four photos"
-Output: {{"action": "update_field", "target": "photos_uploaded", "value": "4", "fieldUpdates": {{"photos_uploaded": "4"}}, "confidence": 0.9, "confirmation": "Updated photos uploaded to 4", "ttsText": "I updated the photos uploaded to 4", "success": true}}
-
-Input: "add parking cost of 20 bucks"
-Output: {{"action": "update_field", "target": "expenses", "value": "Parking: $20", "fieldUpdates": {{"expenses": "Parking: $20"}}, "confidence": 0.9, "confirmation": "Added parking expense of $20", "ttsText": "I added the parking expense of 20 dollars", "success": true}}
+Be flexible with field name matching (use synonyms, partial matches, natural language variations).
 """
 
-            response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a voice command assistant for field service forms. Always respond with valid JSON only."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
+            try:
+                # Get AI response for voice command processing
+                response = self.client.chat.completions.create(
+                    model=getattr(settings, 'gpt_model', 'gpt-3.5-turbo'),
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": transcription}
+                    ],
+                    max_tokens=getattr(settings, 'gpt_max_tokens', 300),
+                    temperature=getattr(settings, 'gpt_temperature', 0.3)
+                )
+                
+                # Parse the AI response
+                ai_result = self.parse_ai_response(response)
+                
+                if ai_result:
+                    # Validate and enhance the response
+                    action = ai_result.get('action', 'acknowledge')
+                    target = ai_result.get('target', '')
+                    value = ai_result.get('value', '')
+                    confidence = float(ai_result.get('confidence', 0.5))
+                    clarification = ai_result.get('clarification', '')
+                    confirmation = ai_result.get('confirmation', f"I heard: '{transcription}'")
+                    
+                    # Map target field name using field mapping
+                    if target and target.lower() in field_mapping:
+                        target = field_mapping[target.lower()]
+                    
+                    return {
+                        "action": action,
+                        "target": target,
+                        "value": value,
+                        "confidence": confidence,
+                        "clarification": clarification,
+                        "confirmation": confirmation,
+                        "ttsText": clarification if clarification else confirmation
                     }
-                ],
-                temperature=0.1,
-                max_tokens=600
-            )
-            
-            # Parse the response and ensure string values
-            parsed_response = self.parse_ai_response(response)
-            
-            if parsed_response is None:
-                return {
-                    "action": "error",
-                    "fieldUpdates": {},
-                    "confidence": 0.0,
-                    "confirmation": "I couldn't process your request",
-                    "ttsText": "I'm sorry, I couldn't understand your request. Could you please try again?",
-                    "success": False
-                }
-            
-            # Ensure all field update values are strings
-            if "fieldUpdates" in parsed_response and parsed_response["fieldUpdates"]:
-                for key, value in parsed_response["fieldUpdates"].items():
-                    parsed_response["fieldUpdates"][key] = str(value)
-            
-            return parsed_response
-            
+                else:
+                    # Fallback response if AI parsing failed
+                    return {
+                        "action": "acknowledge",
+                        "target": "",
+                        "value": "",
+                        "confidence": 0.3,
+                        "clarification": "",
+                        "confirmation": f"I heard: '{transcription}', but I'm not sure how to help with that.",
+                        "ttsText": "I'm not sure how to help with that. Can you try rephrasing?"
+                    }
+                    
+            except Exception as ai_error:
+                logger.error(f"AI processing failed: {ai_error}")
+                # Fallback to simple pattern matching
+                return self._simple_voice_command_processing(transcription, field_mapping)
+                
         except Exception as e:
-            logger.error(f"Voice command processing error: {e}")
+            logger.error(f"Voice command processing failed: {e}")
             return {
                 "action": "error",
-                "fieldUpdates": {},
+                "target": "",
+                "value": "",
                 "confidence": 0.0,
-                "confirmation": "An error occurred processing your command",
-                "ttsText": "I encountered an error. Please try your command again.",
-                "success": False
+                "clarification": "",
+                "confirmation": "Sorry, I couldn't process that command.",
+                "ttsText": "I encountered an error. Please try again."
             }
     
-    def test_connection(self) -> Dict[str, Any]:
-        """Test OpenAI API connection"""
-        try:
-            # Test with a minimal API call
-            models = self.client.models.list()
+    def _simple_voice_command_processing(self, transcription: str, field_mapping: Dict[str, str] = None) -> Dict[str, Any]:
+        """Simple fallback voice command processing using pattern matching"""
+        
+        command_lower = transcription.lower()
+        
+        # Help commands
+        if any(word in command_lower for word in ['help', 'what can you do', 'capabilities']):
             return {
-                "status": "success",
-                "message": "OpenAI API connection successful",
-                "models_available": len(models.data) > 0
+                "action": "help",
+                "target": "",
+                "value": "",
+                "confidence": 0.9,
+                "clarification": "",
+                "confirmation": "I can help you fill out forms by voice",
+                "ttsText": "I can help you fill out forms by voice, update fields, and answer questions about your work."
             }
-        except Exception as e:
-            return {
-                "status": "error",
-                "message": f"OpenAI API connection failed: {str(e)}"
-            }
+        
+        # Update field commands
+        update_patterns = ['set', 'change', 'update', 'fill']
+        for pattern in update_patterns:
+            if pattern in command_lower:
+                # Try to extract field and value
+                parts = command_lower.split(pattern, 1)
+                if len(parts) > 1:
+                    remaining = parts[1].strip()
+                    
+                    # Look for "field to value" pattern
+                    if ' to ' in remaining:
+                        field_part, value_part = remaining.split(' to ', 1)
+                        field_name = field_part.strip()
+                        value = value_part.strip()
+                        
+                        # Map field name if possible
+                        if field_mapping and field_name in field_mapping:
+                            field_name = field_mapping[field_name]
+                        
+                        return {
+                            "action": "update_field",
+                            "target": field_name,
+                            "value": value,
+                            "confidence": 0.7,
+                            "clarification": "",
+                            "confirmation": f"Setting {field_name} to {value}",
+                            "ttsText": f"Setting {field_name} to {value}"
+                        }
+        
+        # Default acknowledgment
+        return {
+            "action": "acknowledge",
+            "target": "",
+            "value": "",
+            "confidence": 0.5,
+            "clarification": "",
+            "confirmation": f"I heard: '{transcription}'",
+            "ttsText": "I heard what you said, but I'm not sure how to help. Can you try rephrasing?"
+        }

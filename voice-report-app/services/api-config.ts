@@ -1,6 +1,6 @@
 // Auto-generated API configuration
 // This file is automatically updated by ngrok_manager.py
-// Last updated: 2025-08-04 15:38:10
+// Last updated: 2025-08-26 17:57:48
 
 import { Platform } from 'react-native';
 
@@ -8,14 +8,14 @@ import { Platform } from 'react-native';
 export const API_CONFIG = {
   // Backend URLs in order of preference
   BACKEND_URLS: [
-    'https://62080799cc08.ngrok-free.app',
+    'https://6e8e79c48446.ngrok-free.app',
     'http://192.168.1.171:8000',
     'http://localhost:8000',
     'http://10.0.2.2:8000'
   ],
   
   // Current ngrok URL (null if not available)
-  NGROK_URL: 'https://62080799cc08.ngrok-free.app',
+  NGROK_URL: 'https://6e8e79c48446.ngrok-free.app',
   
   // Local network IP
   LOCAL_IP: '192.168.1.171',
@@ -36,12 +36,11 @@ export const API_CONFIG = {
   },
 };
 
-// Helper function to test backend connectivity
+// FIXED: Helper function with critical ngrok header
 export const testBackendConnection = async (url: string): Promise<boolean> => {
   try {
     console.log(`Testing connection to: ${url}`);
     
-    // Use AbortController for timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
     
@@ -51,6 +50,9 @@ export const testBackendConnection = async (url: string): Promise<boolean> => {
       headers: {
         'Accept': 'application/json',
         'User-Agent': 'VoiceReportApp/2.0',
+        // 🚨 CRITICAL: This header prevents ngrok 400 errors
+        'ngrok-skip-browser-warning': 'true',
+        'Cache-Control': 'no-cache',
       },
     });
     
@@ -71,7 +73,6 @@ export const testBackendConnection = async (url: string): Promise<boolean> => {
   }
 };
 
-// Function to find working backend
 export const findWorkingBackend = async (): Promise<string | null> => {
   console.log('🔍 Testing backend connectivity...');
   
@@ -87,21 +88,17 @@ export const findWorkingBackend = async (): Promise<string | null> => {
   return null;
 };
 
-// Function to update ngrok URL dynamically
 export const updateNgrokURL = (newUrl: string) => {
-  // Update the first URL in the array with new ngrok URL
   API_CONFIG.BACKEND_URLS[0] = newUrl;
   API_CONFIG.NGROK_URL = newUrl;
   console.log(`Updated ngrok URL to: ${newUrl}`);
 };
 
-// Platform-specific configuration
 export const PLATFORM_CONFIG = {
   IS_IOS: Platform.OS === 'ios',
   IS_ANDROID: Platform.OS === 'android',
   IS_WEB: Platform.OS === 'web',
   
-  // Audio recording presets based on platform
   AUDIO_PRESET: Platform.select({
     ios: 'HIGH_QUALITY',
     android: 'HIGH_QUALITY',
@@ -109,7 +106,6 @@ export const PLATFORM_CONFIG = {
   }),
 };
 
-// Debug configuration
 export const DEBUG_CONFIG = {
   ENABLE_LOGS: __DEV__,
   ENABLE_PERFORMANCE_MONITORING: __DEV__,

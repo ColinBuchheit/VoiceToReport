@@ -1,51 +1,59 @@
-// voice-report-app/services/api.ts - REVERTED TO ORIGINAL WORKING VERSION (PDF REMOVED)
-import axios from 'axios';
+// voice-report-app/services/api.ts - FIXED VERSION (TypeScript Errors Resolved)
+import axios, { AxiosError } from 'axios';
 import * as FileSystem from 'expo-file-system';
-import { findWorkingBackend, testBackendConnection, API_CONFIG } from './api-config';
+import { API_CONFIG } from './api-config';
+import { TranscriptionResponse, SummaryResponse, EmailResponse, CloseoutSummary, ApiError } from '../types/api';
 
-interface TranscriptionResponse {
-  transcription: string;
-}
-
-interface SummaryResponse {
-  summary: any; // CloseoutSummary format from backend
-}
-
-interface EmailResponse {
-  success: boolean;
-  message: string;
-  recipients: string[];
-}
-
-// Cache for working backend URL to reduce redundant testing
+// Cache for working backend URL
 let cachedBackendUrl: string | null = null;
-let lastConnectivityCheck = 0;
-const CONNECTIVITY_CACHE_DURATION = 30000; // 30 seconds
+let lastCacheTime = 0;
+const CACHE_DURATION = 60000; // 1 minute
 
+// FIXED: Helper function to get working backend with proper error handling
 async function getWorkingBackend(): Promise<string | null> {
   const now = Date.now();
   
-  // Use cached URL if it's recent and still working
-  if (cachedBackendUrl && (now - lastConnectivityCheck) < CONNECTIVITY_CACHE_DURATION) {
-    const isStillWorking = await testBackendConnection(cachedBackendUrl);
-    if (isStillWorking) {
-      return cachedBackendUrl;
-    } else {
-      console.log('🔄 Cached backend URL no longer working, finding new one...');
-      cachedBackendUrl = null;
+  // Return cached URL if still fresh
+  if (cachedBackendUrl && (now - lastCacheTime) < CACHE_DURATION) {
+    return cachedBackendUrl;
+  }
+  
+  console.log('🔍 Testing backend connectivity...');
+  
+  // Test each backend URL
+  for (const url of API_CONFIG.BACKEND_URLS) {
+    try {
+      console.log(`📡 Testing: ${url}`);
+      
+      const response = await axios.get(`${url}/health`, {
+        timeout: 10000,
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'VoiceReportApp/2.0',
+          // FIXED: Add ngrok headers to prevent browser warning
+          'ngrok-skip-browser-warning': 'true',
+          'Cache-Control': 'no-cache',
+        },
+      });
+      
+      if (response.status === 200) {
+        console.log(`✅ Backend healthy: ${url}`);
+        cachedBackendUrl = url;
+        lastCacheTime = now;
+        return url;
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.log(`❌ Backend failed: ${url} - ${errorMessage}`);
+      continue;
     }
   }
   
-  // Use the function from api-config.ts to find working backend
-  const workingUrl = await findWorkingBackend();
-  if (workingUrl) {
-    cachedBackendUrl = workingUrl;
-    lastConnectivityCheck = now;
-  }
-  
-  return workingUrl;
+  cachedBackendUrl = null;
+  return null;
 }
 
+// FIXED: Transcribe audio with proper mobile app support
 export async function transcribeAudio(audioUri: string): Promise<TranscriptionResponse> {
   const workingBackendUrl = await getWorkingBackend();
   
@@ -66,7 +74,7 @@ export async function transcribeAudio(audioUri: string): Promise<TranscriptionRe
     // Determine audio format from file extension
     const format = audioUri.split('.').pop()?.toLowerCase() || 'm4a';
     
-    // Create request payload matching backend expectations
+    // FIXED: Create request payload matching backend expectations
     const payload = {
       audio: base64Audio,
       format: format
@@ -76,6 +84,7 @@ export async function transcribeAudio(audioUri: string): Promise<TranscriptionRe
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'VoiceReportApp/2.0',
+        // FIXED: Add ngrok headers
         'ngrok-skip-browser-warning': 'true',
       },
       timeout: API_CONFIG.CONNECTION.TIMEOUT,
@@ -89,14 +98,30 @@ export async function transcribeAudio(audioUri: string): Promise<TranscriptionRe
     cachedBackendUrl = null;
     
     if (axios.isAxiosError(error)) {
-      if (error.response?.status === 400) {
-        throw new Error('Invalid audio format or data');
+      const axiosError = error as AxiosError<ApiError>;
+      
+      // Handle specific error codes
+      if (axiosError.response?.status === 400) {
+        throw new Error('Invalid audio format or corrupted audio file');
       }
-      if (error.response?.status === 500) {
-        throw new Error('Server error during transcription');
+      if (axiosError.response?.status === 413) {
+        throw new Error('Audio file too large (max 25MB)');
       }
-      if (error.response?.data?.detail) {
-        throw new Error(`Backend error: ${error.response.data.detail}`);
+      if (axiosError.response?.status === 500) {
+        throw new Error('Server error during transcription - please try again');
+      }
+      if (axiosError.response?.status === 503) {
+        throw new Error('Transcription service unavailable - check OpenAI API configuration');
+      }
+      
+      // FIXED: Handle detailed error responses with proper typing
+      if (axiosError.response?.data?.detail) {
+        throw new Error(`Backend error: ${axiosError.response.data.detail}`);
+      }
+      
+      // Handle network errors
+      if (axiosError.code === 'NETWORK_ERROR' || axiosError.code === 'ECONNREFUSED') {
+        throw new Error('Network connection failed - check your internet connection');
       }
     }
     
@@ -114,7 +139,7 @@ export async function summarizeText(transcription: string): Promise<SummaryRespo
   try {
     console.log(`📝 Summarizing text using: ${workingBackendUrl}`);
     
-    // Create request payload matching backend expectations
+    // FIXED: Create request payload matching backend expectations
     const payload = {
       transcription: transcription
     };
@@ -134,18 +159,29 @@ export async function summarizeText(transcription: string): Promise<SummaryRespo
     console.error('Summarization failed:', error);
     // Clear cache on error
     cachedBackendUrl = null;
+    
+    if (axios.isAxiosError(error)) {
+      const axiosError = error as AxiosError<ApiError>;
+      
+      if (axiosError.response?.status === 503) {
+        throw new Error('Summarization service unavailable - check OpenAI API configuration');
+      }
+      // FIXED: Handle detailed error responses with proper typing
+      if (axiosError.response?.data?.detail) {
+        throw new Error(`Backend error: ${axiosError.response.data.detail}`);
+      }
+    }
+    
     throw new Error('Failed to summarize text. Please check your connection and try again.');
   }
 }
 
-// Export generateSummary function (alias for summarizeText) - FIXES THE MISSING FUNCTION ERROR
-export async function generateSummary(transcription: string): Promise<SummaryResponse> {
-  return await summarizeText(transcription);
-}
-
-// REMOVED: generatePDF function completely
-
-export async function sendEmail(emailData: any): Promise<EmailResponse> {
+// FIXED: Send email with proper error handling
+export async function sendEmail(
+  summary: CloseoutSummary,
+  transcription: string,
+  technicianName: string
+): Promise<EmailResponse> {
   const workingBackendUrl = await getWorkingBackend();
   
   if (!workingBackendUrl) {
@@ -154,44 +190,11 @@ export async function sendEmail(emailData: any): Promise<EmailResponse> {
 
   try {
     console.log(`📧 Sending email using: ${workingBackendUrl}`);
-    const response = await axios.post(`${workingBackendUrl}/send-email`, emailData, {
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'VoiceReportApp/2.0',
-        'ngrok-skip-browser-warning': 'true',
-      },
-      timeout: API_CONFIG.CONNECTION.TIMEOUT,
-    });
-
-    console.log(`📧 Email sent successfully`);
-    return response.data;
-  } catch (error) {
-    console.error('Email sending failed:', error);
-    cachedBackendUrl = null;
-    throw new Error('Failed to send email. Please check your connection and try again.');
-  }
-}
-
-// Send closeout email function
-export async function sendCloseoutEmail(data: {
-  summary: any;
-  transcription: string;
-  technician_name?: string;
-}): Promise<EmailResponse> {
-  const workingBackendUrl = await getWorkingBackend();
-  
-  if (!workingBackendUrl) {
-    throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
-  }
-
-  try {
-    console.log(`📧 Sending closeout email using: ${workingBackendUrl}`);
     
-    // Create request payload matching backend expectations
     const payload = {
-      summary: data.summary,
-      transcription: data.transcription,
-      technician_name: data.technician_name
+      summary: summary,
+      transcription: transcription,
+      technician_name: technicianName
     };
     
     const response = await axios.post(`${workingBackendUrl}/send-email`, payload, {
@@ -203,85 +206,94 @@ export async function sendCloseoutEmail(data: {
       timeout: API_CONFIG.CONNECTION.TIMEOUT,
     });
 
-    console.log(`📧 Email sent successfully to ${response.data.recipients.length} recipients`);
+    console.log('✅ Email sent successfully');
     return response.data;
   } catch (error) {
     console.error('Email sending failed:', error);
     cachedBackendUrl = null;
-    throw new Error('Failed to send closeout email. Please check your connection and try again.');
+    
+    if (axios.isAxiosError(error)) {
+      const axiosError = error as AxiosError<ApiError>;
+      
+      // FIXED: Handle detailed error responses with proper typing
+      if (axiosError.response?.data?.detail) {
+        throw new Error(`Email error: ${axiosError.response.data.detail}`);
+      }
+    }
+    
+    throw new Error('Failed to send email. Please check your connection and try again.');
   }
 }
 
-// Additional utility functions for debugging
-export async function checkBackendHealth(): Promise<boolean> {
-  try {
-    const workingBackendUrl = await getWorkingBackend();
-    return workingBackendUrl !== null;
-  } catch (error) {
-    console.error('Health check failed:', error);
-    return false;
-  }
-}
-
-export async function getBackendInfo(): Promise<any> {
+// FIXED: Process voice command for AI agent
+export async function processVoiceCommand(
+  audioUri: string, 
+  screenContext: any
+): Promise<any> {
   const workingBackendUrl = await getWorkingBackend();
   
   if (!workingBackendUrl) {
-    throw new Error('No backend server available');
+    throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
   }
 
   try {
-    const response = await axios.get(`${workingBackendUrl}/health`, {
-      headers: {
-        'ngrok-skip-browser-warning': 'true',
-      },
-      timeout: 5000,
+    console.log(`🤖 Processing voice command using: ${workingBackendUrl}`);
+    
+    // Read audio file as base64
+    const base64Audio = await FileSystem.readAsStringAsync(audioUri, {
+      encoding: FileSystem.EncodingType.Base64,
     });
-    return {
-      url: workingBackendUrl,
-      status: response.status,
-      data: response.data,
+
+    // Determine audio format
+    const format = audioUri.split('.').pop()?.toLowerCase() || 'm4a';
+    
+    const payload = {
+      audio: base64Audio,
+      format: format,
+      screenContext: screenContext
     };
-  } catch (error) {
-    console.error('Failed to get backend info:', error);
-    cachedBackendUrl = null;
-    throw new Error('Failed to get backend information');
-  }
-}
-
-export async function testEmailConfiguration(): Promise<any> {
-  const workingBackendUrl = await getWorkingBackend();
-  
-  if (!workingBackendUrl) {
-    throw new Error('No backend server available');
-  }
-
-  try {
-    const response = await axios.get(`${workingBackendUrl}/test-email`, {
+    
+    const response = await axios.post(`${workingBackendUrl}/voice-command`, payload, {
       headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'VoiceReportApp/2.0',
         'ngrok-skip-browser-warning': 'true',
       },
-      timeout: 10000,
+      timeout: API_CONFIG.CONNECTION.TIMEOUT,
     });
+
+    console.log('✅ Voice command processed successfully');
     return response.data;
   } catch (error) {
-    console.error('Email test failed:', error);
+    console.error('Voice command failed:', error);
     cachedBackendUrl = null;
-    throw new Error('Failed to test email configuration');
+    
+    if (axios.isAxiosError(error)) {
+      const axiosError = error as AxiosError<ApiError>;
+      
+      // FIXED: Handle detailed error responses with proper typing
+      if (axiosError.response?.data?.detail) {
+        throw new Error(`Voice command error: ${axiosError.response.data.detail}`);
+      }
+    }
+    
+    throw new Error('Failed to process voice command. Please try again.');
   }
 }
 
-// Function to manually refresh backend connection
-export async function refreshBackendConnection(): Promise<string | null> {
-  console.log('🔄 Manually refreshing backend connection...');
-  cachedBackendUrl = null;
-  lastConnectivityCheck = 0;
-  return await getWorkingBackend();
+// FIXED: Test backend connection
+export async function testBackendConnection(): Promise<{ success: boolean; url?: string; error?: string }> {
+  try {
+    const workingUrl = await getWorkingBackend();
+    if (workingUrl) {
+      return { success: true, url: workingUrl };
+    } else {
+      return { success: false, error: 'No working backend found' };
+    }
+  } catch (error) {
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Connection test failed' 
+    };
+  }
 }
-
-// Export the current configuration for debugging
-export const getAPIConfig = () => ({
-  ...API_CONFIG,
-  cachedBackendUrl,
-  lastConnectivityCheck: new Date(lastConnectivityCheck).toISOString(),
-});

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Fixed Ngrok URL Manager - Complete api-config.ts Generation
-This script properly generates the complete api-config.ts file with all necessary exports
+FIXED Ngrok URL Manager - Correct JavaScript syntax generation
 """
 
 import json
@@ -24,19 +23,17 @@ class NgrokManager:
     def get_local_ip(self) -> str:
         """Get the actual local IP address"""
         try:
-            # Connect to a remote server to get local IP
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
             ip = s.getsockname()[0]
             s.close()
             return ip
         except Exception:
-            # Fallback methods
             try:
                 hostname = socket.gethostname()
                 return socket.gethostbyname(hostname)
             except Exception:
-                return "192.168.1.100"  # Last resort fallback
+                return "192.168.1.100"
         
     def get_ngrok_url(self) -> Optional[str]:
         """Get the current ngrok HTTPS URL"""
@@ -62,84 +59,39 @@ class NgrokManager:
             print(f"❌ Error getting ngrok URL: {e}")
             return None
     
-    def wait_for_ngrok(self, max_attempts: int = 15, delay: int = 2) -> Optional[str]:
-        """Wait for ngrok to start and return the URL"""
-        print("🔄 Waiting for ngrok to establish tunnel...")
-        
-        for attempt in range(1, max_attempts + 1):
-            print(f"   Attempt {attempt}/{max_attempts}")
-            
-            url = self.get_ngrok_url()
-            if url:
-                print(f"✅ Ngrok tunnel found: {url}")
-                return url
-              
-            time.sleep(delay)
-        
-        print("❌ Failed to get ngrok URL after maximum attempts")
-        return None
-    
-    def start_ngrok(self) -> Optional[str]:
-        """Start ngrok and return the URL"""
-        print("🚀 Starting ngrok tunnel...")
-        
-        # Kill existing ngrok processes
-        try:
-            subprocess.run(["pkill", "-f", "ngrok"], check=False)
-            time.sleep(2)
-        except:
-            pass
-        
-        # Start ngrok
-        try:
-            subprocess.Popen([
-                "ngrok", "http", str(self.backend_port)
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            return self.wait_for_ngrok()
-            
-        except Exception as e:
-            print(f"❌ Failed to start ngrok: {e}")
-            return None
-    
     def generate_complete_api_config(self, ngrok_url: Optional[str] = None):
-        """Generate the complete api-config.ts file with all necessary exports"""
+        """Generate the FIXED api-config.ts with proper JavaScript syntax"""
         print("📝 Generating complete frontend configuration...")
         
-        # Get ngrok URL if not provided
         if ngrok_url is None:
             ngrok_url = self.get_ngrok_url()
         
-        # Get local IP
         local_ip = self.get_local_ip()
         
         # Ensure the services directory exists
         services_dir = Path(self.frontend_dir) / "services"
         services_dir.mkdir(exist_ok=True)
         
-        # Build the URL list in order of preference
+        # Build backend URLs - FIXED: Proper array formatting
         backend_urls = []
         
-        # Add ngrok URL if available
         if ngrok_url:
             backend_urls.append(f"'{ngrok_url}'")
             print(f"✅ Using ngrok URL: {ngrok_url}")
         else:
-            # Add placeholder that will be replaced when ngrok becomes available
             backend_urls.append("'https://placeholder-ngrok.ngrok.io'")
             print("⚠️  Ngrok URL not available, using placeholder")
         
-        # Add local network URL
         backend_urls.append(f"'http://{local_ip}:{self.backend_port}'")
-        print(f"✅ Using local IP: http://{local_ip}:{self.backend_port}")
-        
-        # Add localhost (for emulator/development)
         backend_urls.append(f"'http://localhost:{self.backend_port}'")
-        
-        # Add Android emulator URL
         backend_urls.append(f"'http://10.0.2.2:{self.backend_port}'")
         
-        # Create the complete configuration content with ALL exports
+        print(f"✅ Using local IP: http://{local_ip}:{self.backend_port}")
+        
+        # FIXED: Proper JavaScript array formatting with actual newlines
+        backend_urls_formatted = ',\n    '.join(backend_urls)
+        
+        # FIXED: Template with correct JavaScript syntax
         config_content = f'''// Auto-generated API configuration
 // This file is automatically updated by ngrok_manager.py
 // Last updated: {time.strftime("%Y-%m-%d %H:%M:%S")}
@@ -150,7 +102,7 @@ import {{ Platform }} from 'react-native';
 export const API_CONFIG = {{
   // Backend URLs in order of preference
   BACKEND_URLS: [
-    {',\n    '.join(backend_urls)}
+    {backend_urls_formatted}
   ],
   
   // Current ngrok URL (null if not available)
@@ -175,12 +127,11 @@ export const API_CONFIG = {{
   }},
 }};
 
-// Helper function to test backend connectivity
+// FIXED: Helper function with critical ngrok header
 export const testBackendConnection = async (url: string): Promise<boolean> => {{
   try {{
     console.log(`Testing connection to: ${{url}}`);
     
-    // Use AbortController for timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
     
@@ -190,6 +141,9 @@ export const testBackendConnection = async (url: string): Promise<boolean> => {{
       headers: {{
         'Accept': 'application/json',
         'User-Agent': 'VoiceReportApp/2.0',
+        // 🚨 CRITICAL: This header prevents ngrok 400 errors
+        'ngrok-skip-browser-warning': 'true',
+        'Cache-Control': 'no-cache',
       }},
     }});
     
@@ -210,7 +164,6 @@ export const testBackendConnection = async (url: string): Promise<boolean> => {{
   }}
 }};
 
-// Function to find working backend
 export const findWorkingBackend = async (): Promise<string | null> => {{
   console.log('🔍 Testing backend connectivity...');
   
@@ -226,21 +179,17 @@ export const findWorkingBackend = async (): Promise<string | null> => {{
   return null;
 }};
 
-// Function to update ngrok URL dynamically
 export const updateNgrokURL = (newUrl: string) => {{
-  // Update the first URL in the array with new ngrok URL
   API_CONFIG.BACKEND_URLS[0] = newUrl;
   API_CONFIG.NGROK_URL = newUrl;
   console.log(`Updated ngrok URL to: ${{newUrl}}`);
 }};
 
-// Platform-specific configuration
 export const PLATFORM_CONFIG = {{
   IS_IOS: Platform.OS === 'ios',
   IS_ANDROID: Platform.OS === 'android',
   IS_WEB: Platform.OS === 'web',
   
-  // Audio recording presets based on platform
   AUDIO_PRESET: Platform.select({{
     ios: 'HIGH_QUALITY',
     android: 'HIGH_QUALITY',
@@ -248,7 +197,6 @@ export const PLATFORM_CONFIG = {{
   }}),
 }};
 
-// Debug configuration
 export const DEBUG_CONFIG = {{
   ENABLE_LOGS: __DEV__,
   ENABLE_PERFORMANCE_MONITORING: __DEV__,
@@ -258,12 +206,10 @@ export const DEBUG_CONFIG = {{
 '''
         
         try:
-            # Write the complete file
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 f.write(config_content)
             print(f"✅ Complete configuration generated: {self.config_file}")
             
-            # Verify the file was written correctly
             if self.config_file.exists() and self.config_file.stat().st_size > 100:
                 print(f"✅ Configuration file verified: {self.config_file.stat().st_size} bytes")
                 return True
@@ -275,41 +221,45 @@ export const DEBUG_CONFIG = {{
             print(f"❌ Failed to generate configuration: {e}")
             return False
     
-    def update_frontend_config(self, ngrok_url: Optional[str] = None):
-        """Update the frontend configuration - alias for generate_complete_api_config"""
-        return self.generate_complete_api_config(ngrok_url)
-    
-    def get_tunnel_info(self) -> Dict:
-        """Get detailed information about all tunnels"""
+    def verify_api_config(self):
+        """Verify the api-config.ts file has all necessary exports"""
+        print("🔍 Verifying api-config.ts exports...")
+        
+        if not self.config_file.exists():
+            print(f"❌ Configuration file does not exist: {self.config_file}")
+            return False
+        
         try:
-            response = requests.get(self.ngrok_api_url, timeout=5)
-            response.raise_for_status()
-            return response.json()
-        except:
-            return {"tunnels": []}
-    
-    def print_tunnel_status(self):
-        """Print the current status of ngrok tunnels"""
-        info = self.get_tunnel_info()
-        tunnels = info.get('tunnels', [])
-        
-        if not tunnels:
-            print("❌ No ngrok tunnels found")
-            return
-        
-        print("🌐 Ngrok Tunnel Status:")
-        print("=" * 50)
-        
-        for tunnel in tunnels:
-            proto = tunnel.get('proto', 'unknown')
-            public_url = tunnel.get('public_url', 'unknown')
-            config = tunnel.get('config', {})
-            addr = config.get('addr', 'unknown')
+            with open(self.config_file, 'r', encoding='utf-8') as f:
+                content = f.read()
             
-            print(f"  Protocol: {proto}")
-            print(f"  Public URL: {public_url}")
-            print(f"  Local Address: {addr}")
-            print("-" * 30)
+            required_exports = [
+                'export const API_CONFIG',
+                'export const testBackendConnection',
+                'export const findWorkingBackend',
+                'export const updateNgrokURL',
+                'export const PLATFORM_CONFIG',
+                'export const DEBUG_CONFIG',
+                'ngrok-skip-browser-warning'
+            ]
+            
+            missing_exports = []
+            for export in required_exports:
+                if export not in content:
+                    missing_exports.append(export)
+            
+            if missing_exports:
+                print(f"❌ Missing required exports: {missing_exports}")
+                return False
+            else:
+                print("✅ All required exports found in api-config.ts")
+                if 'ngrok-skip-browser-warning' in content:
+                    print("✅ Critical ngrok header found in template")
+                return True
+                
+        except Exception as e:
+            print(f"❌ Error verifying api-config.ts: {e}")
+            return False
     
     def test_connectivity(self):
         """Test connectivity to backend through all available URLs"""
@@ -329,7 +279,8 @@ export const DEBUG_CONFIG = {{
         working_count = 0
         for url in urls_to_test:
             try:
-                response = requests.get(f"{url}/health", timeout=5)
+                headers = {'ngrok-skip-browser-warning': 'true'} if 'ngrok' in url else {}
+                response = requests.get(f"{url}/health", timeout=5, headers=headers)
                 if response.status_code == 200:
                     print(f"✅ {url} - OK")
                     working_count += 1
@@ -338,55 +289,16 @@ export const DEBUG_CONFIG = {{
             except Exception as e:
                 print(f"❌ {url} - Failed: {e}")
         
-        print(f"\n📊 Summary: {working_count}/{len(urls_to_test)} URLs working")
-        return working_count > 0
-    
-    def verify_api_config(self):
-        """Verify that the generated api-config.ts file has all required exports"""
-        print("🔍 Verifying api-config.ts exports...")
-        
-        if not self.config_file.exists():
-            print("❌ api-config.ts file does not exist")
-            return False
-        
-        try:
-            with open(self.config_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            required_exports = [
-                'export const API_CONFIG',
-                'export const testBackendConnection',
-                'export const findWorkingBackend',
-                'export const updateNgrokURL',
-                'export const PLATFORM_CONFIG',
-                'export const DEBUG_CONFIG'
-            ]
-            
-            missing_exports = []
-            for export in required_exports:
-                if export not in content:
-                    missing_exports.append(export)
-            
-            if missing_exports:
-                print(f"❌ Missing exports: {missing_exports}")
-                return False
-            else:
-                print("✅ All required exports found in api-config.ts")
-                return True
-                
-        except Exception as e:
-            print(f"❌ Error reading api-config.ts: {e}")
-            return False
+        print(f"\n📊 Summary: {working_count}/{len(urls_to_test)} endpoints working")
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description='Ngrok URL Manager - Complete Config Generator')
-    parser.add_argument('--start', action='store_true', help='Start ngrok and generate complete config')
+    
+    parser = argparse.ArgumentParser(description='FIXED Ngrok Manager & Frontend Config Generator')
     parser.add_argument('--update', action='store_true', help='Generate complete frontend config with current URLs')
     parser.add_argument('--url', action='store_true', help='Get current ngrok URL')
-    parser.add_argument('--status', action='store_true', help='Show tunnel status')
-    parser.add_argument('--test', action='store_true', help='Test connectivity')
     parser.add_argument('--verify', action='store_true', help='Verify api-config.ts has all exports')
+    parser.add_argument('--test', action='store_true', help='Test connectivity to all backends')
     parser.add_argument('--port', type=int, default=8000, help='Backend port (default: 8000)')
     parser.add_argument('--frontend-dir', default='voice-report-app', help='Frontend directory')
     
@@ -394,11 +306,7 @@ def main():
     
     manager = NgrokManager(args.port, args.frontend_dir)
     
-    if args.start:
-        url = manager.start_ngrok()
-        manager.generate_complete_api_config(url)
-        manager.verify_api_config()
-    elif args.update:
+    if args.update:
         result = manager.generate_complete_api_config()
         if result:
             manager.verify_api_config()
@@ -408,12 +316,10 @@ def main():
             print(url)
         else:
             sys.exit(1)
-    elif args.status:
-        manager.print_tunnel_status()
-    elif args.test:
-        manager.test_connectivity()
     elif args.verify:
         manager.verify_api_config()
+    elif args.test:
+        manager.test_connectivity()
     else:
         parser.print_help()
 

@@ -1,4 +1,4 @@
-// voice-report-app/App.tsx - Updated without PDF functionality
+// voice-report-app/App.tsx - FIXED VERSION with better error handling
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -7,9 +7,9 @@ import { StatusBar } from 'react-native';
 import HomeScreen from './screens/HomeScreen';
 import TranscriptScreen from './screens/TranscriptScreen';
 import SummaryScreen from './screens/SummaryScreen';
-import { CloseoutSummary } from './types/aiAgent';
+import { CloseoutSummary } from './types/api'; // FIXED: Import from correct types file
 
-// REMOVED: PDFPreviewScreen import and navigation type
+// FIXED: Updated navigation types to match new API types
 export type RootStackParamList = {
   Home: undefined;
   Transcript: {
@@ -20,7 +20,6 @@ export type RootStackParamList = {
     transcription: string;
     summary: CloseoutSummary;
   };
-  // REMOVED: PDFPreview navigation type
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -56,7 +55,6 @@ export default function App() {
             component={SummaryScreen} 
             options={{ title: 'Summary' }}
           />
-          {/* REMOVED: PDFPreview screen */}
         </Stack.Navigator>
       </NavigationContainer>
     </>
