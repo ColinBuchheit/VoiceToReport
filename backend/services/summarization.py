@@ -1,168 +1,217 @@
-# backend/services/summarization.py - FIXED EXTRACTION AND IMPROVED PROMPTING
-
-import json
+# backend/services/summarization.py - FIXED TO EXTRACT INFORMATION PROPERLY
 import logging
+import json
 from typing import Dict, Any
 from openai import OpenAI
-from models import CloseoutSummary
+from config import settings
 
 logger = logging.getLogger(__name__)
 
 class SummarizationService:
+    """Service for generating structured closeout summaries from transcriptions"""
+    
     def __init__(self, openai_client: OpenAI):
         self.client = openai_client
     
-    def parse_ai_response(self, response) -> Dict[str, Any]:
-        """Enhanced parsing with better error handling"""
-        try:
-            content = response.choices[0].message.content.strip()
-            logger.info(f"Raw AI response: {content[:500]}...")
-            
-            # Find JSON content
-            start_idx = content.find('{')
-            end_idx = content.rfind('}') + 1
-            
-            if start_idx == -1 or end_idx == 0:
-                logger.error("No JSON found in AI response")
-                return None
-            
-            json_str = content[start_idx:end_idx]
-            parsed = json.loads(json_str)
-            
-            logger.info(f"Successfully parsed JSON response with {len(parsed)} top-level keys")
-            return parsed
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON parsing failed: {e}")
-            logger.error(f"Attempted to parse: {content}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error parsing response: {e}")
-            return None
-    
-    def extract_closeout_data(self, transcription: str) -> CloseoutSummary:
-        """Extract structured closeout information from transcription"""
+    def generate_closeout_summary(self, transcription: str) -> Dict[str, Any]:
+        """
+        Generate structured closeout summary from transcription
         
-        # IMPROVED PROMPT with better instruction and examples
-        prompt = f"""
-You are a specialized AI that extracts field service closeout information from transcriptions.
-
-TRANSCRIPTION TO ANALYZE:
-"{transcription}"
-
-Extract information for these specific categories. If information is not mentioned, use "Not mentioned".
-
-CRITICAL INSTRUCTIONS:
-1. Listen for NAMES - extract all person names mentioned (John, Ron, Sarah, etc.)
-2. Listen for COMPANIES - extract company/organization names (Pavlov, Microsoft, etc.) 
-3. Listen for LOCATIONS - extract specific places, addresses, buildings
-4. Listen for WORK DETAILS - extract all technical work, tasks, repairs mentioned
-5. Listen for COSTS - extract any dollar amounts, parking fees, expenses
-6. Listen for NUMBERS - extract photo counts, tracking numbers, codes
-7. Be COMPREHENSIVE - don't summarize, extract ALL details mentioned
-
-RESPOND WITH ONLY THIS JSON FORMAT:
-
-{{
-    "CLOSEOUT_NOTES": {{
-        "onsite_contact": "Extract WHO they met with on-site (names, roles)",
-        "support_contact": "Extract WHO helped with support (names, companies)", 
-        "work_completed": "Extract ALL work/tasks completed (be detailed)",
-        "delays": "Extract any delays mentioned or 'Not mentioned'",
-        "troubleshooting_steps": "Extract troubleshooting steps taken",
-        "scope_completed": "Extract if scope was completed (yes/no/details)",
-        "released_by": "Extract who released/signed off (name/role)",
-        "release_code": "Extract any release/completion codes",
-        "return_tracking": "Extract return tracking numbers"
-    }},
-    "EXPENSES": {{
-        "expenses": "Extract parking fees, costs, dollar amounts", 
-        "materials_used": "Extract equipment, parts, supplies used"
-    }},
-    "OUT_OF_SCOPE": {{
-        "out_of_scope_work": "Extract additional work and approvals"
-    }},
-    "PHOTOS": {{
-        "photos_uploaded": "Extract number of photos (just the number)"
-    }},
-    "ADDITIONAL_CONTEXT": {{
-        "location": "Extract specific location/address/building",
-        "datetime": "Extract date/time mentioned",
-        "technician_name": "Extract technician's name"
-    }}
-}}
-
-EXAMPLES OF GOOD EXTRACTION:
-- "I met with John Smith" → onsite_contact: "John Smith"
-- "Pavlov support helped me" → support_contact: "Pavlov support"  
-- "Fixed the router and updated firmware" → work_completed: "Fixed the router and updated firmware"
-- "Parking cost me 20 bucks" → expenses: "Parking: $20"
-- "Took 4 photos" → photos_uploaded: "4"
-
-Extract ALL information mentioned. Be specific and detailed."""
-
-        try:
-            logger.info("🔍 Starting closeout data extraction...")
-            logger.info(f"📝 Transcription length: {len(transcription)} characters")
+        Args:
+            transcription: Raw voice transcription text
             
+        Returns:
+            Dictionary with closeout report fields
+        """
+        try:
+            logger.info("Generating closeout summary from transcription")
+            logger.info(f"Transcription length: {len(transcription)} characters")
+            
+            # Create detailed prompt for field extraction
+            prompt = self._build_extraction_prompt(transcription)
+            
+            # Get GPT response
             response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model=settings.gpt_model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a specialized field service data extraction AI. Always respond with valid JSON only, no additional text. Extract ALL information mentioned, don't summarize."
+                        "content": "You are an expert at extracting structured information from field service reports. Extract the requested information accurately and format it as valid JSON."
                     },
-                    {
-                        "role": "user", 
-                        "content": prompt
-                    }
+                    {"role": "user", "content": prompt}
                 ],
-                max_tokens=1200,  # Increased for longer responses
-                temperature=0.0   # Minimal temperature for consistent extraction
+                max_tokens=settings.gpt_max_tokens,
+                temperature=0.1  # Low temperature for consistent extraction
             )
             
-            # Parse JSON response
-            extracted_data = self.parse_ai_response(response)
+            # Parse the response
+            summary_text = response.choices[0].message.content.strip()
+            logger.info("GPT summary generation completed")
             
-            if extracted_data is None:
-                logger.error("❌ Failed to parse AI response, returning empty summary")
-                return self.get_empty_summary()
+            # Extract JSON from response
+            summary = self._parse_summary_response(summary_text)
             
-            # IMPROVED: Flatten and validate the nested structure
-            logger.info("🔧 Flattening extracted data structure...")
-            flattened_data = {}
+            # Log extraction results
+            populated_fields = sum(1 for v in summary.values() if v and v != "Not mentioned" and v != "")
+            logger.info(f"Summary extraction completed: {populated_fields}/16 fields populated")
             
-            # Extract each section with validation
-            sections = ['CLOSEOUT_NOTES', 'EXPENSES', 'OUT_OF_SCOPE', 'PHOTOS', 'ADDITIONAL_CONTEXT']
+            return summary
             
-            for section_name in sections:
-                section_data = extracted_data.get(section_name, {})
-                if isinstance(section_data, dict):
-                    flattened_data.update(section_data)
-                    logger.info(f"  ✅ Extracted {len(section_data)} fields from {section_name}")
-                else:
-                    logger.warning(f"  ⚠️ Section {section_name} is not a dict: {type(section_data)}")
-            
-            # DEBUGGING: Log extracted fields
-            logger.info("📋 Extracted field summary:")
-            for key, value in flattened_data.items():
-                if value and value != "Not mentioned":
-                    logger.info(f"  - {key}: {str(value)[:50]}...")
-            
-            # Create CloseoutSummary object
-            logger.info(f"✅ Successfully extracted {len(flattened_data)} fields")
-            closeout_summary = CloseoutSummary(**flattened_data)
-            
-            return closeout_summary
-                
         except Exception as e:
-            logger.error(f"❌ Closeout data extraction failed: {e}")
-            return self.get_empty_summary()
+            logger.error(f"Summary generation failed: {e}")
+            # Return empty structure on failure
+            return self._get_empty_summary()
     
-    def get_empty_summary(self) -> CloseoutSummary:
-        """Return an empty CloseoutSummary with 'Not mentioned' defaults"""
-        logger.info("📝 Creating empty summary with defaults")
-        empty_data = {
+    def _build_extraction_prompt(self, transcription: str) -> str:
+        """Build detailed prompt for extracting closeout information"""
+        
+        prompt = f"""Extract field service closeout information from this transcription. 
+
+TRANSCRIPTION:
+"{transcription}"
+
+TASK: Extract the following closeout report fields. Be thorough and look for this information throughout the entire transcription:
+
+CLOSEOUT NOTES:
+- onsite_contact: Who did the technician meet with on-site? (names, titles, roles)
+- support_contact: Who provided support? (remote support person, help desk, colleague)
+- work_completed: What specific work was done? (tasks, repairs, installations, troubleshooting)
+- delays: Were there any delays mentioned? (traffic, waiting for parts, access issues)
+- troubleshooting_steps: What troubleshooting or diagnostic steps were taken?
+- scope_completed: Was the work scope completed successfully? (yes/no/partial with details)
+- released_by: Who released/dismissed the technician? (name or title)
+- release_code: Any release or completion code mentioned?
+- return_tracking: Any return tracking numbers for parts/equipment?
+
+EXPENSES:
+- expenses: Any expenses mentioned? (parking, tolls, materials purchased)
+- materials_used: What materials/parts were used?
+
+OUT OF SCOPE:
+- out_of_scope_work: Any additional work outside the original scope?
+
+PHOTOS:
+- photos_uploaded: How many photos were taken/uploaded?
+
+ADDITIONAL:
+- location: Where was the work performed? (address, building, site name)
+- datetime: When was the work performed? (date/time if mentioned)
+- technician_name: Name of the technician (if mentioned)
+
+EXTRACTION RULES:
+1. Look for this information ANYWHERE in the transcription, not just in order
+2. Extract names, specific details, and numbers where mentioned
+3. Use "Not mentioned" ONLY if the information is truly not present
+4. Be flexible with phrasing (e.g., "met with John" = onsite_contact: "John")
+5. Extract partial information rather than marking as "Not mentioned"
+
+EXAMPLES OF GOOD EXTRACTION:
+- "I worked with Sarah from IT" → support_contact: "Sarah from IT"
+- "Met with the front desk manager Mark" → onsite_contact: "Mark (front desk manager)"
+- "Replaced the faulty switch" → work_completed: "Replaced faulty switch"
+- "No issues, everything went smoothly" → delays: "None"
+
+Return ONLY a JSON object with the exact field names above:
+
+{{
+  "onsite_contact": "extracted value or Not mentioned",
+  "support_contact": "extracted value or Not mentioned", 
+  "work_completed": "extracted value or Not mentioned",
+  "delays": "extracted value or Not mentioned",
+  "troubleshooting_steps": "extracted value or Not mentioned",
+  "scope_completed": "extracted value or Not mentioned",
+  "released_by": "extracted value or Not mentioned",
+  "release_code": "extracted value or Not mentioned",
+  "return_tracking": "extracted value or Not mentioned",
+  "expenses": "extracted value or Not mentioned",
+  "materials_used": "extracted value or Not mentioned",
+  "out_of_scope_work": "extracted value or Not mentioned",
+  "photos_uploaded": "extracted value or Not mentioned",
+  "location": "extracted value or Not mentioned",
+  "datetime": "extracted value or Not mentioned",
+  "technician_name": "extracted value or Not mentioned"
+}}"""
+        
+        return prompt
+    
+    def _parse_summary_response(self, response_text: str) -> Dict[str, Any]:
+        """Parse and validate the GPT summary response"""
+        try:
+            # Extract JSON from response
+            start_idx = response_text.find('{')
+            end_idx = response_text.rfind('}') + 1
+            
+            if start_idx == -1 or end_idx == 0:
+                logger.warning("No JSON found in summary response, using fallback parsing")
+                return self._fallback_parse(response_text)
+            
+            json_str = response_text[start_idx:end_idx]
+            summary = json.loads(json_str)
+            
+            # Ensure all required fields are present
+            required_fields = [
+                'onsite_contact', 'support_contact', 'work_completed', 'delays',
+                'troubleshooting_steps', 'scope_completed', 'released_by', 
+                'release_code', 'return_tracking', 'expenses', 'materials_used',
+                'out_of_scope_work', 'photos_uploaded', 'location', 'datetime', 
+                'technician_name'
+            ]
+            
+            for field in required_fields:
+                if field not in summary:
+                    summary[field] = "Not mentioned"
+            
+            # Clean up values
+            for key, value in summary.items():
+                if not value or str(value).strip() == "":
+                    summary[key] = "Not mentioned"
+                elif isinstance(value, str):
+                    summary[key] = value.strip()
+            
+            return summary
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse summary JSON: {e}")
+            logger.error(f"Response text: {response_text}")
+            return self._fallback_parse(response_text)
+        except Exception as e:
+            logger.error(f"Unexpected error parsing summary: {e}")
+            return self._get_empty_summary()
+    
+    def _fallback_parse(self, response_text: str) -> Dict[str, Any]:
+        """Fallback parsing using simple text extraction"""
+        logger.info("Using fallback parsing for summary extraction")
+        
+        summary = self._get_empty_summary()
+        text_lower = response_text.lower()
+        
+        # Simple keyword extraction patterns
+        patterns = {
+            'onsite_contact': ['met with', 'on-site contact', 'front desk', 'manager', 'receptionist'],
+            'support_contact': ['support', 'help desk', 'it support', 'technical support', 'worked with'],
+            'work_completed': ['replaced', 'fixed', 'repaired', 'installed', 'completed', 'work done'],
+            'location': ['location', 'site', 'building', 'office', 'address'],
+            'technician_name': ['i am', 'my name is', 'this is', 'technician']
+        }
+        
+        for field, keywords in patterns.items():
+            for keyword in keywords:
+                if keyword in text_lower:
+                    # Try to extract surrounding context
+                    idx = text_lower.find(keyword)
+                    if idx != -1:
+                        # Get surrounding words for context
+                        start = max(0, idx - 50)
+                        end = min(len(response_text), idx + 100)
+                        context = response_text[start:end].strip()
+                        summary[field] = context
+                        break
+        
+        return summary
+    
+    def _get_empty_summary(self) -> Dict[str, Any]:
+        """Get empty summary structure with all required fields"""
+        return {
             "onsite_contact": "Not mentioned",
             "support_contact": "Not mentioned", 
             "work_completed": "Not mentioned",
@@ -170,7 +219,7 @@ Extract ALL information mentioned. Be specific and detailed."""
             "troubleshooting_steps": "Not mentioned",
             "scope_completed": "Not mentioned",
             "released_by": "Not mentioned",
-            "release_code": "Not mentioned", 
+            "release_code": "Not mentioned",
             "return_tracking": "Not mentioned",
             "expenses": "Not mentioned",
             "materials_used": "Not mentioned",
@@ -180,5 +229,3 @@ Extract ALL information mentioned. Be specific and detailed."""
             "datetime": "Not mentioned",
             "technician_name": "Not mentioned"
         }
-        
-        return CloseoutSummary(**empty_data)

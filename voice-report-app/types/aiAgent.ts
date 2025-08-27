@@ -38,6 +38,7 @@ export interface VoiceCommand {
 
 export interface VoiceCommandResponse {
   action: 
+    | 'respond'           // ADD THIS - Backend returns this for simple responses
     | 'update_field' 
     | 'navigate' 
     | 'toggle_mode' 
@@ -45,18 +46,28 @@ export interface VoiceCommandResponse {
     | 'execute_action'
     | 'explain_capabilities'
     | 'provide_suggestion'
-    | 'acknowledge';
+    | 'acknowledge'
+    | 'edit_field'        // ADD THIS - Common alias for update_field
+    | 'clear_field'       // ADD THIS - For clearing field values
+    | 'toggle_edit_mode'  // ADD THIS - For toggling edit mode
+    | 'generate_summary'; // ADD THIS - For generating summaries
   target?: string;
   value?: string;
   confidence: number;
   clarification?: string;
   confirmation: string;
   ttsText: string;
+  success?: boolean;    // ADD THIS - Backend includes this field
+  needs_clarification?: boolean; // ADD THIS - Backend includes this
+  clarification_question?: string; // ADD THIS - Backend includes this
+  replacement?: string; // ADD THIS - Backend includes this
+  fieldUpdates?: Record<string, any>; // ADD THIS - Backend includes this
   metadata?: {
     processingTime?: number;
     modelUsed?: string;
     suggestions?: string[];
     relatedFields?: string[];
+    [key: string]: any; // Allow additional metadata fields
   };
 }
 

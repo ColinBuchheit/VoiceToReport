@@ -1,14 +1,12 @@
-# backend/main.py - COMPLETE FIXED VERSION
+# backend/main.py - CORRECTED VERSION WITH PROPER VOICE AGENT
+
 import os
 import tempfile
 import base64
 import logging
-import json
-import re
 from datetime import datetime
-from typing import Dict, Any
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from openai import OpenAI
@@ -25,6 +23,8 @@ from models import (
 from services.transcription import TranscriptionService
 from services.summarization import SummarizationService
 from services.email_service import EmailService
+from services.voice_agent import VoiceAgentService  # CRITICAL: This import was missing
+from config import settings  # Use settings instead of direct env vars
 
 # Load environment variables
 load_dotenv()
@@ -49,13 +49,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize OpenAI client
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Initialize OpenAI client using settings
 openai_client = None
-
-if OPENAI_API_KEY:
+if settings.openai_api_key:
     try:
-        openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        openai_client = OpenAI(api_key=settings.openai_api_key)
         logger.info("OpenAI client initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize OpenAI client: {e}")
@@ -77,14 +75,23 @@ except Exception as e:
     logger.error(f"Failed to initialize summarization service: {e}")
     summarization_service = None
 
+# CRITICAL FIX: Initialize Voice Agent Service
+try:
+    voice_agent_service = VoiceAgentService() if openai_client else None
+    logger.info("Voice agent service initialized")
+except Exception as e:
+    logger.error(f"Failed to initialize voice agent service: {e}")
+    voice_agent_service = None
+
 try:
     email_service = EmailService()
     logger.info("Email service initialized")
+    logger.info(f"Email configured for: {', '.join(email_service.recipients)}")
 except Exception as e:
     logger.error(f"Failed to initialize email service: {e}")
     email_service = None
 
-# Helper function for audio format validation
+# Helper functions
 def validate_audio_format(format_str: str) -> bool:
     """Validate that the audio format is supported"""
     supported_formats = ['m4a', 'mp4', 'wav', 'mp3', 'webm']
@@ -105,13 +112,13 @@ def decode_audio_data(audio_data: str) -> bytes:
         logger.error(f"Failed to decode audio data: {e}")
         raise HTTPException(status_code=400, detail="Invalid audio data format")
 
-# Root endpoint
+# API Endpoints
+
 @app.get("/", response_model=HealthResponse)
 async def root():
     """Root endpoint with service status"""
     return await health_check()
 
-# Health check endpoint
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint"""
@@ -119,6 +126,7 @@ async def health_check():
         services_status = {
             "transcription": "available" if transcription_service else "unavailable",
             "summarization": "available" if summarization_service else "unavailable", 
+            "voice_agent": "available" if voice_agent_service else "unavailable",  # Added this
             "email": "available" if email_service else "unavailable",
             "openai": "available" if openai_client else "unavailable"
         }
@@ -132,7 +140,6 @@ async def health_check():
         logger.error(f"Health check failed: {e}")
         raise HTTPException(status_code=500, detail="Health check failed")
 
-# FIXED: Transcribe endpoint with correct file handling
 @app.post("/transcribe", response_model=TranscriptionResponse)
 async def transcribe_audio(request: TranscribeRequest):
     """Transcribe audio to text - optimized for mobile uploads"""
@@ -161,13 +168,13 @@ async def transcribe_audio(request: TranscribeRequest):
         if audio_size_mb > 25:
             raise HTTPException(status_code=413, detail="Audio file too large (max 25MB)")
         
-        # FIXED: Create temporary file and pass file path to transcription service
+        # Create temporary file and pass file path to transcription service
         with tempfile.NamedTemporaryFile(suffix=f'.{request.format}', delete=False) as temp_file:
             temp_file.write(audio_bytes)
             temp_file_path = temp_file.name
         
         try:
-            # FIXED: Pass file path to transcription service (not bytes)
+            # Pass file path to transcription service (not bytes)
             transcription = transcription_service.transcribe_audio(temp_file_path)
             
             logger.info("Transcription completed successfully")
@@ -195,16 +202,20 @@ async def transcribe_audio(request: TranscribeRequest):
             detail=f"Transcription failed: {str(e)}"
         )
 
-# Voice command endpoint for AI agent
+# CRITICAL FIX: Properly implement voice command endpoint
 @app.post("/voice-command", response_model=VoiceCommandResponse)
 async def process_voice_command(request: VoiceCommandRequest):
-    """Process voice command for AI agent - handles mobile app requests"""
+    """Process voice command for AI agent - FIXED to use proper VoiceAgentService"""
     
-    if not transcription_service or not summarization_service:
-        raise HTTPException(status_code=503, detail="AI services unavailable - check OpenAI API key")
+    if not voice_agent_service:
+        raise HTTPException(status_code=503, detail="Voice agent service unavailable - check OpenAI API key")
+    
+    if not transcription_service:
+        raise HTTPException(status_code=503, detail="Transcription service unavailable - check OpenAI API key")
     
     try:
         logger.info("Processing voice command request")
+        logger.info(f"Screen context: {request.screenContext.get('screenName', 'unknown')} - {request.screenContext.get('mode', 'N/A')}")
         
         # Decode audio data
         audio_bytes = decode_audio_data(request.audio)
@@ -217,34 +228,35 @@ async def process_voice_command(request: VoiceCommandRequest):
         try:
             # Transcribe the voice command
             transcription = transcription_service.transcribe_audio(temp_file_path)
+            logger.info(f"Voice command transcribed: '{transcription}'")
             
-            # Process the command based on screen context
-            screen_context = request.screenContext
+            # CRITICAL FIX: Use VoiceAgentService to process the command properly
+            response_data = await voice_agent_service.process_voice_command(
+                transcription, 
+                request.screenContext
+            )
             
-            # Generate AI response based on command and context
-            response_text = f"I heard: '{transcription}'. "
+            logger.info(f"Voice command processed: action='{response_data.get('action')}', target='{response_data.get('target', 'N/A')}'")
             
-            # Simple command processing logic
-            command_lower = transcription.lower()
-            
-            if any(word in command_lower for word in ['help', 'what can you do', 'capabilities']):
-                response_text += "I can help you fill out reports by voice, improve your wording, and answer questions about your work."
-            elif any(word in command_lower for word in ['set', 'change', 'update', 'fill']):
-                response_text += f"I can help you update fields on the {screen_context.get('screenName', 'current')} screen. What would you like to change?"
-            elif any(word in command_lower for word in ['improve', 'better', 'professional']):
-                response_text += "I can help improve your text. Please tell me what you'd like me to make sound more professional."
-            else:
-                response_text += "I'm ready to help with your field service report. You can ask me to update fields, improve wording, or explain my capabilities."
-            
+            # Build proper response matching frontend expectations
             return VoiceCommandResponse(
-                action="respond",
-                confirmation=transcription,
-                response=response_text,
-                success=True
+                action=response_data.get('action', 'acknowledge'),
+                target=response_data.get('target', ''),
+                value=response_data.get('value', ''),
+                confidence=response_data.get('confidence', 0.5),
+                clarification=response_data.get('clarification', ''),
+                confirmation=response_data.get('confirmation', 'Command processed'),
+                ttsText=response_data.get('ttsText', ''),
+                success=response_data.get('success', True),
+                needs_clarification=response_data.get('needs_clarification', False),
+                clarification_question=response_data.get('clarification_question', ''),
+                replacement=response_data.get('replacement', ''),
+                fieldUpdates=response_data.get('fieldUpdates', {}),
+                metadata=response_data.get('metadata', {})
             )
             
         finally:
-            # Clean up
+            # Clean up temporary file
             try:
                 os.unlink(temp_file_path)
             except Exception as e:
@@ -255,9 +267,9 @@ async def process_voice_command(request: VoiceCommandRequest):
     except Exception as e:
         logger.error(f"Voice command processing failed: {e}")
         return VoiceCommandResponse(
-            action="error",
+            action="acknowledge",
             confirmation="Sorry, I couldn't process that command.",
-            response="There was an error processing your voice command. Please try again.",
+            ttsText="I encountered an error. Please try again.",
             success=False
         )
 
@@ -270,11 +282,15 @@ async def summarize_transcription(request: SummarizeRequest):
     
     try:
         logger.info("Processing summarization request")
+        logger.info(f"Transcription preview: {request.transcription[:200]}...")
         
         # Generate structured summary
         summary = summarization_service.generate_closeout_summary(request.transcription)
         
-        logger.info("Summarization completed successfully")
+        # Log extraction results for debugging
+        populated_fields = [k for k, v in summary.items() if v and v != "Not mentioned"]
+        logger.info(f"Summarization completed: {len(populated_fields)}/16 fields populated: {populated_fields}")
+        
         return SummaryResponse(
             summary=summary,
             success=True,
@@ -299,6 +315,13 @@ async def send_closeout_email(request: SendEmailRequest):
     try:
         logger.info("Processing email send request")
         
+        # Check email configuration
+        if not settings.email_user or not settings.email_password:
+            raise HTTPException(
+                status_code=500, 
+                detail="Email not configured - missing EMAIL_USER or EMAIL_PASSWORD in .env file"
+            )
+        
         # Send email using email service
         success = email_service.send_closeout_email(
             closeout_data=request.summary.dict(),
@@ -314,8 +337,10 @@ async def send_closeout_email(request: SendEmailRequest):
                 recipients=email_service.recipients
             )
         else:
-            raise HTTPException(status_code=500, detail="Failed to send email")
+            raise HTTPException(status_code=500, detail="Failed to send email - check email configuration")
             
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Email sending failed: {e}")
         raise HTTPException(status_code=500, detail=f"Email sending failed: {str(e)}")
@@ -339,28 +364,6 @@ async def test_email_configuration():
             "status": "error",
             "message": f"Email test failed: {str(e)}"
         }
-
-@app.post("/text-to-speech")
-async def text_to_speech(request: Dict[str, str]):
-    """Convert text to speech (placeholder endpoint)"""
-    try:
-        logger.info("Processing text-to-speech request")
-        text = request.get("text", "")
-        
-        if not text:
-            raise HTTPException(status_code=400, detail="No text provided")
-        
-        # TODO: Implement actual text-to-speech functionality
-        # For now, return a placeholder response
-        return {
-            "success": True,
-            "message": "Text-to-speech functionality not yet implemented",
-            "audio_url": None
-        }
-        
-    except Exception as e:
-        logger.error(f"Text-to-speech failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Text-to-speech failed: {str(e)}")
 
 # Add middleware to handle ngrok browser warnings
 @app.middleware("http")
@@ -391,9 +394,11 @@ async def options_handler(path: str):
 
 if __name__ == "__main__":
     import uvicorn
-    print("Starting Voice-to-Report API Server...")
-    print("Binding to all network interfaces (0.0.0.0:8000)")
-    print("Mobile app and ngrok tunnel support enabled")
-    print("API Documentation: http://localhost:8000/docs")
-    print("Health Check: http://localhost:8000/health")
+    print("🚀 Starting Voice-to-Report API Server...")
+    print("🔧 Voice Agent Service: ENABLED")
+    print("📧 Email Service: ENABLED" if email_service else "📧 Email Service: NEEDS CONFIGURATION")
+    print("🌐 Binding to all network interfaces (0.0.0.0:8000)")
+    print("📍 Mobile app and ngrok tunnel support enabled")
+    print("📋 API Documentation: http://localhost:8000/docs")
+    print("🏥 Health Check: http://localhost:8000/health")
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -18,11 +18,20 @@ class EmailService:
         self.email_user = settings.email_user
         self.email_password = settings.email_password
         
-        # Fixed recipient list as specified
-        self.recipients = [
-            'colbol42@gmail.com'
-        ]
+        # Parse recipients from environment variable with fallback
+        if settings.email_recipients:
+            # Split by comma and clean up whitespace
+            self.recipients = [email.strip() for email in settings.email_recipients.split(',') if email.strip()]
+        else:
+            # Fallback to default recipient
+            self.recipients = ['colbol42@gmail.com']
         
+        logger.info(f"Email service initialized with {len(self.recipients)} recipients: {', '.join(self.recipients)}")
+        
+    def get_recipients(self) -> List[str]:
+        """Get current list of email recipients"""
+        return self.recipients.copy()
+    
     def format_closeout_email(self, closeout_data: Dict[str, Any], transcription: str) -> str:
         """Format the closeout data into a professional email body"""
         
@@ -104,8 +113,14 @@ This report was automatically generated from voice input using the Bear Technolo
         try:
             # Validate email configuration
             if not self.email_user or not self.email_password:
-                logger.error("Email credentials not configured")
+                logger.error("Email credentials not configured - check EMAIL_USER and EMAIL_PASSWORD in .env file")
                 return False
+            
+            if not self.recipients:
+                logger.error("No email recipients configured")
+                return False
+            
+            logger.info(f"Sending closeout email to {len(self.recipients)} recipients: {', '.join(self.recipients)}")
             
             # Create email message
             msg = MIMEMultipart()
@@ -145,7 +160,7 @@ This report was automatically generated from voice input using the Bear Technolo
             if not self.email_user or not self.email_password:
                 return {
                     "status": "error",
-                    "message": "Email credentials not configured"
+                    "message": "Email credentials not configured - add EMAIL_USER and EMAIL_PASSWORD to .env file"
                 }
             
             # Test SMTP connection
@@ -158,7 +173,8 @@ This report was automatically generated from voice input using the Bear Technolo
                 "message": "Email configuration is valid",
                 "smtp_server": self.smtp_server,
                 "smtp_port": self.smtp_port,
-                "recipients": self.recipients
+                "recipients": self.recipients,
+                "sender": self.email_user
             }
             
         except Exception as e:

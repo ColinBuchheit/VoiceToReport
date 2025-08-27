@@ -1,4 +1,4 @@
-# backend/config.py
+# backend/config.py - ADD THE EMAIL_RECIPIENTS FIELD
 import os
 from typing import List, Union
 from pydantic import field_validator
@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     # Email Configuration
     email_user: str = ""
     email_password: str = ""
+    email_recipients: str = "colbol42@gmail.com"  # ADD THIS LINE - comma-separated list
     smtp_server: str = "smtp.gmail.com"
     smtp_port: str = "587"
     

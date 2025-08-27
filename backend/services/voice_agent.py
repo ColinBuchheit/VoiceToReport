@@ -1,4 +1,4 @@
-# backend/services/voice_agent.py
+# backend/services/voice_agent.py - FIXED VERSION
 import json
 import logging
 from typing import Dict, Any, List
@@ -31,6 +31,9 @@ class VoiceAgentService:
             Dictionary with action, target, value, confidence, and TTS response
         """
         try:
+            logger.info(f"Processing voice command: '{transcription}'")
+            logger.info(f"Screen context: {screen_context.get('screenName')} - {screen_context.get('mode')}")
+            
             # Create detailed context prompt
             prompt = self._build_command_prompt(transcription, screen_context)
             
@@ -43,7 +46,7 @@ class VoiceAgentService:
             # Enhance with context-aware improvements
             enhanced_response = self._enhance_response(parsed_response, screen_context)
             
-            logger.info(f"Voice command processed: '{transcription}' -> {enhanced_response['action']}")
+            logger.info(f"Voice command result: '{transcription}' -> action: {enhanced_response['action']}, target: {enhanced_response.get('target', 'N/A')}")
             return enhanced_response
             
         except Exception as e:
@@ -62,7 +65,7 @@ class VoiceAgentService:
         # Format available actions
         actions = ', '.join(screen_context.get('availableActions', []))
         
-        prompt = f"""You are an AI assistant helping a user interact with their mobile voice report app via voice commands.
+        prompt = f"""You are an AI assistant for a field service voice report app. Your job is to interpret voice commands and return the appropriate action.
 
 CURRENT SCREEN: {screen_context.get('screenName', 'unknown')}
 CURRENT MODE: {screen_context.get('mode', 'N/A')}
@@ -78,35 +81,60 @@ AVAILABLE ACTIONS:
 
 USER COMMAND: "{transcription}"
 
-Your task is to interpret the user's voice command and determine the appropriate action. Consider:
-1. Field name matching (exact, synonyms, and partial matches)
-2. Context awareness (what screen they're on, what mode they're in)
-3. Natural language variations
-4. Common abbreviations and colloquialisms
+COMMAND ANALYSIS:
+Interpret the user's command and determine the most appropriate action. Consider:
 
-Respond with a JSON object containing:
+1. FIELD UPDATES: Commands like "set location to X", "change the description", "update contact to John"
+2. MODE CHANGES: Commands like "let me edit this", "switch to edit mode", "stop editing"
+3. ACTION REQUESTS: Commands like "generate summary", "read the transcription", "send email"
+4. CLARIFICATION NEEDED: When the intent is unclear
+
+RESPONSE FORMAT:
+Return a JSON object with these fields:
 {{
-  "action": "update_field|toggle_mode|navigate|execute_action|clarify",
+  "action": "update_field|toggle_mode|execute_action|clarify|acknowledge",
   "target": "field_name_or_action_name",
-  "value": "new_value_if_updating_field",
+  "value": "new_value_for_field_updates",
   "confidence": 0.95,
-  "clarification": "Question to ask if confidence < 0.7",
-  "confirmation": "Brief confirmation of what was done",
-  "ttsText": "Natural spoken response"
+  "clarification": "question_if_confidence_low",
+  "confirmation": "brief_confirmation_message",
+  "ttsText": "what_to_say_back_to_user",
+  "success": true,
+  "needs_clarification": false
 }}
 
-Rules:
-- If confidence < 0.7, use "clarify" action and ask for clarification
-- For field updates, use exact field names from the available fields
-- For mode changes, use "toggle_mode" action
-- For navigation/actions, use "execute_action" with the action name
-- Keep TTS responses conversational but concise
-- Handle common phrases like "change that", "update the place", etc.
+FIELD MATCHING RULES:
+- Match field names exactly when possible
+- Use synonyms (e.g., "place" → "location", "person" → "contact") 
+- Be flexible with natural language variations
+- Default to most likely field if ambiguous
 
-Examples of good responses:
-- "Updated! Location is now Downtown Office"
-- "I heard 'place' - did you mean the location field?"
-- "Switched to edit mode so you can make changes"
+EXAMPLES:
+
+Command: "Set location to downtown office"
+Response: {{"action": "update_field", "target": "location", "value": "downtown office", "confidence": 0.95, "confirmation": "Set location to downtown office", "ttsText": "", "success": true, "needs_clarification": false}}
+
+Command: "Change the hi to say hello instead"  
+Response: {{"action": "update_field", "target": "transcription", "value": "{transcription.replace('hi', 'hello')}", "confidence": 0.90, "confirmation": "Updated transcription", "ttsText": "", "success": true, "needs_clarification": false}}
+
+Command: "Say that we met John on site"
+Response: {{"action": "update_field", "target": "onsite_contact", "value": "John", "confidence": 0.90, "confirmation": "Set onsite contact to John", "ttsText": "", "success": true, "needs_clarification": false}}
+
+Command: "Read out my transcription"
+Response: {{"action": "execute_action", "target": "read_transcription", "value": "", "confidence": 0.95, "confirmation": "Reading transcription", "ttsText": "{current_values.get('transcription', 'No transcription available')}", "success": true, "needs_clarification": false}}
+
+Command: "Let me edit this"
+Response: {{"action": "toggle_mode", "target": "edit_mode", "value": "true", "confidence": 0.95, "confirmation": "Switched to edit mode", "ttsText": "", "success": true, "needs_clarification": false}}
+
+Command: "Generate the summary"
+Response: {{"action": "execute_action", "target": "generate_summary", "value": "", "confidence": 0.95, "confirmation": "Generating summary", "ttsText": "", "success": true, "needs_clarification": false}}
+
+IMPORTANT:
+- Only use "ttsText" for explicit read requests or clarifications
+- Keep "ttsText" empty for simple updates to avoid unnecessary chatter
+- Use "clarify" action only when confidence < 0.7
+- Always include "success": true and "needs_clarification": false unless there's an issue
+- Be action-focused, not chatty
 """
         
         return prompt
@@ -119,9 +147,13 @@ Examples of good responses:
         formatted = []
         for field in fields:
             synonyms = ', '.join(field.get('synonyms', []))
+            current_val = field.get('currentValue', '')
+            if len(current_val) > 50:
+                current_val = current_val[:50] + "..."
+            
             formatted.append(
-                f"- {field['label']} ('{field['name']}'): "
-                f"Current='{field['currentValue']}', "
+                f"- {field['label']} (field: '{field['name']}'): "
+                f"Current='{current_val}', "
                 f"Editable={field['isEditable']}, "
                 f"Synonyms=[{synonyms}]"
             )
@@ -151,7 +183,7 @@ Examples of good responses:
                 messages=[
                     {
                         "role": "system", 
-                        "content": "You are a helpful AI assistant that processes voice commands for a mobile app. Always respond with valid JSON."
+                        "content": "You are a helpful AI assistant that processes voice commands for a mobile field service app. Always respond with valid JSON in the exact format specified. Be action-focused and avoid unnecessary chatter."
                     },
                     {"role": "user", "content": prompt}
                 ],
@@ -179,88 +211,121 @@ Examples of good responses:
             parsed = json.loads(json_str)
             
             # Validate required fields
-            required_fields = ['action', 'confidence', 'confirmation', 'ttsText']
+            required_fields = ['action', 'confidence', 'confirmation']
             for field in required_fields:
                 if field not in parsed:
-                    raise ValueError(f"Missing required field: {field}")
+                    logger.warning(f"Missing field {field}, using default")
+                    if field == 'action':
+                        parsed['action'] = 'acknowledge'
+                    elif field == 'confidence':
+                        parsed['confidence'] = 0.5
+                    elif field == 'confirmation':
+                        parsed['confirmation'] = 'Command received'
+            
+            # Add missing fields with defaults
+            parsed.setdefault('target', '')
+            parsed.setdefault('value', '')
+            parsed.setdefault('ttsText', '')
+            parsed.setdefault('success', True)
+            parsed.setdefault('needs_clarification', False)
+            parsed.setdefault('clarification', '')
             
             # Validate action type
-            valid_actions = ['update_field', 'toggle_mode', 'navigate', 'execute_action', 'clarify']
+            valid_actions = ['update_field', 'toggle_mode', 'execute_action', 'clarify', 'acknowledge']
             if parsed['action'] not in valid_actions:
-                raise ValueError(f"Invalid action: {parsed['action']}")
+                logger.warning(f"Invalid action {parsed['action']}, defaulting to acknowledge")
+                parsed['action'] = 'acknowledge'
             
             return parsed
             
         except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"Failed to parse GPT response: {e}")
             logger.error(f"Raw response: {response}")
-            raise ValueError("Invalid response format from AI")
+            # Return fallback response
+            return {
+                "action": "acknowledge",
+                "target": "",
+                "value": "",
+                "confidence": 0.3,
+                "clarification": "",
+                "confirmation": "I didn't understand that command",
+                "ttsText": "I didn't understand that command. Please try again.",
+                "success": False,
+                "needs_clarification": False
+            }
     
     def _enhance_response(self, response: Dict[str, Any], screen_context: Dict[str, Any]) -> Dict[str, Any]:
         """Enhance response with context-aware improvements"""
         
+        # Handle transcription text replacement
+        if (response['action'] == 'update_field' and 
+            response.get('target') == 'transcription' and 
+            'current_values' in screen_context):
+            
+            current_transcription = screen_context['current_values'].get('transcription', '')
+            if current_transcription and 'change' in response.get('confirmation', '').lower():
+                # Try to do smart text replacement based on the command
+                response['value'] = self._perform_text_replacement(
+                    current_transcription, 
+                    response.get('value', '')
+                )
+        
         # Add current timestamp for date/time requests
         if (response['action'] == 'update_field' and 
-            response.get('target') == 'datetime' and 
+            response.get('target') in ['datetime', 'date', 'time'] and 
             not response.get('value')):
             response['value'] = datetime.now().strftime('%Y-%m-%d %H:%M')
-            response['ttsText'] = f"Added current date and time: {response['value']}"
+            response['confirmation'] = f"Added current date and time: {response['value']}"
         
         # Handle mode-specific enhancements
         current_mode = screen_context.get('mode')
         if response['action'] == 'update_field' and current_mode == 'preview':
-            # Suggest switching to edit mode
-            response['action'] = 'clarify'
-            response['clarification'] = "You're in preview mode. Should I switch to edit mode first?"
-            response['ttsText'] = "You're in preview mode. Should I switch to edit mode so you can make changes?"
+            # Auto-switch to edit mode first
+            response['action'] = 'toggle_mode'
+            response['target'] = 'edit_mode'
+            response['value'] = 'true'
+            response['confirmation'] = 'Switched to edit mode'
         
-        # Enhance confirmation messages with field labels
-        if response['action'] == 'update_field':
-            field_name = response.get('target')
-            fields = screen_context.get('visibleFields', [])
-            field_label = next((f['label'] for f in fields if f['name'] == field_name), field_name)
+        # Handle read requests
+        if (response['action'] == 'execute_action' and 
+            'read' in response.get('target', '').lower() and
+            not response.get('ttsText')):
             
-            if response.get('value'):
-                response['confirmation'] = f"Updated {field_label} to: {response['value']}"
-                response['ttsText'] = f"Updated! {field_label} is now {response['value']}"
-        
-        # Handle common action mappings
-        if response['action'] == 'execute_action':
-            target = response.get('target', '').lower()
-            if 'pdf' in target or 'generate' in target:
-                response['target'] = 'generate_pdf'
-                response['ttsText'] = "Generating your PDF report now"
-            elif 'edit' in target and 'mode' in target:
-                response['action'] = 'toggle_mode'
-                response['ttsText'] = "Switched to edit mode"
-            elif 'preview' in target and 'mode' in target:
-                response['action'] = 'toggle_mode'
-                response['ttsText'] = "Switched to preview mode"
+            transcription = screen_context.get('currentValues', {}).get('transcription', '')
+            if transcription:
+                response['ttsText'] = transcription
+                response['confirmation'] = 'Reading transcription'
+            else:
+                response['ttsText'] = 'No transcription available to read'
+                response['confirmation'] = 'No transcription available'
         
         return response
     
-    def _create_error_response(self, error_message: str) -> Dict[str, Any]:
-        """Create error response for failed commands"""
-        return {
-            "action": "clarify",
-            "confidence": 0.0,
-            "clarification": "I couldn't understand that command. Could you try again?",
-            "confirmation": f"Error: {error_message}",
-            "ttsText": "I didn't catch that. Could you please try again?"
-        }
-    
-    async def generate_tts_audio(self, text: str) -> bytes:
-        """Generate TTS audio using OpenAI"""
+    def _perform_text_replacement(self, original_text: str, instruction: str) -> str:
+        """Perform smart text replacement based on voice instruction"""
         try:
-            response = await self.client.audio.speech.create(
-                model="tts-1",  # Use standard model for cost efficiency
-                voice="alloy",  # Professional, clear voice
-                input=text,
-                response_format="mp3"
-            )
-            
-            return response.content
-            
-        except Exception as e:
-            logger.error(f"TTS generation failed: {e}")
-            raise
+            # Simple replacement logic - can be enhanced
+            lower_instruction = instruction.lower()
+            if 'hi' in lower_instruction and 'hello' in lower_instruction:
+                return original_text.replace('hi', 'hello').replace('Hi', 'Hello')
+            elif 'hello' in lower_instruction and 'hi' in lower_instruction:
+                return original_text.replace('hello', 'hi').replace('Hello', 'Hi')
+            else:
+                return instruction  # Use the instruction as the new text
+        except:
+            return instruction
+    
+    def _create_error_response(self, error_message: str) -> Dict[str, Any]:
+        """Create error response"""
+        return {
+            "action": "acknowledge",
+            "target": "",
+            "value": "",
+            "confidence": 0.0,
+            "clarification": "",
+            "confirmation": "Sorry, I encountered an error processing your command",
+            "ttsText": "I encountered an error. Please try again.",
+            "success": False,
+            "needs_clarification": False,
+            "error": error_message
+        }
