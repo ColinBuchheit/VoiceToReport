@@ -1,4 +1,4 @@
-// voice-report-app/screens/TranscriptScreen.tsx - FIXED VERSION with working voice AI
+// voice-report-app/screens/TranscriptScreen.tsx - COMPLETE FIXED VERSION
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
@@ -35,26 +35,29 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // FIXED: Create enhanced context that matches what works in SummaryScreen
+  // FIXED: Enhanced screen context with comprehensive field mapping
   const screenContext = useMemo((): ScreenContext => {
     const fields: FieldInfo[] = [
       {
-        name: 'transcription', // FIXED: Use simple name that matches mapping
-        label: 'Transcription Text', // Backend maps this label to the name
+        name: 'transcription',
+        label: 'Transcription Text', // This matches what backend sends
         currentValue: transcription || '',
         type: 'multiline',
         isEditable: isEditing,
         synonyms: [
-          'transcription', 
+          'transcription',
           'transcript', 
-          'recording', 
-          'what I said', 
+          'recording',
+          'what I said',
           'the text',
           'voice recording',
           'spoken text',
           'text',
           'recording text',
-          'transcription text' // FIXED: Add the label as a synonym
+          'transcription text', // Key synonym for backend mapping
+          'voice text',
+          'audio text',
+          'speech text'
         ],
         placeholder: 'Your voice recording will appear here...',
       },
@@ -150,21 +153,55 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     }
   };
 
-  // FIXED: Enhanced handleFieldUpdate with proper state management and logging
+  // FIXED: Enhanced handleFieldUpdate with comprehensive field mapping
   const handleFieldUpdate = (fieldName: string, value: string) => {
     console.log(`🔄 handleFieldUpdate called: ${fieldName} = "${value}"`);
     
-    if (fieldName === 'transcription') {
+    // FIXED: Add comprehensive field name mapping to handle all possible formats
+    const fieldMapping: Record<string, string> = {
+      // Transcription field variations
+      'transcription': 'transcription',
+      'transcript': 'transcription', 
+      'recording': 'transcription',
+      'text': 'transcription',
+      'transcription text': 'transcription',  // ← KEY: Handles "Transcription Text" from backend
+      'recording text': 'transcription',
+      'voice recording': 'transcription',
+      'spoken text': 'transcription',
+      'voice text': 'transcription',
+      'audio text': 'transcription',
+      'speech text': 'transcription',
+      'the text': 'transcription',
+      'what i said': 'transcription',
+      
+      // Edit mode variations
+      'isediting': 'isEditing',
+      'is_editing': 'isEditing', 
+      'edit_mode': 'isEditing',
+      'editing': 'isEditing',
+      'edit': 'isEditing'
+    };
+
+    // Normalize field name to lowercase for matching
+    const normalizedFieldName = fieldName.toLowerCase().trim();
+    const actualFieldName = fieldMapping[normalizedFieldName] || normalizedFieldName;
+    
+    console.log(`🔄 Field mapping: "${fieldName}" → "${actualFieldName}"`);
+    
+    if (actualFieldName === 'transcription') {
       console.log('📝 Updating transcription state...');
       setTranscription(value);
       console.log('✅ setTranscription called with:', value.substring(0, 50) + '...');
-    } else if (fieldName === 'isEditing') {
+    } else if (actualFieldName === 'isEditing') {
       console.log('📝 Updating editing mode...');
-      const newEditingState = value === 'true';
+      // Handle both string and boolean values properly
+      const newEditingState = typeof value === 'boolean' ? value : value === 'true';
       setIsEditing(newEditingState);
       console.log('✅ setIsEditing called with:', newEditingState);
     } else {
-      console.warn(`⚠️ Unknown field update: ${fieldName}`);
+      console.warn(`⚠️ Unknown field update: ${fieldName} (mapped to: ${actualFieldName})`);
+      console.log('📋 Available mappings:', Object.keys(fieldMapping));
+      console.log('📋 All variations tried:', [fieldName, normalizedFieldName, actualFieldName]);
     }
   };
 
@@ -241,7 +278,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         </View>
       </ScrollView>
 
-      {/* FIXED: AI Agent with proper context */}
+      {/* FIXED: AI Agent with proper context and enhanced callbacks */}
       <AIAgent
         screenContext={screenContext}
         onFieldUpdate={handleFieldUpdate}
@@ -289,7 +326,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   editButtonActive: {
-    backgroundColor: '#FF6B35',
+    backgroundColor: '#3498db',
   },
   editButtonText: {
     color: '#2c3e50',
@@ -299,58 +336,55 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   transcriptionCard: {
-    backgroundColor: '#f8f9fa',
     margin: 20,
     padding: 20,
+    backgroundColor: '#f8f9fa',
     borderRadius: 12,
-    minHeight: 200,
     borderWidth: 1,
     borderColor: '#e9ecef',
-  },
-  transcriptionText: {
-    fontSize: 16,
-    lineHeight: 24,
-    color: '#2c3e50',
-    textAlign: 'left',
+    minHeight: 200,
   },
   transcriptionInput: {
     fontSize: 16,
     lineHeight: 24,
     color: '#2c3e50',
+    textAlignVertical: 'top',
     minHeight: 160,
-    textAlign: 'left',
+  },
+  transcriptionText: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#2c3e50',
   },
   actionButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingBottom: 20,
   },
   generateButton: {
-    backgroundColor: '#FF6B35',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
     flex: 1,
+    backgroundColor: '#27ae60',
+    paddingVertical: 15,
+    borderRadius: 8,
     marginRight: 10,
+    alignItems: 'center',
   },
   generateButtonText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
-    textAlign: 'center',
   },
   clearButton: {
     backgroundColor: '#e74c3c',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+    paddingVertical: 15,
+    paddingHorizontal: 20,
     borderRadius: 8,
-    flex: 0.4,
+    alignItems: 'center',
   },
   clearButtonText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
-    textAlign: 'center',
   },
 });
