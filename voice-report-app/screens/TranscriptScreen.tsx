@@ -1,5 +1,5 @@
-// voice-report-app/screens/TranscriptScreen.tsx - OPTIMIZED VERSION using existing hooks
-import React, { useState, useEffect } from 'react';
+// voice-report-app/screens/TranscriptScreen.tsx - FIXED VERSION with working voice AI
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -17,8 +17,7 @@ import { RootStackParamList } from '../App';
 import Loader from '../components/Loader';
 import { generateSummary } from '../services/api';
 import AIAgent from '../components/AIAgent';
-import { useTranscriptScreenContext } from '../hooks/useScreenContext'; // USING EXISTING HOOK
-import { CloseoutSummary } from '../types/aiAgent';
+import { ScreenContext, FieldInfo, CloseoutSummary } from '../types/aiAgent';
 
 type TranscriptScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -36,8 +35,60 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // OPTIMIZED: Use the existing hook instead of manual context creation
-  const screenContext = useTranscriptScreenContext(transcription, isEditing);
+  // FIXED: Create enhanced context that matches what works in SummaryScreen
+  const screenContext = useMemo((): ScreenContext => {
+    const fields: FieldInfo[] = [
+      {
+        name: 'transcription', // FIXED: Use simple name that matches mapping
+        label: 'Transcription Text', // Backend maps this label to the name
+        currentValue: transcription || '',
+        type: 'multiline',
+        isEditable: isEditing,
+        synonyms: [
+          'transcription', 
+          'transcript', 
+          'recording', 
+          'what I said', 
+          'the text',
+          'voice recording',
+          'spoken text',
+          'text',
+          'recording text',
+          'transcription text' // FIXED: Add the label as a synonym
+        ],
+        placeholder: 'Your voice recording will appear here...',
+      },
+    ];
+
+    return {
+      screenName: 'transcript',
+      visibleFields: fields,
+      currentValues: {
+        transcription,
+        isEditing,
+      },
+      availableActions: [
+        'toggle_edit_mode',
+        'generate_summary',
+        'clear_transcription',
+        'suggest_improvements',
+        'make_professional',
+        'edit transcription',
+        'stop editing',
+        'generate closeout summary',
+        'clear transcription'
+      ],
+      mode: isEditing ? 'edit' : 'preview',
+      agentCapabilities: [
+        'field_updates',
+        'wording_help', 
+        'questions',
+        'voice_control',
+        'context_aware'
+      ],
+      timestamp: new Date().toISOString(),
+    };
+  }, [transcription, isEditing]);
 
   // Enhanced debugging for state changes
   useEffect(() => {
@@ -47,6 +98,17 @@ export default function TranscriptScreen({ navigation, route }: Props) {
       transcriptionLength: transcription?.length || 0
     });
   }, [transcription, isEditing]);
+
+  // Debug the screen context
+  useEffect(() => {
+    console.log('🔍 TranscriptScreen context:', {
+      screenName: screenContext.screenName,
+      fieldsCount: screenContext.visibleFields.length,
+      mode: screenContext.mode,
+      hasTranscriptionField: screenContext.visibleFields.some(f => f.name === 'transcription'),
+      transcriptionFieldEditable: screenContext.visibleFields.find(f => f.name === 'transcription')?.isEditable
+    });
+  }, [screenContext]);
 
   const handleGenerateSummary = async () => {
     try {
@@ -88,7 +150,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     }
   };
 
-  // Enhanced handleFieldUpdate with proper state management and logging
+  // FIXED: Enhanced handleFieldUpdate with proper state management and logging
   const handleFieldUpdate = (fieldName: string, value: string) => {
     console.log(`🔄 handleFieldUpdate called: ${fieldName} = "${value}"`);
     
@@ -106,7 +168,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     }
   };
 
-  // Enhanced handleModeToggle with logging
+  // FIXED: Enhanced handleModeToggle with logging
   const handleModeToggle = () => {
     console.log('🔄 handleModeToggle called, current editing state:', isEditing);
     const newEditingState = !isEditing;
@@ -179,16 +241,16 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         </View>
       </ScrollView>
 
-      {/* AI Agent for voice commands - USING OPTIMIZED CONTEXT */}
+      {/* FIXED: AI Agent with proper context */}
       <AIAgent
         screenContext={screenContext}
         onFieldUpdate={handleFieldUpdate}
         onModeToggle={handleModeToggle}
         onAction={(action) => {
           console.log('🎯 AIAgent action triggered:', action);
-          if (action === 'generate_summary') {
+          if (action === 'generate_summary' || action === 'generate closeout summary') {
             handleGenerateSummary();
-          } else if (action === 'clear_transcription') {
+          } else if (action === 'clear_transcription' || action === 'clear transcription') {
             setTranscription('');
           }
         }}
