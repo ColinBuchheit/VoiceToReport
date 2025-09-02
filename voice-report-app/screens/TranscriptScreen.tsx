@@ -1,5 +1,5 @@
-// voice-report-app/screens/TranscriptScreen.tsx - FIXED FOR PROPER FIELD MAPPING
-import React, { useState } from 'react';
+// voice-report-app/screens/TranscriptScreen.tsx - OPTIMIZED VERSION using existing hooks
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,8 @@ import { RootStackParamList } from '../App';
 import Loader from '../components/Loader';
 import { generateSummary } from '../services/api';
 import AIAgent from '../components/AIAgent';
-import { ScreenContext, FieldInfo, CloseoutSummary } from '../types/aiAgent';
+import { useTranscriptScreenContext } from '../hooks/useScreenContext'; // USING EXISTING HOOK
+import { CloseoutSummary } from '../types/aiAgent';
 
 type TranscriptScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -35,45 +36,17 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Enhanced screen context for AI
-  const getEnhancedScreenContext = (): ScreenContext => {
-    const fields: FieldInfo[] = [
-      {
-        name: 'transcription',
-        label: 'Transcription Text',
-        currentValue: transcription || '',
-        type: 'multiline',
-        isEditable: isEditing,
-        synonyms: [
-          'transcription', 
-          'transcript', 
-          'recording', 
-          'what I said', 
-          'the text',
-          'voice recording',
-          'spoken text'
-        ],
-        placeholder: 'Your voice recording will appear here...',
-      },
-    ];
+  // OPTIMIZED: Use the existing hook instead of manual context creation
+  const screenContext = useTranscriptScreenContext(transcription, isEditing);
 
-    return {
-      screenName: 'transcript',
-      visibleFields: fields,
-      currentValues: {
-        transcription,
-        isEditing,
-      },
-      availableActions: [
-        'toggle_edit_mode',
-        'generate_summary',
-        'clear_transcription',
-        'suggest_improvements',
-        'make_professional',
-      ],
-      mode: isEditing ? 'edit' : 'preview',
-    };
-  };
+  // Enhanced debugging for state changes
+  useEffect(() => {
+    console.log('🔄 TranscriptScreen state updated:', {
+      transcription: transcription?.substring(0, 50) + '...',
+      isEditing,
+      transcriptionLength: transcription?.length || 0
+    });
+  }, [transcription, isEditing]);
 
   const handleGenerateSummary = async () => {
     try {
@@ -83,34 +56,25 @@ export default function TranscriptScreen({ navigation, route }: Props) {
       const response = await generateSummary(transcription);
       console.log('📥 Raw API response:', response);
       
-      // FIXED: Handle the new CloseoutSummary response format correctly
+      // Handle the CloseoutSummary response format correctly
       let closeoutSummary: CloseoutSummary;
       
-      if (response.summary) {
+      if (response && typeof response === 'object' && 'summary' in response) {
         // The API returns { summary: CloseoutSummary }
-        closeoutSummary = response.summary;
+        closeoutSummary = (response as any).summary;
         console.log('✅ Using CloseoutSummary from response.summary');
       } else {
         // Fallback: treat response as CloseoutSummary directly
-        closeoutSummary = response as any;
+        closeoutSummary = response as CloseoutSummary;
         console.log('✅ Using response as CloseoutSummary directly');
       }
       
       console.log('📋 Extracted closeout summary:', closeoutSummary);
       
-      // FIXED: Log individual fields to debug what's extracted
-      console.log('🔍 Field extraction check:');
-      console.log('  - onsite_contact:', closeoutSummary.onsite_contact);
-      console.log('  - support_contact:', closeoutSummary.support_contact);
-      console.log('  - work_completed:', closeoutSummary.work_completed);
-      console.log('  - location:', closeoutSummary.location);
-      console.log('  - technician_name:', closeoutSummary.technician_name);
-      
-      // FIXED: Pass the CloseoutSummary directly to Summary screen
-      // No need to convert to legacy format anymore
+      // Navigate to Summary screen
       navigation.navigate('Summary', {
         transcription,
-        summary: closeoutSummary, // Pass the full CloseoutSummary object
+        summary: closeoutSummary,
       });
       
     } catch (error) {
@@ -124,14 +88,30 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     }
   };
 
+  // Enhanced handleFieldUpdate with proper state management and logging
   const handleFieldUpdate = (fieldName: string, value: string) => {
+    console.log(`🔄 handleFieldUpdate called: ${fieldName} = "${value}"`);
+    
     if (fieldName === 'transcription') {
+      console.log('📝 Updating transcription state...');
       setTranscription(value);
+      console.log('✅ setTranscription called with:', value.substring(0, 50) + '...');
+    } else if (fieldName === 'isEditing') {
+      console.log('📝 Updating editing mode...');
+      const newEditingState = value === 'true';
+      setIsEditing(newEditingState);
+      console.log('✅ setIsEditing called with:', newEditingState);
+    } else {
+      console.warn(`⚠️ Unknown field update: ${fieldName}`);
     }
   };
 
+  // Enhanced handleModeToggle with logging
   const handleModeToggle = () => {
-    setIsEditing(!isEditing);
+    console.log('🔄 handleModeToggle called, current editing state:', isEditing);
+    const newEditingState = !isEditing;
+    setIsEditing(newEditingState);
+    console.log('✅ Mode toggled to:', newEditingState ? 'edit' : 'preview');
   };
 
   if (isProcessing) {
@@ -161,7 +141,10 @@ export default function TranscriptScreen({ navigation, route }: Props) {
             <TextInput
               style={styles.transcriptionInput}
               value={transcription}
-              onChangeText={setTranscription}
+              onChangeText={(text) => {
+                console.log('📝 TextInput onChangeText called with:', text.substring(0, 50) + '...');
+                setTranscription(text);
+              }}
               multiline
               textAlignVertical="top"
               placeholder="Your voice recording transcription will appear here..."
@@ -186,19 +169,23 @@ export default function TranscriptScreen({ navigation, route }: Props) {
 
           <TouchableOpacity
             style={styles.clearButton}
-            onPress={() => setTranscription('')}
+            onPress={() => {
+              console.log('🔄 Clear button pressed');
+              setTranscription('');
+            }}
           >
             <Text style={styles.clearButtonText}>Clear</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
 
-      {/* AI Agent for voice commands */}
+      {/* AI Agent for voice commands - USING OPTIMIZED CONTEXT */}
       <AIAgent
-        screenContext={getEnhancedScreenContext()}
+        screenContext={screenContext}
         onFieldUpdate={handleFieldUpdate}
         onModeToggle={handleModeToggle}
         onAction={(action) => {
+          console.log('🎯 AIAgent action triggered:', action);
           if (action === 'generate_summary') {
             handleGenerateSummary();
           } else if (action === 'clear_transcription') {
@@ -247,65 +234,61 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   editButtonTextActive: {
-    color: 'white',
+    color: '#ffffff',
   },
   transcriptionCard: {
-    backgroundColor: 'white',
+    backgroundColor: '#f8f9fa',
     margin: 20,
-    borderRadius: 12,
     padding: 20,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  transcriptionInput: {
-    fontSize: 16,
-    lineHeight: 24,
-    color: '#2c3e50',
-    minHeight: 300,
-    textAlignVertical: 'top',
-    borderWidth: 0,
-    padding: 0,
+    borderRadius: 12,
+    minHeight: 200,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
   },
   transcriptionText: {
     fontSize: 16,
     lineHeight: 24,
     color: '#2c3e50',
-    minHeight: 200,
+    textAlign: 'left',
+  },
+  transcriptionInput: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#2c3e50',
+    minHeight: 160,
+    textAlign: 'left',
   },
   actionButtons: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingBottom: 40,
-    gap: 15,
+    paddingVertical: 10,
   },
   generateButton: {
-    flex: 2,
     backgroundColor: '#FF6B35',
-    paddingVertical: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
     borderRadius: 8,
-    alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
   },
   generateButtonText: {
-    color: 'white',
+    color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
+    textAlign: 'center',
   },
   clearButton: {
-    flex: 1,
     backgroundColor: '#e74c3c',
-    paddingVertical: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
     borderRadius: 8,
-    alignItems: 'center',
+    flex: 0.4,
   },
   clearButtonText: {
-    color: 'white',
+    color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
+    textAlign: 'center',
   },
 });

@@ -1,4 +1,4 @@
-// voice-report-app/App.tsx - FIXED VERSION with better error handling
+// voice-report-app/App.tsx - FIXED VERSION with correct type imports
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -7,9 +7,9 @@ import { StatusBar } from 'react-native';
 import HomeScreen from './screens/HomeScreen';
 import TranscriptScreen from './screens/TranscriptScreen';
 import SummaryScreen from './screens/SummaryScreen';
-import { CloseoutSummary } from './types/api'; // FIXED: Import from correct types file
+import { CloseoutSummary } from './types/aiAgent'; // FIXED: Import from correct types file
 
-// FIXED: Updated navigation types to match new API types
+// Navigation types to match API structure
 export type RootStackParamList = {
   Home: undefined;
   Transcript: {

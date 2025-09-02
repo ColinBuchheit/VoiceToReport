@@ -1,4 +1,4 @@
-// voice-report-app/components/AIAgent.tsx - ACTION-FOCUSED VERSION
+// voice-report-app/components/AIAgent.tsx - COMPLETE FIXED VERSION
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -161,7 +161,7 @@ export default function AIAgent({
     haloAnim.stopAnimation(() => haloAnim.setValue(0));
   };
 
-  // Core AI Agent Functions
+  // Core AI Agent Functions - FIXED METHOD NAMES
   const startListening = async () => {
     if (disabled || agentState.isListening || agentState.isProcessing) return;
 
@@ -170,6 +170,7 @@ export default function AIAgent({
       setAgentState(prev => ({ ...prev, isListening: true, error: undefined }));
       startListeningAnimation();
 
+      // FIXED: Use startListening() instead of startRecording()
       await aiService.startListening();
       console.log('✅ AI Agent listening started successfully');
 
@@ -216,6 +217,7 @@ export default function AIAgent({
       stopAllAnimations();
       startProcessingAnimation();
 
+      // FIXED: Use stopListening() instead of stopRecording()
       const audioUri = await aiService.stopListening();
       
       if (!audioUri) {
@@ -320,49 +322,41 @@ export default function AIAgent({
   const shouldProvideTTSResponse = (response: VoiceCommandResponse): boolean => {
     // Only provide TTS for:
     // 1. Clarification requests (always need audio feedback)
-    // 2. Error conditions or failures
-    // 3. When user explicitly asks AI to "read" or "say" something
-    // 4. When confidence is low and we need to confirm
+    // 2. Read commands (user explicitly asked to hear something)
+    // 3. Help/explanation requests
+    if (response.action === 'clarify' || response.needs_clarification) {
+      return true;
+    }
     
-    const needsTTS = 
-      response.action === 'clarify' || // Always provide audio for clarifications
-      response.confidence < 0.7 || // Low confidence needs confirmation
-      response.confirmation?.toLowerCase().includes('error') ||
-      response.confirmation?.toLowerCase().includes('failed') ||
-      response.ttsText?.toLowerCase().includes('read') ||
-      response.ttsText?.toLowerCase().includes('say') ||
-      response.ttsText?.toLowerCase().includes('speak');
-
-    console.log(`🔊 TTS Decision: ${needsTTS ? 'PLAY' : 'SKIP'} (action: ${response.action}, confidence: ${response.confidence})`);
-    return needsTTS;
+    if (response.action === 'explain_capabilities' || response.action === 'acknowledge') {
+      return true;
+    }
+    
+    // Skip TTS for field updates and other actions (low confidence gets TTS)
+    if (response.action === 'update_field' && response.confidence > 0.8) {
+      return false;
+    }
+    
+    return response.confidence < 0.7; // Low confidence = provide audio feedback
   };
 
+  // Enhanced command execution with better error handling and logging
   const executeCommand = async (response: VoiceCommandResponse) => {
+    console.log('🎯 executeCommand called with:', response);
+    
     try {
-      console.log('🎯 Executing AI command:', response.action, response);
-      
       switch (response.action) {
-        case 'respond':
-          // Only for basic acknowledgments - no action needed, just log
-          console.log('💬 AI Agent acknowledging:', response.confirmation);
-          break;
-
-        case 'acknowledge':
-          console.log('✅ AI Agent acknowledging:', response.confirmation);
-          break;
-
         case 'update_field':
-        case 'edit_field':
+        case 'edit_field': // Handle alias
           await handleFieldUpdate(response);
           break;
           
         case 'toggle_mode':
-        case 'toggle_edit_mode':
+        case 'toggle_edit_mode': // Handle alias
           await handleModeToggle(response);
           break;
           
         case 'execute_action':
-        case 'generate_summary':
           await handleActionExecution(response);
           break;
           
@@ -382,29 +376,36 @@ export default function AIAgent({
           handleSuggestion(response);
           break;
           
-        case 'clarify':
-          // Clarifications always need user feedback
-          Alert.alert(
-            'Clarification Needed', 
-            response.clarification || response.confirmation,
-            [{ text: 'OK' }]
-          );
+        case 'acknowledge':
+        case 'respond': // Handle backend response type
+          console.log('✅ Command acknowledged:', response.confirmation);
+          // No action needed for acknowledgments
           break;
           
         default:
-          console.warn(`⚠️ Unknown AI command action: ${response.action}`);
+          console.warn('⚠️ Unknown command action:', response.action);
           break;
       }
+      
+      console.log('✅ AI Agent command executed successfully');
+      
     } catch (error) {
       console.error('❌ Command execution failed:', error);
-      Alert.alert('Error', 'Failed to execute command. Please try again.');
+      Alert.alert('Error', 'Command execution failed. Please try again.');
     }
   };
 
-  // Enhanced field update with context awareness
+  // Enhanced field update with better error handling and logging
   const handleFieldUpdate = async (response: VoiceCommandResponse) => {
-    if (!response.target || response.value === undefined || !onFieldUpdate) {
-      console.warn('⚠️ Field update missing target, value, or handler');
+    console.log('🔄 handleFieldUpdate called with:', response);
+    
+    if (!response.target || response.value === undefined) {
+      console.warn('⚠️ Field update missing target or value:', response);
+      return;
+    }
+
+    if (!onFieldUpdate) {
+      console.warn('⚠️ onFieldUpdate callback not provided');
       return;
     }
 
@@ -414,14 +415,17 @@ export default function AIAgent({
 
     if (isInPreviewMode || isEditingMode) {
       console.log('🔄 Switching to edit mode before field update');
-      if (onFieldUpdate) {
+      try {
         await onFieldUpdate('isEditing', 'true');
         // Small delay to let the UI update
-        setTimeout(async () => {
-          await onFieldUpdate(response.target!, response.value!);
-        }, 100);
+        await new Promise(resolve => setTimeout(resolve, 150));
+        await onFieldUpdate(response.target, response.value);
+      } catch (error) {
+        console.error('❌ Error updating field with mode switch:', error);
+        throw error;
       }
     } else {
+      console.log('🔄 Updating field directly (already in edit mode)');
       await onFieldUpdate(response.target, response.value);
     }
 
@@ -429,6 +433,8 @@ export default function AIAgent({
   };
 
   const handleModeToggle = async (response: VoiceCommandResponse) => {
+    console.log('🔄 handleModeToggle called');
+    
     if (onFieldUpdate) {
       const currentEditingState = screenContext.currentValues?.isEditing || false;
       const currentMode = screenContext.mode;
@@ -445,6 +451,7 @@ export default function AIAgent({
       console.log(`🔄 Mode toggled: editing = ${newEditingState}`);
     } else if (onModeToggle) {
       onModeToggle();
+      console.log('🔄 Mode toggled via onModeToggle callback');
     }
   };
 
@@ -482,22 +489,25 @@ export default function AIAgent({
     }
   };
 
-  // Handle button press
+  // Handle button press - FIXED METHOD CALLS
   const handlePress = async () => {
     if (disabled) return;
 
     if (agentState.isListening) {
+      // FIXED: Use stopListening() instead of stopRecording()
       await stopListening();
     } else if (!agentState.isProcessing && !agentState.isPlayingResponse) {
+      // FIXED: Use startListening() instead of startRecording()
       await startListening();
     }
   };
 
   // Calculate positioning
-  const buttonSize = customStyle?.size || 70;
+  const buttonSize = (customStyle as any)?.size || 70;
   const haloSize = buttonSize + 20;
   const haloOffset = -10;
 
+  // FIXED: Remove invalid position values
   const getPositionStyle = (): ViewStyle => {
     const baseStyle: ViewStyle = {
       position: 'absolute',
@@ -569,7 +579,7 @@ export default function AIAgent({
               width: buttonSize,
               height: buttonSize,
               borderRadius: buttonSize / 2,
-              backgroundColor: customStyle?.buttonColor || (
+              backgroundColor: (customStyle as any)?.buttonColor || (
                 agentState.isListening ? '#FF4444' :
                 agentState.isProcessing ? '#FFA500' :
                 agentState.isPlayingResponse ? '#00AA00' : '#007AFF'
@@ -588,7 +598,7 @@ export default function AIAgent({
             
             {(agentState.isListening || agentState.isPlayingResponse) && (
               <SpeakerWave 
-                color={customStyle?.iconColor || '#FFFFFF'} 
+                color={(customStyle as any)?.iconColor || '#FFFFFF'} 
                 isActive={agentState.isListening || agentState.isPlayingResponse}
               />
             )}

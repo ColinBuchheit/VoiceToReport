@@ -1,4 +1,4 @@
-// types/aiAgent.ts - Enhanced Types for Natural AI Agent
+// types/aiAgent.ts - CLEANED VERSION - Removed unused interfaces
 export interface ScreenContext {
   screenName: 'home' | 'transcript' | 'summary' | 'pdfPreview' | 'closeout_summary' | 'emailConfirmation';
   visibleFields: FieldInfo[];
@@ -38,7 +38,7 @@ export interface VoiceCommand {
 
 export interface VoiceCommandResponse {
   action: 
-    | 'respond'           // ADD THIS - Backend returns this for simple responses
+    | 'respond'
     | 'update_field' 
     | 'navigate' 
     | 'toggle_mode' 
@@ -47,27 +47,27 @@ export interface VoiceCommandResponse {
     | 'explain_capabilities'
     | 'provide_suggestion'
     | 'acknowledge'
-    | 'edit_field'        // ADD THIS - Common alias for update_field
-    | 'clear_field'       // ADD THIS - For clearing field values
-    | 'toggle_edit_mode'  // ADD THIS - For toggling edit mode
-    | 'generate_summary'; // ADD THIS - For generating summaries
+    | 'edit_field'
+    | 'clear_field'
+    | 'toggle_edit_mode'
+    | 'generate_summary';
   target?: string;
   value?: string;
   confidence: number;
   clarification?: string;
   confirmation: string;
   ttsText: string;
-  success?: boolean;    // ADD THIS - Backend includes this field
-  needs_clarification?: boolean; // ADD THIS - Backend includes this
-  clarification_question?: string; // ADD THIS - Backend includes this
-  replacement?: string; // ADD THIS - Backend includes this
-  fieldUpdates?: Record<string, any>; // ADD THIS - Backend includes this
+  success?: boolean;
+  needs_clarification?: boolean;
+  clarification_question?: string;
+  replacement?: string;
+  fieldUpdates?: Record<string, any>;
   metadata?: {
     processingTime?: number;
     modelUsed?: string;
     suggestions?: string[];
     relatedFields?: string[];
-    [key: string]: any; // Allow additional metadata fields
+    [key: string]: any;
   };
 }
 
@@ -96,7 +96,7 @@ export interface AIAgentProps {
   onModeToggle?: () => void;
   onNavigate?: (screen: string, params?: any) => void;
   onAction?: (actionName: string, params?: any) => void;
-  onCustomAction?: (action: string) => void; // Added this missing prop
+  onCustomAction?: (action: string) => void;
   onCapabilityExplain?: (capability: string) => void;
   onSuggestionProvided?: (suggestion: string, targetField?: string) => void;
   position?: 'bottom-right' | 'bottom-left' | 'bottom-center';
@@ -107,15 +107,6 @@ export interface AIAgentProps {
     iconColor?: string;
     size?: number;
   };
-}
-
-export interface ConversationEntry {
-  userInput: string;
-  agentResponse: string;
-  timestamp: number;
-  screenContext: string;
-  action: string;
-  confidence: number;
 }
 
 export interface AgentHealthStatus {
@@ -132,7 +123,7 @@ export interface AgentHealthStatus {
   };
 }
 
-// Updated summary structure for closeout reports
+// Main data structure for closeout reports
 export interface CloseoutSummary {
   // Closeout Notes
   onsite_contact?: string;
@@ -166,7 +157,7 @@ export interface CloseoutSummary {
   notes?: string;
 }
 
-// Maintain backward compatibility with legacy summary structure
+// Legacy summary structure for backward compatibility
 export interface LegacySummary {
   taskDescription: string;
   location?: string;
@@ -183,52 +174,12 @@ export interface ConnectivityTestResult {
   backendVersion?: string;
 }
 
-export interface TechniciansReport {
-  id?: string;
-  location: string;
-  clientCompany: string;
-  servicesPerformed: string[];
-  equipmentInvolved: string[];
-  issuesEncountered: string[];
-  resolutionStatus: 'completed' | 'partial' | 'pending';
-  additionalNotes: string;
-  durationEstimate: string;
-  followUpNeeded: boolean;
-  followUpType?: string;
-  technicianName?: string;
-  dateCompleted?: string;
-  timestamp: string;
-}
-
-export interface FieldSuggestion {
-  fieldName: string;
-  currentValue: string;
-  suggestedValue: string;
-  reason: string;
-  confidence: number;
-  improvements: string[];
-}
-
-export interface AgentPersonality {
-  name: string;
-  role: string;
-  traits: string[];
-  communicationStyle: {
-    formality: 'casual' | 'professional' | 'mixed';
-    verbosity: 'brief' | 'detailed' | 'adaptive';
-    empathy: 'high' | 'medium' | 'low';
-  };
-  expertise: string[];
-  limitations: string[];
-}
-
 // Utility types for better type safety
 export type ActionType = VoiceCommandResponse['action'];
 export type ScreenName = ScreenContext['screenName'];
 export type FieldType = FieldInfo['type'];
-export type AgentStatus = AIAgentState['isListening'] | AIAgentState['isProcessing'] | AIAgentState['isPlayingResponse'];
 
-// Error types for better error handling
+// Error classes for better error handling
 export class AIAgentError extends Error {
   constructor(
     message: string,
