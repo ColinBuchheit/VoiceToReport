@@ -1,5 +1,5 @@
-// voice-report-app/screens/HomeScreen.tsx - COMPLETE FIXED VERSION
-import React, { useState } from 'react';
+// voice-report-app/screens/HomeScreen.tsx - COMPLETE VERSION WITH ALL FIXES
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Audio } from 'expo-av';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
 import Recorder from '../components/Recorder';
 import { transcribeAudio } from '../services/api';
@@ -36,19 +37,137 @@ interface CriteriaCategory {
   items: CriteriaItem[];
 }
 
+// Global state to persist across navigation
+let persistedState: {
+  checkedItems: Record<string, boolean>;
+  showChecklist: boolean;
+  shouldReset: boolean;
+} = {
+  checkedItems: {},
+  showChecklist: true,
+  shouldReset: false, // Flag to trigger complete reset
+};
+
 export default function HomeScreen({ navigation }: Props) {
   const [isProcessing, setIsProcessing] = useState(false);
-  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
-  const [showChecklist, setShowChecklist] = useState(true);
+  // Initialize from persisted state
+  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>(persistedState.checkedItems);
+  const [showChecklist, setShowChecklist] = useState(persistedState.showChecklist);
   
-  // Shared recording state - lifted up from Recorder components
+  // Shared recording state - always reset to clean state
   const [isRecording, setIsRecording] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  
+  // Timer management
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Function to completely reset all state
+  const resetAllState = () => {
+    // Reset checklist state
+    setCheckedItems({});
+    setShowChecklist(true);
+    
+    // Reset recording state
+    setIsRecording(false);
+    setRecording(null);
+    setRecordingDuration(0);
+    setIsProcessing(false);
+    
+    // Clear any running timers
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    
+    // Reset persisted state
+    persistedState.checkedItems = {};
+    persistedState.showChecklist = true;
+    persistedState.shouldReset = false;
+  };
+
+  // Save state to persistence when values change
+  useEffect(() => {
+    if (!persistedState.shouldReset) {
+      persistedState.checkedItems = checkedItems;
+    }
+  }, [checkedItems]);
+
+  useEffect(() => {
+    if (!persistedState.shouldReset) {
+      persistedState.showChecklist = showChecklist;
+    }
+  }, [showChecklist]);
+
+  // Handle navigation events - detect return from summary
+  useFocusEffect(
+    React.useCallback(() => {
+      // Check if we should reset (coming back from summary screen)
+      if (persistedState.shouldReset) {
+        resetAllState();
+        return;
+      }
+      
+      // Otherwise, just clean up recording state (normal return from transcript)
+      setIsRecording(false);
+      setRecording(null);
+      setRecordingDuration(0);
+      setIsProcessing(false);
+      
+      // Clear any running timers
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }, [])
+  );
+
+  // Listen for navigation state changes to detect summary completion
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      // Get the navigation state to check if we're coming from summary
+      const routes = navigation.getState()?.routes || [];
+      const currentIndex = navigation.getState()?.index || 0;
+      
+      // If we're coming back from a deeper screen (summary), reset everything
+      if (routes.length > 1 && currentIndex === 0) {
+        // Check if the previous route was summary by looking at navigation history
+        const wasOnSummary = routes.some(route => route.name === 'Summary');
+        if (wasOnSummary) {
+          persistedState.shouldReset = true;
+        }
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation]);
+
+  // Timer management - handles timer across view switches
+  useEffect(() => {
+    if (isRecording) {
+      if (!timerRef.current) {
+        timerRef.current = setInterval(() => {
+          setRecordingDuration((prev: number) => prev + 1);
+        }, 1000);
+      }
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [isRecording]);
 
   const criteriaCategories: CriteriaCategory[] = [
     {
-      title: "Closeout Information",
+      title: "Closeout Notes",
       color: "#000000",
       items: [
         {
@@ -70,24 +189,6 @@ export default function HomeScreen({ navigation }: Props) {
           required: true
         },
         {
-          id: "scope_completed",
-          label: "Was the scope completed successfully?",
-          hint: "Say yes/no and explain the outcome",
-          required: true
-        },
-        {
-          id: "released_by",
-          label: "Who released you?",
-          hint: "Name of person who signed off on completion",
-          required: true
-        }
-      ]
-    },
-    {
-      title: "Technical Details",
-      color: "#FF6B35",
-      items: [
-        {
           id: "delays",
           label: "Were there any delays?",
           hint: "Mention any delays or say 'no delays'",
@@ -100,63 +201,69 @@ export default function HomeScreen({ navigation }: Props) {
           required: true
         },
         {
+          id: "scope_completed",
+          label: "Was the scope completed successfully?",
+          hint: "Say yes/no and explain the outcome",
+          required: true
+        },
+        {
+          id: "released_by",
+          label: "Who released you?",
+          hint: "Name of person who signed off on completion",
+          required: true
+        },
+        {
           id: "release_code",
-          label: "Is there a release code?",
-          hint: "Provide any completion or release codes",
-          required: false
+          label: "Is there a release code? If so, what is it?",
+          hint: "Mention release code or say 'no release code'",
+          required: true
         },
         {
           id: "return_tracking",
-          label: "Return tracking number?",
-          hint: "Any tracking numbers for returned items",
-          required: false
+          label: "Is there a return tracking number? If so, what is it?",
+          hint: "Mention tracking number or say 'no return tracking'",
+          required: true
         }
       ]
     },
     {
-      title: "Resources & Documentation",
-      color: "#6B7280",
+      title: "Expenses",
+      color: "#10B981",
       items: [
+        {
+          id: "expenses",
+          label: "Did you have any expenses (parking fees, etc)?",
+          hint: "List any expenses or say 'no expenses'",
+          required: true
+        },
         {
           id: "materials_used",
           label: "What materials did you use?",
-          hint: "List equipment, parts, or supplies used",
+          hint: "List materials used or say 'no materials used'",
           required: true
-        },
-        {
-          id: "expenses",
-          label: "Any expenses (parking, etc.)?",
-          hint: "Mention parking fees, tolls, or other costs",
-          required: true
-        },
+        }
+      ]
+    },
+    {
+      title: "Out of Scope",
+      color: "#F59E0B",
+      items: [
         {
           id: "out_of_scope_work",
-          label: "Any out of scope work?",
-          hint: "Describe additional work and who approved it",
-          required: false
-        },
+          label: "Was there any out of scope work? If so, what is it and who approved the work?",
+          hint: "Describe out of scope work and approval or say 'no out of scope work'",
+          required: true
+        }
+      ]
+    },
+    {
+      title: "Photos",
+      color: "#8B5CF6",
+      items: [
         {
           id: "photos_uploaded",
           label: "How many photos did you upload?",
-          hint: "State the number of photos taken",
-          required: false
-        },
-        {
-          id: "location",
-          label: "Work location",
-          hint: "Where was the work performed?",
-          required: true
-        },
-        {
-          id: "technician_name",
-          label: "Your name",
-          hint: "State your name as the technician",
-          required: true
-        },
-        {
-          id: "datetime",
-          label: "Date and time",
-          hint: "When was the work completed?",
+          hint: "State number of photos uploaded or say 'no photos uploaded'",
           required: true
         }
       ]
@@ -174,6 +281,9 @@ export default function HomeScreen({ navigation }: Props) {
       setIsProcessing(true);
       const result = await transcribeAudio(audioUri);
       
+      // Set flag to reset state when returning from the workflow
+      persistedState.shouldReset = true;
+      
       navigation.navigate('Transcript', {
         transcription: result.transcription,
         audioUri,
@@ -183,7 +293,6 @@ export default function HomeScreen({ navigation }: Props) {
       Alert.alert('Error', 'Failed to process audio recording');
     } finally {
       setIsProcessing(false);
-      // Reset shared recording state
       setIsRecording(false);
       setRecording(null);
       setRecordingDuration(0);
@@ -289,7 +398,7 @@ export default function HomeScreen({ navigation }: Props) {
             <View style={styles.bottomPadding} />
           </ScrollView>
         ) : (
-          /* Large Centered Record Button - With shared state */
+          /* Large Centered Record Button */
           <View style={styles.centeredRecorderView}>
             <Recorder
               onRecordingComplete={handleRecordingComplete}
@@ -306,7 +415,7 @@ export default function HomeScreen({ navigation }: Props) {
         )}
       </View>
 
-      {/* Fixed Bottom Recorder - With shared state */}
+      {/* Fixed Bottom Recorder */}
       {showChecklist && (
         <View style={styles.recorderContainer}>
           <Recorder

@@ -1,4 +1,4 @@
-// voice-report-app/components/Recorder.tsx - COMPLETE FIXED VERSION
+// voice-report-app/components/Recorder.tsx - WITH STOCK MICROPHONE ICONS
 import React, { useRef, useEffect } from 'react';
 import {
   View,
@@ -12,6 +12,7 @@ import {
   Vibration,
 } from 'react-native';
 import { Audio } from 'expo-av';
+import { Ionicons } from '@expo/vector-icons';
 
 interface RecorderProps {
   onRecordingComplete: (uri: string) => void;
@@ -62,16 +63,8 @@ export default function Recorder({
   const buttonSize = isLarge ? largeButtonSize : smallButtonSize;
   const iconScale = buttonSize / 140;
   
-  // Icon sizes
-  const micSize = isLarge ? 
-    { width: Math.round(32 * iconScale), height: Math.round(40 * iconScale) } : 
-    { width: Math.round(20 * iconScale), height: Math.round(26 * iconScale) };
-  const micSizeRecording = isLarge ? 
-    { width: Math.round(24 * iconScale), height: Math.round(24 * iconScale) } : 
-    { width: Math.round(16 * iconScale), height: Math.round(16 * iconScale) };
-  const processingSize = isLarge ? 
-    { width: Math.round(28 * iconScale), height: Math.round(28 * iconScale) } : 
-    { width: Math.round(18 * iconScale), height: Math.round(18 * iconScale) };
+  // Icon size - responsive to button size
+  const iconSize = isLarge ? Math.round(64 * iconScale) : Math.round(32 * iconScale);
   
   // Enhanced Animation Values
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -82,14 +75,15 @@ export default function Recorder({
   const shadowAnim = useRef(new Animated.Value(1)).current;
   const innerGlowAnim = useRef(new Animated.Value(0)).current;
   const outerRingAnim = useRef(new Animated.Value(1)).current;
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Cleanup animations on unmount
   useEffect(() => {
     return () => {
-      // Only clean up timer, not recording (parent manages recording state)
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
+      pulseAnim.stopAnimation();
+      glowAnim.stopAnimation();
+      rotateAnim.stopAnimation();
+      innerGlowAnim.stopAnimation();
+      outerRingAnim.stopAnimation();
     };
   }, []);
 
@@ -259,10 +253,6 @@ export default function Recorder({
           }
           setRecording(null);
         }
-        if (timerRef.current) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
-        }
         setIsRecording(false);
         setRecordingDuration(0);
       } catch (error) {
@@ -290,13 +280,6 @@ export default function Recorder({
         setRecording(newRecording);
         setIsRecording(true);
         setRecordingDuration(0);
-
-        // Start timer only if not already running (prevent duplicates)
-        if (!timerRef.current) {
-          timerRef.current = setInterval(() => {
-            setRecordingDuration((prev: number) => prev + 1);
-          }, 1000);
-        }
       } catch (error) {
         console.error('Failed to start recording:', error);
         Alert.alert('Error', 'Failed to start recording');
@@ -308,6 +291,26 @@ export default function Recorder({
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Get the appropriate icon and color based on state
+  const getIconProps = () => {
+    if (isRecording) {
+      return {
+        name: 'stop' as const, // Stop icon when recording
+        color: COLORS.BLACK, // Black icon on orange background
+      };
+    } else if (isProcessing) {
+      return {
+        name: 'refresh' as const, // Spinning refresh icon when processing
+        color: COLORS.ORANGE, // Orange icon on white background
+      };
+    } else {
+      return {
+        name: 'mic' as const, // Microphone icon when idle
+        color: COLORS.WHITE, // White icon on black background
+      };
+    }
   };
 
   // Outer glow ring style
@@ -369,51 +372,42 @@ export default function Recorder({
           shadowOffset: { width: 0, height: isLarge ? 12 : 8 },
         },
         android: {
-          elevation: isLarge ? 16 : 12,
+          elevation: isLarge ? 15 : 8,
         },
       }),
     };
 
     if (isRecording) {
-      return [
-        baseStyle,
-        {
-          backgroundColor: COLORS.BLACK,
-          borderColor: COLORS.ORANGE,
-          borderWidth: 5,
-        }
-      ];
+      return {
+        ...baseStyle,
+        backgroundColor: COLORS.ORANGE,
+        borderColor: COLORS.BLACK,
+      };
     } else if (isProcessing) {
-      return [
-        baseStyle,
-        {
-          backgroundColor: COLORS.ORANGE,
-          borderColor: COLORS.BLACK,
-          borderWidth: 4,
-        }
-      ];
+      return {
+        ...baseStyle,
+        backgroundColor: COLORS.WHITE,
+        borderColor: COLORS.ORANGE,
+      };
     } else {
-      return [
-        baseStyle,
-        {
-          backgroundColor: COLORS.ORANGE,
-          borderColor: COLORS.WHITE,
-          borderWidth: 4,
-        }
-      ];
+      return {
+        ...baseStyle,
+        backgroundColor: COLORS.BLACK,
+        borderColor: COLORS.ORANGE,
+      };
     }
   };
 
-  // Ripple effect
+  // Ripple effect style
   const getRippleStyle = () => {
     const rippleScale = rippleAnim.interpolate({
       inputRange: [0, 1],
-      outputRange: [0, 2.5],
+      outputRange: [1, 2.5],
     });
-
+    
     const rippleOpacity = rippleAnim.interpolate({
-      inputRange: [0, 0.3, 1],
-      outputRange: [0, 0.4, 0],
+      inputRange: [0, 0.5, 1],
+      outputRange: [0.6, 0.3, 0],
     });
 
     return {
@@ -421,55 +415,10 @@ export default function Recorder({
       width: buttonSize,
       height: buttonSize,
       borderRadius: buttonSize / 2,
-      backgroundColor: COLORS.WHITE,
+      backgroundColor: COLORS.ORANGE,
       opacity: rippleOpacity,
       transform: [{ scale: rippleScale }],
     };
-  };
-
-  // Microphone icon with company styling
-  const getMicStyle = () => {
-    const borderRadius = Math.round(iconScale * (isLarge ? 14 : 10));
-    
-    if (isRecording) {
-      return [
-        styles.micIconRecording,
-        micSizeRecording,
-        { 
-          borderRadius: 4,
-          backgroundColor: COLORS.ORANGE,
-        }
-      ];
-    } else {
-      return [
-        styles.micIcon,
-        micSize,
-        { 
-          borderRadius,
-          backgroundColor: isProcessing ? COLORS.WHITE : COLORS.BLACK,
-        }
-      ];
-    }
-  };
-
-  // Processing icon with rotation
-  const getProcessingStyle = () => {
-    const rotateInterpolate = rotateAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: ['0deg', '360deg'],
-    });
-
-    return [
-      styles.processingIcon,
-      processingSize,
-      { 
-        borderRadius: processingSize.width / 2,
-        borderWidth: Math.max(Math.round(iconScale * 3), 2),
-        borderColor: COLORS.BLACK,
-        borderTopColor: 'transparent',
-        transform: [{ rotate: rotateInterpolate }],
-      }
-    ];
   };
 
   // Inner glow overlay
@@ -488,6 +437,20 @@ export default function Recorder({
       opacity: innerGlowOpacity,
     };
   };
+
+  // Icon rotation for processing state
+  const getIconTransform = () => {
+    if (isProcessing) {
+      const rotateInterpolate = rotateAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['0deg', '360deg'],
+      });
+      return [{ rotate: rotateInterpolate }];
+    }
+    return [];
+  };
+
+  const iconProps = getIconProps();
 
   return (
     <View style={[styles.container, isLarge && styles.centerContainer]}>
@@ -541,11 +504,13 @@ export default function Recorder({
             disabled={isProcessing}
             activeOpacity={0.95}
           >
-            {isProcessing ? (
-              <Animated.View style={getProcessingStyle()} />
-            ) : (
-              <View style={getMicStyle()} />
-            )}
+            <Animated.View style={{ transform: getIconTransform() }}>
+              <Ionicons 
+                name={iconProps.name} 
+                size={iconSize} 
+                color={iconProps.color} 
+              />
+            </Animated.View>
           </TouchableOpacity>
         </Animated.View>
       </Animated.View>
@@ -559,93 +524,58 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   centerContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    flex: 1,
   },
   
-  // Company-branded Status Bubble
+  // Enhanced Status Bubble
   statusBubble: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 25,
-    marginBottom: 25,
+    position: 'absolute',
+    top: -60,
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
     borderWidth: 2,
+    zIndex: 10,
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.3,
-        shadowRadius: 10,
-      },
-      android: {
-        elevation: 10,
-      },
-    }),
-  },
-  recordingIndicator: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 10,
-  },
-  statusText: {
-    fontSize: 18,
-    fontWeight: '700',
-    fontFamily: Platform.OS === 'ios' ? 'Menlo-Bold' : 'monospace',
-    letterSpacing: 1,
-  },
-  
-  touchableArea: {
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 1000,
-  },
-  
-  // Company-styled Microphone Icon
-  micIcon: {
-    position: 'relative',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.2,
-        shadowRadius: 5,
-      },
-      android: {
-        elevation: 5,
-      },
-    }),
-  },
-  micIconRecording: {
-    ...Platform.select({
-      ios: {
-        shadowColor: '#FF6B35',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.4,
+        shadowColor: '#000000',
+        shadowOpacity: 0.25,
         shadowRadius: 8,
+        shadowOffset: { width: 0, height: 4 },
       },
       android: {
         elevation: 8,
       },
     }),
   },
+  recordingIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  statusText: {
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'Roboto',
+  },
   
-  // Processing Icon
-  processingIcon: {
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
+  // Button Styles
+  touchableArea: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  
+  // Fixed: Icon container for consistent positioning
+  iconContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
+    height: '100%',
   },
 });
+
