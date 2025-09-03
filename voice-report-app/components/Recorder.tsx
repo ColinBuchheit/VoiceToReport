@@ -1,4 +1,4 @@
-// voice-report-app/components/Recorder.tsx - FLOATING ACTION BUTTON STYLE
+// voice-report-app/components/Recorder.tsx - Fully responsive with proper variable scoping
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -7,18 +7,51 @@ import {
   TouchableOpacity,
   Animated,
   Alert,
+  Dimensions,
 } from 'react-native';
 import { Audio } from 'expo-av';
 
 interface RecorderProps {
   onRecordingComplete: (uri: string) => void;
   isProcessing: boolean;
+  size?: 'small' | 'large'; // Size prop to control button size
 }
 
-export default function Recorder({ onRecordingComplete, isProcessing }: RecorderProps) {
+export default function Recorder({ 
+  onRecordingComplete, 
+  isProcessing, 
+  size = 'small' // Default to small size
+}: RecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  
+  // Get screen dimensions
+  const { width: screenWidth } = Dimensions.get('window');
+  
+  // Calculate responsive sizes based on screen dimensions
+  const baseSmallSize = Math.min(screenWidth * 0.18, 140); // 18% of screen width, max 140px
+  const baseLargeSize = Math.min(screenWidth * 0.35, 280); // 35% of screen width, max 280px
+  
+  // Ensure minimum sizes for usability
+  const smallButtonSize = Math.max(baseSmallSize, 80); // Minimum 80px
+  const largeButtonSize = Math.max(baseLargeSize, 180); // Minimum 180px
+  
+  const isLarge = size === 'large';
+  const buttonSize = isLarge ? largeButtonSize : smallButtonSize;
+  
+  // Scale icons proportionally to button size
+  const iconScale = buttonSize / 140; // 140 was our original base size
+  
+  const micSize = isLarge ? 
+    { width: Math.round(36 * iconScale), height: Math.round(42 * iconScale) } : 
+    { width: Math.round(24 * iconScale), height: Math.round(28 * iconScale) };
+  const micSizeRecording = isLarge ? 
+    { width: Math.round(30 * iconScale), height: Math.round(30 * iconScale) } : 
+    { width: Math.round(20 * iconScale), height: Math.round(20 * iconScale) };
+  const processingSize = isLarge ? 
+    { width: Math.round(30 * iconScale), height: Math.round(30 * iconScale) } : 
+    { width: Math.round(20 * iconScale), height: Math.round(20 * iconScale) };
   
   // Animations for floating button
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -76,121 +109,150 @@ export default function Recorder({ onRecordingComplete, isProcessing }: Recorder
         useNativeDriver: true,
       }),
     ]).start();
-    
+
     if (isRecording) {
-      await stopRecording();
+      // Stop recording
+      try {
+        if (recording) {
+          await recording.stopAndUnloadAsync();
+          const uri = recording.getURI();
+          if (uri) {
+            onRecordingComplete(uri);
+          }
+          setRecording(null);
+        }
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+        setIsRecording(false);
+        setRecordingDuration(0);
+      } catch (error) {
+        console.error('Failed to stop recording:', error);
+        Alert.alert('Error', 'Failed to stop recording');
+      }
     } else {
-      await startRecording();
-    }
-  };
+      // Start recording
+      try {
+        const { status } = await Audio.requestPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission required', 'Please enable microphone access');
+          return;
+        }
 
-  const startRecording = async () => {
-    try {
-      const { status } = await Audio.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Please enable microphone permissions in Settings');
-        return;
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+        });
+
+        const newRecording = new Audio.Recording();
+        await newRecording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+        await newRecording.startAsync();
+        
+        setRecording(newRecording);
+        setIsRecording(true);
+        setRecordingDuration(0);
+
+        // Start timer
+        timerRef.current = setInterval(() => {
+          setRecordingDuration(prev => prev + 1);
+        }, 1000);
+      } catch (error) {
+        console.error('Failed to start recording:', error);
+        Alert.alert('Error', 'Failed to start recording');
       }
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
-
-      const { recording: newRecording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-
-      setRecording(newRecording);
-      setIsRecording(true);
-      setRecordingDuration(0);
-
-      timerRef.current = setInterval(() => {
-        setRecordingDuration(prev => prev + 1);
-      }, 1000);
-
-    } catch (error) {
-      console.error('Failed to start recording:', error);
-      Alert.alert('Error', 'Failed to start recording. Please try again.');
-    }
-  };
-
-  const stopRecording = async () => {
-    if (!recording) return;
-
-    try {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-      });
-
-      setIsRecording(false);
-      setRecording(null);
-      setRecordingDuration(0);
-
-      if (uri) {
-        onRecordingComplete(uri);
-      }
-
-    } catch (error) {
-      console.error('Failed to stop recording:', error);
-      Alert.alert('Error', 'Failed to stop recording. Please try again.');
-      
-      setIsRecording(false);
-      setRecording(null);
-      setRecordingDuration(0);
     }
   };
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getButtonStyle = () => {
+    if (isLarge) {
+      return [
+        styles.centerFab,
+        isRecording && styles.centerFabRecording,
+        isProcessing && styles.centerFabProcessing,
+        { 
+          width: buttonSize, 
+          height: buttonSize, 
+          borderRadius: buttonSize / 2,
+          borderWidth: Math.max(Math.round(iconScale * 4), 3) // Responsive border width
+        }
+      ];
+    } else {
+      return [
+        styles.fab,
+        isRecording && styles.fabRecording,
+        isProcessing && styles.fabProcessing,
+        { 
+          width: buttonSize, 
+          height: buttonSize, 
+          borderRadius: buttonSize / 2,
+          borderWidth: Math.max(Math.round(iconScale * 3), 2) // Responsive border width
+        }
+      ];
+    }
+  };
+
+  const getMicStyle = () => {
+    const borderRadius = size === 'large' ? Math.round(iconScale * 18) : Math.round(iconScale * 12);
+    if (isRecording) {
+      return [
+        styles.micIconRecording,
+        micSizeRecording,
+        { borderRadius: Math.round(borderRadius * 0.3) } // Smaller radius when recording
+      ];
+    } else {
+      return [
+        styles.micIcon,
+        micSize,
+        { borderRadius }
+      ];
+    }
+  };
+
+  const getProcessingStyle = () => {
+    return [
+      styles.processingIcon,
+      processingSize,
+      { 
+        borderRadius: processingSize.width / 2,
+        borderWidth: Math.max(Math.round(iconScale * 3), 2) // Responsive border width
+      }
+    ];
   };
 
   return (
-    <View style={styles.container}>
-      {/* Status Text - Appears above button when active */}
-      {(isRecording || isProcessing) && (
+    <View style={[styles.container, isLarge && styles.centerContainer]}>
+      {/* Status Bubble - Only show during recording */}
+      {isRecording && (
         <View style={styles.statusBubble}>
-          {isProcessing ? (
-            <Text style={styles.statusText}>Processing...</Text>
-          ) : (
-            <Text style={styles.statusText}>{formatDuration(recordingDuration)}</Text>
-          )}
+          <Text style={styles.statusText}>
+            {formatDuration(recordingDuration)}
+          </Text>
         </View>
       )}
 
-      {/* Main Floating Action Button */}
-      <Animated.View style={{
-        transform: [
-          { scale: Animated.multiply(scaleAnim, pulseAnim) }
-        ]
-      }}>
+      {/* Main Recording Button */}
+      <Animated.View
+        style={[
+          { transform: [{ scale: scaleAnim }, { scale: pulseAnim }] }
+        ]}
+      >
         <TouchableOpacity
-          style={[
-            styles.fab,
-            isRecording && styles.fabRecording,
-            isProcessing && styles.fabProcessing,
-          ]}
+          style={getButtonStyle()}
           onPress={toggleRecording}
           disabled={isProcessing}
           activeOpacity={0.8}
         >
           {isProcessing ? (
-            <View style={styles.processingIcon} />
+            <View style={getProcessingStyle()} />
           ) : (
-            <View style={[
-              styles.micIcon,
-              isRecording && styles.micIconRecording
-            ]} />
+            <View style={getMicStyle()} />
           )}
         </TouchableOpacity>
       </Animated.View>
@@ -224,9 +286,6 @@ const styles = StyleSheet.create({
   
   // Regular Floating Action Button
   fab: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
     backgroundColor: '#FF6B35',
     justifyContent: 'center',
     alignItems: 'center',
@@ -248,9 +307,6 @@ const styles = StyleSheet.create({
   
   // Large Center Mode FAB
   centerFab: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
     backgroundColor: '#FF6B35',
     justifyContent: 'center',
     alignItems: 'center',
@@ -270,45 +326,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#6B7280',
   },
   
-  // Regular Microphone Icon
+  // Microphone Icon (responsive to size)
   micIcon: {
-    width: 24,
-    height: 28,
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
     position: 'relative',
   },
   micIconRecording: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 4,
-    width: 20,
-    height: 20,
   },
   
-  // Large Microphone Icon for Center Mode
-  micIconLarge: {
-    width: 36,
-    height: 42,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-  },
-  
-  // Regular Processing Icon
+  // Processing Icon (responsive to size)
   processingIcon: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 3,
-    borderColor: '#FFFFFF',
-    borderTopColor: 'transparent',
-  },
-  
-  // Large Processing Icon for Center Mode
-  processingIconLarge: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 4,
     borderColor: '#FFFFFF',
     borderTopColor: 'transparent',
   },

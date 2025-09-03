@@ -1,4 +1,4 @@
-// voice-report-app/screens/HomeScreen.tsx - SIMPLE TEMPLATE APPROACH
+// voice-report-app/screens/HomeScreen.tsx - Updated to use large recorder when checklist is hidden
 import React, { useState } from 'react';
 import {
   View,
@@ -163,7 +163,6 @@ export default function HomeScreen({ navigation }: Props) {
   const checkedRequiredCount = requiredItems.filter(item => checkedItems[item.id]).length;
   const progressPercent = totalItems > 0 ? Math.round((checkedCount / totalItems) * 100) : 0;
 
-  // EXACT SAME CORE FUNCTIONALITY
   const handleRecordingComplete = async (audioUri: string) => {
     try {
       setIsProcessing(true);
@@ -190,7 +189,7 @@ export default function HomeScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Fixed Header - Like iOS Voice Memos */}
+      {/* Fixed Header */}
       <View style={styles.header}>
         <Image 
           source={require('../assets/bears&t.png')} 
@@ -199,7 +198,7 @@ export default function HomeScreen({ navigation }: Props) {
         />
       </View>
 
-      {/* Progress Summary - Like Todoist */}
+      {/* Progress Summary */}
       <View style={styles.progressSummary}>
         <View style={styles.progressInfo}>
           <Text style={styles.progressTitle}>Report Progress</Text>
@@ -212,7 +211,7 @@ export default function HomeScreen({ navigation }: Props) {
         </View>
       </View>
 
-      {/* Content Area - Simple Toggle */}
+      {/* Content Area */}
       <View style={styles.contentContainer}>
         <View style={styles.contentHeader}>
           <TouchableOpacity 
@@ -226,13 +225,12 @@ export default function HomeScreen({ navigation }: Props) {
         </View>
 
         {showChecklist ? (
-          /* Clean Scrollable List - No Tips */
+          /* Checklist View */
           <ScrollView 
             style={styles.checklistContainer}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.checklistContent}
           >
-            {/* Category Lists Only - No Tips Section */}
             {criteriaCategories.map((category) => {
               const categoryChecked = category.items.filter(item => checkedItems[item.id]).length;
               
@@ -281,11 +279,12 @@ export default function HomeScreen({ navigation }: Props) {
             <View style={styles.bottomPadding} />
           </ScrollView>
         ) : (
-          /* Large Centered Record Button - No Text */
+          /* Large Centered Record Button - NOW WITH SIZE PROP */
           <View style={styles.centeredRecorderView}>
             <Recorder
               onRecordingComplete={handleRecordingComplete}
               isProcessing={isProcessing}
+              size="large"
             />
           </View>
         )}
@@ -297,6 +296,7 @@ export default function HomeScreen({ navigation }: Props) {
           <Recorder
             onRecordingComplete={handleRecordingComplete}
             isProcessing={isProcessing}
+            size="small"
           />
         </View>
       )}
@@ -310,7 +310,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   
-  // Fixed Header - Simple & Clean
+  // Fixed Header
   header: {
     paddingHorizontal: 20,
     paddingTop: Platform.OS === 'ios' ? 10 : 20,
@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   
-  // Progress Summary - Like Todoist
+  // Progress Summary
   progressSummary: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -385,7 +385,7 @@ const styles = StyleSheet.create({
     color: '#374151',
   },
   
-  // Checklist - Simple List
+  // Checklist
   checklistContainer: {
     flex: 1,
   },
@@ -393,15 +393,16 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   
-  // Centered Recorder View - Large & Prominent (Takes Full Available Space)
+  // Centered Recorder View - ENHANCED for large button
   centeredRecorderView: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: 60,  // Increased padding for better spacing
+    paddingHorizontal: 40,
   },
   
-  // Category Sections - Clean
+  // Category Sections
   categorySection: {
     marginBottom: 24,
   },
@@ -429,7 +430,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   
-  // Checklist Items - iOS Style
+  // Checklist Items
   checklistItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -487,35 +488,11 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   
-  // Ready State - Simple (kept for compatibility)
-  readyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 40,
-  },
-  
-  // Add missing styles for the fullScreenReady section
-  readyTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#1F2937',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  readySubtitle: {
-    fontSize: 18,
-    color: '#6B7280',
-    textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 32,
-  },
-  
   bottomPadding: {
     height: 20,
   },
   
-  // Fixed Bottom Recorder - Like WhatsApp
+  // Fixed Bottom Recorder
   recorderContainer: {
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
