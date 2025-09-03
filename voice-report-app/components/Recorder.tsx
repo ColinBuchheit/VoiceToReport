@@ -1,4 +1,4 @@
-// Simplified Recorder.tsx with single press toggle
+// voice-report-app/components/Recorder.tsx - FLOATING ACTION BUTTON STYLE
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   Animated,
   Alert,
-  Dimensions,
 } from 'react-native';
 import { Audio } from 'expo-av';
 
@@ -16,23 +15,16 @@ interface RecorderProps {
   isProcessing: boolean;
 }
 
-const { width } = Dimensions.get('window');
-
 export default function Recorder({ onRecordingComplete, isProcessing }: RecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   
-  // Simple animation refs
+  // Animations for floating button
+  const scaleAnim = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const waveAnim1 = useRef(new Animated.Value(0)).current;
-  const waveAnim2 = useRef(new Animated.Value(0)).current;
-  const rotateAnim = useRef(new Animated.Value(0)).current;
-  
-  // Timer ref
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (recording) {
@@ -44,102 +36,59 @@ export default function Recorder({ onRecordingComplete, isProcessing }: Recorder
     };
   }, []);
 
-  // Start recording animations
-  const startAnimations = () => {
-    // Pulse animation
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.2,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-
-    // Wave animations
-    const createWave = (animValue: Animated.Value, delay: number) => {
-      return Animated.loop(
+  // Floating button animations
+  useEffect(() => {
+    if (isRecording) {
+      // Pulsing animation during recording
+      Animated.loop(
         Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(animValue, {
-            toValue: 1,
-            duration: 2000,
+          Animated.timing(pulseAnim, {
+            toValue: 1.1,
+            duration: 800,
             useNativeDriver: true,
           }),
-          Animated.timing(animValue, {
-            toValue: 0,
-            duration: 0,
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 800,
             useNativeDriver: true,
           }),
         ])
-      );
-    };
-
-    Animated.parallel([
-      createWave(waveAnim1, 0),
-      createWave(waveAnim2, 1000),
-    ]).start();
-  };
-
-  // Start processing animation
-  const startProcessingAnimation = () => {
-    Animated.loop(
-      Animated.timing(rotateAnim, {
-        toValue: 1,
-        duration: 2000,
-        useNativeDriver: true,
-      })
-    ).start();
-  };
-
-  // Stop all animations
-  const stopAnimations = () => {
-    pulseAnim.stopAnimation();
-    waveAnim1.stopAnimation();
-    waveAnim2.stopAnimation();
-    rotateAnim.stopAnimation();
-    
-    pulseAnim.setValue(1);
-    waveAnim1.setValue(0);
-    waveAnim2.setValue(0);
-    rotateAnim.setValue(0);
-  };
-
-  // Start processing animation when isProcessing changes
-  useEffect(() => {
-    if (isProcessing) {
-      startProcessingAnimation();
-    } else if (!isRecording) {
-      stopAnimations();
+      ).start();
+    } else {
+      pulseAnim.stopAnimation();
+      pulseAnim.setValue(1);
     }
-  }, [isProcessing]);
+  }, [isRecording]);
 
-  // Main toggle function
   const toggleRecording = async () => {
-    if (isProcessing) return; // Don't allow interaction during processing
+    if (isProcessing) return;
+    
+    // Haptic feedback on press
+    Animated.sequence([
+      Animated.timing(scaleAnim, {
+        toValue: 0.9,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+    ]).start();
     
     if (isRecording) {
-      // Stop recording
       await stopRecording();
     } else {
-      // Start recording
       await startRecording();
     }
   };
 
   const startRecording = async () => {
     try {
-      console.log('Starting recording...');
-      
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Please enable microphone permissions');
+        Alert.alert('Permission Denied', 'Please enable microphone permissions in Settings');
         return;
       }
 
@@ -152,13 +101,10 @@ export default function Recorder({ onRecordingComplete, isProcessing }: Recorder
         Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
 
-      console.log('Recording started successfully');
       setRecording(newRecording);
       setIsRecording(true);
       setRecordingDuration(0);
-      startAnimations();
 
-      // Start timer
       timerRef.current = setInterval(() => {
         setRecordingDuration(prev => prev + 1);
       }, 1000);
@@ -173,34 +119,23 @@ export default function Recorder({ onRecordingComplete, isProcessing }: Recorder
     if (!recording) return;
 
     try {
-      console.log('Stopping recording...');
-      
-      // Stop animations and timer immediately
-      stopAnimations();
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
 
-      // Stop the recording
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
 
-      // Reset audio mode
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
       });
 
-      console.log('Recording stopped successfully');
-      
-      // Update state
       setIsRecording(false);
       setRecording(null);
       setRecordingDuration(0);
 
-      // Call completion callback
       if (uri) {
-        console.log('Calling onRecordingComplete with URI:', uri);
         onRecordingComplete(uri);
       }
 
@@ -208,7 +143,6 @@ export default function Recorder({ onRecordingComplete, isProcessing }: Recorder
       console.error('Failed to stop recording:', error);
       Alert.alert('Error', 'Failed to stop recording. Please try again.');
       
-      // Reset state on error
       setIsRecording(false);
       setRecording(null);
       setRecordingDuration(0);
@@ -221,111 +155,45 @@ export default function Recorder({ onRecordingComplete, isProcessing }: Recorder
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const rotateInterpolate = rotateAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
-
   return (
     <View style={styles.container}>
-      {/* Animated waves during recording */}
-      {isRecording && (
-        <>
-          <Animated.View
-            style={[
-              styles.wave,
-              {
-                opacity: waveAnim1.interpolate({
-                  inputRange: [0, 0.5, 1],
-                  outputRange: [0, 0.3, 0],
-                }),
-                transform: [{
-                  scale: waveAnim1.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [1, 2],
-                  }),
-                }],
-              },
-            ]}
-          />
-          <Animated.View
-            style={[
-              styles.wave,
-              {
-                opacity: waveAnim2.interpolate({
-                  inputRange: [0, 0.5, 1],
-                  outputRange: [0, 0.2, 0],
-                }),
-                transform: [{
-                  scale: waveAnim2.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [1, 1.8],
-                  }),
-                }],
-              },
-            ]}
-          />
-        </>
+      {/* Status Text - Appears above button when active */}
+      {(isRecording || isProcessing) && (
+        <View style={styles.statusBubble}>
+          {isProcessing ? (
+            <Text style={styles.statusText}>Processing...</Text>
+          ) : (
+            <Text style={styles.statusText}>{formatDuration(recordingDuration)}</Text>
+          )}
+        </View>
       )}
 
-      {/* Main pulse circle */}
-      <Animated.View
-        style={[
-          styles.pulseCircle,
-          {
-            opacity: isRecording ? 0.4 : 0,
-            transform: [{ scale: pulseAnim }],
-          },
-        ]}
-      />
-
-      {/* Main button */}
-      <TouchableOpacity
-        style={[
-          styles.recordButton,
-          isRecording && styles.recordingActive,
-          isProcessing && styles.processingActive,
-        ]}
-        onPress={toggleRecording}
-        disabled={isProcessing}
-        activeOpacity={0.8}
-      >
-        {isProcessing ? (
-          <Animated.View
-            style={[
-              styles.processingContent,
-              { transform: [{ rotate: rotateInterpolate }] },
-            ]}
-          >
-            <View style={styles.processingSpinner} />
-          </Animated.View>
-        ) : (
-          <View style={styles.micContainer}>
-            <View style={[styles.micIcon, isRecording && styles.micIconActive]} />
-            {isRecording && (
-              <View style={styles.recordingIndicator}>
-                <View style={styles.recordingDot} />
-              </View>
-            )}
-          </View>
-        )}
-      </TouchableOpacity>
-
-      {/* Status text */}
-      <View style={styles.statusContainer}>
-        {isProcessing ? (
-          <Text style={styles.statusText}>Processing your recording...</Text>
-        ) : isRecording ? (
-          <View style={styles.recordingStatus}>
-            <Text style={styles.recordingText}>Recording</Text>
-            <Text style={styles.durationText}>{formatDuration(recordingDuration)}</Text>
-          </View>
-        ) : (
-          <Text style={styles.instructionText}>
-            Press to start recording
-          </Text>
-        )}
-      </View>
+      {/* Main Floating Action Button */}
+      <Animated.View style={{
+        transform: [
+          { scale: Animated.multiply(scaleAnim, pulseAnim) }
+        ]
+      }}>
+        <TouchableOpacity
+          style={[
+            styles.fab,
+            isRecording && styles.fabRecording,
+            isProcessing && styles.fabProcessing,
+          ]}
+          onPress={toggleRecording}
+          disabled={isProcessing}
+          activeOpacity={0.8}
+        >
+          {isProcessing ? (
+            <View style={styles.processingIcon} />
+          ) : (
+            <View style={[
+              styles.micIcon,
+              isRecording && styles.micIconRecording
+            ]} />
+          )}
+        </TouchableOpacity>
+      </Animated.View>
     </View>
   );
 }
@@ -333,111 +201,115 @@ export default function Recorder({ onRecordingComplete, isProcessing }: Recorder
 const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
+  },
+  centerContainer: {
+    alignItems: 'center',
     justifyContent: 'center',
-    width: width,
-    height: 300,
   },
-  wave: {
-    position: 'absolute',
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    borderWidth: 2,
-    borderColor: '#FF6B35', // Orange waves
+  
+  // Status Bubble - Appears above button
+  statusBubble: {
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    marginBottom: 12,
   },
-  pulseCircle: {
-    position: 'absolute',
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: '#FF6B35', // Orange pulse
+  statusText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: 'monospace',
   },
-  recordButton: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: '#FF6B35', // Orange - BearS&T brand color
+  
+  // Regular Floating Action Button
+  fab: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#FF6B35',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 4,
-    borderColor: '#000000', // Black border instead of white
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.3,
     shadowRadius: 12,
     elevation: 12,
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
   },
-  recordingActive: {
-    backgroundColor: '#000000', // Black when recording
+  fabRecording: {
+    backgroundColor: '#EF4444',
+    borderColor: '#FFFFFF',
   },
-  processingActive: {
-    backgroundColor: '#FF6B35', // Orange when processing
+  fabProcessing: {
+    backgroundColor: '#6B7280',
   },
-  micContainer: {
-    alignItems: 'center',
+  
+  // Large Center Mode FAB
+  centerFab: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#FF6B35',
     justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    elevation: 16,
+    borderWidth: 4,
+    borderColor: '#FFFFFF',
   },
+  centerFabRecording: {
+    backgroundColor: '#EF4444',
+    borderColor: '#FFFFFF',
+  },
+  centerFabProcessing: {
+    backgroundColor: '#6B7280',
+  },
+  
+  // Regular Microphone Icon
   micIcon: {
-    width: 40,
-    height: 50,
-    backgroundColor: '#000000', // Black microphone icon
-    borderRadius: 20,
+    width: 24,
+    height: 28,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
     position: 'relative',
   },
-  micIconActive: {
-    backgroundColor: '#000000', // Keep black when active
+  micIconRecording: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 4,
+    width: 20,
+    height: 20,
   },
-  recordingIndicator: {
-    position: 'absolute',
-    top: -10,
-    right: -10,
+  
+  // Large Microphone Icon for Center Mode
+  micIconLarge: {
+    width: 36,
+    height: 42,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
   },
-  recordingDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#000000', // Black recording dot
-  },
-  processingContent: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  processingSpinner: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 4,
-    borderColor: '#000000', // Black spinner
+  
+  // Regular Processing Icon
+  processingIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
     borderTopColor: 'transparent',
   },
-  statusContainer: {
-    position: 'absolute',
-    bottom: -80, // Moved further down to give more space
-    alignItems: 'center',
-    width: '100%', // Full width for better centering
-  },
-  statusText: {
-    fontSize: 20, // Enlarged from 16
-    color: '#FF6B35', // Orange for processing
-    fontWeight: '600',
-  },
-  recordingStatus: {
-    alignItems: 'center',
-  },
-  recordingText: {
-    fontSize: 20, // Enlarged from 16
-    color: '#FF6B35', // Orange text for recording status
-    fontWeight: '600',
-    marginBottom: 6, // Slightly more space
-  },
-  durationText: {
-    fontSize: 18, // Enlarged from 14
-    color: '#666666', // Dark gray for duration on white background
-    fontFamily: 'monospace',
-  },
-  instructionText: {
-    fontSize: 18, // Enlarged from 14
-    color: '#666666', // Dark gray for instructions on white background
-    textAlign: 'center',
+  
+  // Large Processing Icon for Center Mode
+  processingIconLarge: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 4,
+    borderColor: '#FFFFFF',
+    borderTopColor: 'transparent',
   },
 });
