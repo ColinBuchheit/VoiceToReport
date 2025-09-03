@@ -1,4 +1,4 @@
-// voice-report-app/components/Recorder.tsx - WITH STOCK MICROPHONE ICONS
+// voice-report-app/components/Recorder.tsx - WITH 3-DOT LOADING ANIMATION
 import React, { useRef, useEffect } from 'react';
 import {
   View,
@@ -26,6 +26,119 @@ interface RecorderProps {
   recordingDuration: number;
   setRecordingDuration: React.Dispatch<React.SetStateAction<number>>;
 }
+
+// 3-Dot Loading Component
+const ThreeDotLoader = ({ size = 'small', color = '#FF6B35' }) => {
+  const dot1Anim = useRef(new Animated.Value(0.3)).current;
+  const dot2Anim = useRef(new Animated.Value(0.3)).current;
+  const dot3Anim = useRef(new Animated.Value(0.3)).current;
+
+  const isLarge = size === 'large';
+  const dotSize = isLarge ? 8 : 6;
+  const spacing = isLarge ? 12 : 8;
+
+  useEffect(() => {
+    const animateDots = () => {
+      const duration = 500;
+      const delay = 150;
+
+      Animated.loop(
+        Animated.sequence([
+          // Animate dot 1
+          Animated.timing(dot1Anim, {
+            toValue: 1,
+            duration,
+            useNativeDriver: true,
+          }),
+          // Animate dot 2 (with overlap)
+          Animated.timing(dot2Anim, {
+            toValue: 1,
+            duration,
+            useNativeDriver: true,
+          }),
+          // Animate dot 3 (with overlap)
+          Animated.timing(dot3Anim, {
+            toValue: 1,
+            duration,
+            useNativeDriver: true,
+          }),
+          // Reset all dots
+          Animated.parallel([
+            Animated.timing(dot1Anim, {
+              toValue: 0.3,
+              duration: duration / 2,
+              useNativeDriver: true,
+            }),
+            Animated.timing(dot2Anim, {
+              toValue: 0.3,
+              duration: duration / 2,
+              useNativeDriver: true,
+            }),
+            Animated.timing(dot3Anim, {
+              toValue: 0.3,
+              duration: duration / 2,
+              useNativeDriver: true,
+            }),
+          ]),
+          // Small pause before restarting
+          Animated.delay(200),
+        ])
+      ).start();
+    };
+
+    animateDots();
+
+    return () => {
+      dot1Anim.stopAnimation();
+      dot2Anim.stopAnimation();
+      dot3Anim.stopAnimation();
+    };
+  }, []);
+
+  return (
+    <View style={[styles.dotLoader, { gap: spacing }]}>
+      <Animated.View
+        style={[
+          styles.dot,
+          {
+            width: dotSize,
+            height: dotSize,
+            borderRadius: dotSize / 2,
+            backgroundColor: color,
+            opacity: dot1Anim,
+            transform: [{ scale: dot1Anim }],
+          },
+        ]}
+      />
+      <Animated.View
+        style={[
+          styles.dot,
+          {
+            width: dotSize,
+            height: dotSize,
+            borderRadius: dotSize / 2,
+            backgroundColor: color,
+            opacity: dot2Anim,
+            transform: [{ scale: dot2Anim }],
+          },
+        ]}
+      />
+      <Animated.View
+        style={[
+          styles.dot,
+          {
+            width: dotSize,
+            height: dotSize,
+            borderRadius: dotSize / 2,
+            backgroundColor: color,
+            opacity: dot3Anim,
+            transform: [{ scale: dot3Anim }],
+          },
+        ]}
+      />
+    </View>
+  );
+};
 
 export default function Recorder({ 
   onRecordingComplete, 
@@ -66,12 +179,11 @@ export default function Recorder({
   // Icon size - responsive to button size
   const iconSize = isLarge ? Math.round(64 * iconScale) : Math.round(32 * iconScale);
   
-  // Enhanced Animation Values
+  // Enhanced Animation Values (removed rotateAnim since we don't need it anymore)
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
   const rippleAnim = useRef(new Animated.Value(0)).current;
-  const rotateAnim = useRef(new Animated.Value(0)).current;
   const shadowAnim = useRef(new Animated.Value(1)).current;
   const innerGlowAnim = useRef(new Animated.Value(0)).current;
   const outerRingAnim = useRef(new Animated.Value(1)).current;
@@ -81,13 +193,12 @@ export default function Recorder({
     return () => {
       pulseAnim.stopAnimation();
       glowAnim.stopAnimation();
-      rotateAnim.stopAnimation();
       innerGlowAnim.stopAnimation();
       outerRingAnim.stopAnimation();
     };
   }, []);
 
-  // Enhanced animations based on state
+  // Enhanced animations based on state (removed rotation logic)
   useEffect(() => {
     if (isRecording) {
       // Recording state: Multiple layered animations
@@ -154,33 +265,25 @@ export default function Recorder({
         ])
       ).start();
     } else if (isProcessing) {
-      // Processing state: Smooth rotation with pulse
+      // Processing state: Just pulse animation (dots handle the loading visual)
       Animated.loop(
-        Animated.parallel([
-          Animated.timing(rotateAnim, {
-            toValue: 1,
-            duration: 2500,
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.05,
+            duration: 1000,
             useNativeDriver: true,
           }),
-          Animated.sequence([
-            Animated.timing(pulseAnim, {
-              toValue: 1.05,
-              duration: 1000,
-              useNativeDriver: true,
-            }),
-            Animated.timing(pulseAnim, {
-              toValue: 1,
-              duration: 1000,
-              useNativeDriver: true,
-            }),
-          ]),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
         ])
       ).start();
     } else {
       // Idle state: Stop all animations smoothly
       pulseAnim.stopAnimation();
       glowAnim.stopAnimation();
-      rotateAnim.stopAnimation();
       innerGlowAnim.stopAnimation();
       outerRingAnim.stopAnimation();
       
@@ -188,7 +291,6 @@ export default function Recorder({
       Animated.parallel([
         Animated.timing(pulseAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
         Animated.timing(glowAnim, { toValue: 0, duration: 400, useNativeDriver: false }),
-        Animated.timing(rotateAnim, { toValue: 0, duration: 400, useNativeDriver: true }),
         Animated.timing(innerGlowAnim, { toValue: 0, duration: 400, useNativeDriver: false }),
         Animated.timing(outerRingAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
       ]).start();
@@ -301,10 +403,8 @@ export default function Recorder({
         color: COLORS.BLACK, // Black icon on orange background
       };
     } else if (isProcessing) {
-      return {
-        name: 'refresh' as const, // Spinning refresh icon when processing
-        color: COLORS.ORANGE, // Orange icon on white background
-      };
+      // No icon when processing - we'll show dots instead
+      return null;
     } else {
       return {
         name: 'mic' as const, // Microphone icon when idle
@@ -438,18 +538,6 @@ export default function Recorder({
     };
   };
 
-  // Icon rotation for processing state
-  const getIconTransform = () => {
-    if (isProcessing) {
-      const rotateInterpolate = rotateAnim.interpolate({
-        inputRange: [0, 1],
-        outputRange: ['0deg', '360deg'],
-      });
-      return [{ rotate: rotateInterpolate }];
-    }
-    return [];
-  };
-
   const iconProps = getIconProps();
 
   return (
@@ -504,13 +592,19 @@ export default function Recorder({
             disabled={isProcessing}
             activeOpacity={0.95}
           >
-            <Animated.View style={{ transform: getIconTransform() }}>
+            {/* Show either icon or 3-dot loader */}
+            {isProcessing ? (
+              <ThreeDotLoader 
+                size={size} 
+                color={COLORS.ORANGE} 
+              />
+            ) : iconProps ? (
               <Ionicons 
                 name={iconProps.name} 
                 size={iconSize} 
                 color={iconProps.color} 
               />
-            </Animated.View>
+            ) : null}
           </TouchableOpacity>
         </Animated.View>
       </Animated.View>
@@ -570,12 +664,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   
-  // Fixed: Icon container for consistent positioning
-  iconContainer: {
+  // 3-Dot Loader Styles
+  dotLoader: {
+    flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    width: '100%',
-    height: '100%',
+  },
+  dot: {
+    // Styles will be applied inline for dynamic sizing
   },
 });
-
