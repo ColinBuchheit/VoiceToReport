@@ -1,4 +1,4 @@
-// voice-report-app/screens/HomeScreen.tsx - Updated to use large recorder when checklist is hidden
+// voice-report-app/screens/HomeScreen.tsx - COMPLETE FIXED VERSION
 import React, { useState } from 'react';
 import {
   View,
@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   Platform,
 } from 'react-native';
+import { Audio } from 'expo-av';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../App';
 import Recorder from '../components/Recorder';
@@ -39,6 +40,11 @@ export default function HomeScreen({ navigation }: Props) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
   const [showChecklist, setShowChecklist] = useState(true);
+  
+  // Shared recording state - lifted up from Recorder components
+  const [isRecording, setIsRecording] = useState(false);
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [recordingDuration, setRecordingDuration] = useState(0);
 
   const criteriaCategories: CriteriaCategory[] = [
     {
@@ -177,6 +183,10 @@ export default function HomeScreen({ navigation }: Props) {
       Alert.alert('Error', 'Failed to process audio recording');
     } finally {
       setIsProcessing(false);
+      // Reset shared recording state
+      setIsRecording(false);
+      setRecording(null);
+      setRecordingDuration(0);
     }
   };
 
@@ -279,24 +289,36 @@ export default function HomeScreen({ navigation }: Props) {
             <View style={styles.bottomPadding} />
           </ScrollView>
         ) : (
-          /* Large Centered Record Button - NOW WITH SIZE PROP */
+          /* Large Centered Record Button - With shared state */
           <View style={styles.centeredRecorderView}>
             <Recorder
               onRecordingComplete={handleRecordingComplete}
               isProcessing={isProcessing}
               size="large"
+              isRecording={isRecording}
+              setIsRecording={setIsRecording}
+              recording={recording}
+              setRecording={setRecording}
+              recordingDuration={recordingDuration}
+              setRecordingDuration={setRecordingDuration}
             />
           </View>
         )}
       </View>
 
-      {/* Fixed Bottom Recorder - Only Shows When Checklist is Visible */}
+      {/* Fixed Bottom Recorder - With shared state */}
       {showChecklist && (
         <View style={styles.recorderContainer}>
           <Recorder
             onRecordingComplete={handleRecordingComplete}
             isProcessing={isProcessing}
             size="small"
+            isRecording={isRecording}
+            setIsRecording={setIsRecording}
+            recording={recording}
+            setRecording={setRecording}
+            recordingDuration={recordingDuration}
+            setRecordingDuration={setRecordingDuration}
           />
         </View>
       )}
@@ -393,12 +415,12 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   
-  // Centered Recorder View - ENHANCED for large button
+  // Centered Recorder View - Enhanced for large button
   centeredRecorderView: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 60,  // Increased padding for better spacing
+    paddingVertical: 60,
     paddingHorizontal: 40,
   },
   
