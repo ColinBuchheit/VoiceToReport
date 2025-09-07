@@ -205,16 +205,63 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="Were there any delays?"
             value={editableSummary.delays || ''}
             onChangeText={(text) => updateSummaryField('delays', text)}
-            isEditing={true} // Always editable
+            isEditing={true}
             multiline
             placeholder="Any delays encountered and reasons..."
           />
 
           <EditableField
-            label="What expenses did you incur?"
+            label="What troubleshooting steps did you take?"
+            value={editableSummary.troubleshooting_steps || ''}
+            onChangeText={(text) => updateSummaryField('troubleshooting_steps', text)}
+            isEditing={true}
+            multiline
+            placeholder="Describe troubleshooting or diagnostic steps..."
+          />
+
+          <EditableField
+            label="Was the scope completed successfully?"
+            value={editableSummary.scope_completed || ''}
+            onChangeText={(text) => updateSummaryField('scope_completed', text)}
+            isEditing={true}
+            multiline
+            placeholder="Yes/No and details about scope completion..."
+          />
+
+          <EditableField
+            label="Who released you?"
+            value={editableSummary.released_by || ''}
+            onChangeText={(text) => updateSummaryField('released_by', text)}
+            isEditing={true}
+            placeholder="Name or title of person who released you..."
+          />
+
+          <EditableField
+            label="Is there a release code? If so, what is it?"
+            value={editableSummary.release_code || ''}
+            onChangeText={(text) => updateSummaryField('release_code', text)}
+            isEditing={true}
+            placeholder="Release code or completion code..."
+          />
+
+          <EditableField
+            label="Is there a return tracking number? If so, what is it?"
+            value={editableSummary.return_tracking || ''}
+            onChangeText={(text) => updateSummaryField('return_tracking', text)}
+            isEditing={true}
+            placeholder="Return tracking number for parts/equipment..."
+          />
+        </View>
+
+        {/* EXPENSES SECTION */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>EXPENSES</Text>
+          
+          <EditableField
+            label="Did you have any expenses (parking fees, etc)?"
             value={editableSummary.expenses || ''}
             onChangeText={(text) => updateSummaryField('expenses', text)}
-            isEditing={true} // Always editable
+            isEditing={true}
             multiline
             placeholder="Parking fees, tolls, meals, or other expenses..."
           />
@@ -223,7 +270,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="What materials did you use?"
             value={editableSummary.materials_used || ''}
             onChangeText={(text) => updateSummaryField('materials_used', text)}
-            isEditing={true} // Always editable
+            isEditing={true}
             multiline
             placeholder="Parts, supplies, equipment used during service..."
           />
@@ -234,12 +281,12 @@ export default function SummaryScreen({ navigation, route }: Props) {
           <Text style={styles.sectionTitle}>OUT OF SCOPE</Text>
           
           <EditableField
-            label="Out of scope work and who approved it"
+            label="Was there any out of scope work? If so, what is it and who approved the work?"
             value={editableSummary.out_of_scope_work || ''}
             onChangeText={(text) => updateSummaryField('out_of_scope_work', text)}
-            isEditing={true} // Always editable
+            isEditing={true}
             multiline
-            placeholder="Any additional work performed and approval details..."
+            placeholder="Any additional work performed and who approved it..."
           />
         </View>
 
@@ -251,7 +298,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="How many photos did you upload?"
             value={editableSummary.photos_uploaded || ''}
             onChangeText={(text) => updateSummaryField('photos_uploaded', text)}
-            isEditing={true} // Always editable
+            isEditing={true}
             placeholder="Number of photos taken and uploaded..."
           />
         </View>
