@@ -1,5 +1,5 @@
-// voice-report-app/screens/TranscriptScreen.tsx - COMPLETE FIXED VERSION
-import React, { useState, useEffect, useMemo } from 'react';
+// voice-report-app/screens/TranscriptScreen.tsx - UPDATED WITH ORANGE BUTTONS AND PRESS-HOLD CLEAR
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Animated,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -34,13 +35,19 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   const [transcription, setTranscription] = useState(route.params.transcription);
   const [isEditing, setIsEditing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  // Press and hold state for clear button
+  const [isHoldingClear, setIsHoldingClear] = useState(false);
+  const holdProgress = useRef(new Animated.Value(0)).current;
+  const holdTimeout = useRef<NodeJS.Timeout | null>(null);
+  const HOLD_DURATION = 2000; // 2 seconds
 
   // FIXED: Enhanced screen context with comprehensive field mapping
   const screenContext = useMemo((): ScreenContext => {
     const fields: FieldInfo[] = [
       {
         name: 'transcription',
-        label: 'Transcription Text', // This matches what backend sends
+        label: 'Transcription Text',
         currentValue: transcription || '',
         type: 'multiline',
         isEditable: isEditing,
@@ -54,7 +61,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
           'spoken text',
           'text',
           'recording text',
-          'transcription text', // Key synonym for backend mapping
+          'transcription text',
           'voice text',
           'audio text',
           'speech text'
@@ -102,17 +109,6 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     });
   }, [transcription, isEditing]);
 
-  // Debug the screen context
-  useEffect(() => {
-    console.log('🔍 TranscriptScreen context:', {
-      screenName: screenContext.screenName,
-      fieldsCount: screenContext.visibleFields.length,
-      mode: screenContext.mode,
-      hasTranscriptionField: screenContext.visibleFields.some(f => f.name === 'transcription'),
-      transcriptionFieldEditable: screenContext.visibleFields.find(f => f.name === 'transcription')?.isEditable
-    });
-  }, [screenContext]);
-
   const handleGenerateSummary = async () => {
     try {
       setIsProcessing(true);
@@ -121,22 +117,18 @@ export default function TranscriptScreen({ navigation, route }: Props) {
       const response = await generateSummary(transcription);
       console.log('📥 Raw API response:', response);
       
-      // Handle the CloseoutSummary response format correctly
       let closeoutSummary: CloseoutSummary;
       
       if (response && typeof response === 'object' && 'summary' in response) {
-        // The API returns { summary: CloseoutSummary }
         closeoutSummary = (response as any).summary;
         console.log('✅ Using CloseoutSummary from response.summary');
       } else {
-        // Fallback: treat response as CloseoutSummary directly
         closeoutSummary = response as CloseoutSummary;
         console.log('✅ Using response as CloseoutSummary directly');
       }
       
       console.log('📋 Extracted closeout summary:', closeoutSummary);
       
-      // Navigate to Summary screen
       navigation.navigate('Summary', {
         transcription,
         summary: closeoutSummary,
@@ -153,64 +145,52 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     }
   };
 
-  // FIXED: Enhanced handleFieldUpdate with comprehensive field mapping
-  const handleFieldUpdate = (fieldName: string, value: string) => {
-    console.log(`🔄 handleFieldUpdate called: ${fieldName} = "${value}"`);
+  // Press and hold handlers for clear button
+  const handleClearPressIn = () => {
+    setIsHoldingClear(true);
     
-    // FIXED: Add comprehensive field name mapping to handle all possible formats
-    const fieldMapping: Record<string, string> = {
-      // Transcription field variations
-      'transcription': 'transcription',
-      'transcript': 'transcription', 
-      'recording': 'transcription',
-      'text': 'transcription',
-      'transcription text': 'transcription',  // ← KEY: Handles "Transcription Text" from backend
-      'recording text': 'transcription',
-      'voice recording': 'transcription',
-      'spoken text': 'transcription',
-      'voice text': 'transcription',
-      'audio text': 'transcription',
-      'speech text': 'transcription',
-      'the text': 'transcription',
-      'what i said': 'transcription',
-      
-      // Edit mode variations
-      'isediting': 'isEditing',
-      'is_editing': 'isEditing', 
-      'edit_mode': 'isEditing',
-      'editing': 'isEditing',
-      'edit': 'isEditing'
-    };
+    // Start the progress animation
+    Animated.timing(holdProgress, {
+      toValue: 1,
+      duration: HOLD_DURATION,
+      useNativeDriver: false,
+    }).start();
 
-    // Normalize field name to lowercase for matching
-    const normalizedFieldName = fieldName.toLowerCase().trim();
-    const actualFieldName = fieldMapping[normalizedFieldName] || normalizedFieldName;
+    // Set timeout for completion
+    holdTimeout.current = setTimeout(() => {
+      // Clear the transcription after hold duration
+      console.log('🔄 Clear button held - clearing transcription');
+      setTranscription('');
+      setIsHoldingClear(false);
+      holdProgress.setValue(0);
+    }, HOLD_DURATION);
+  };
+
+  const handleClearPressOut = () => {
+    // Cancel the operation if released early
+    if (holdTimeout.current) {
+      clearTimeout(holdTimeout.current);
+      holdTimeout.current = null;
+    }
     
-    console.log(`🔄 Field mapping: "${fieldName}" → "${actualFieldName}"`);
+    setIsHoldingClear(false);
     
-    if (actualFieldName === 'transcription') {
-      console.log('📝 Updating transcription state...');
+    // Reset progress animation
+    Animated.timing(holdProgress, {
+      toValue: 0,
+      duration: 200,
+      useNativeDriver: false,
+    }).start();
+  };
+
+  const handleFieldUpdate = (fieldName: string, value: string) => {
+    if (fieldName === 'transcription') {
       setTranscription(value);
-      console.log('✅ setTranscription called with:', value.substring(0, 50) + '...');
-    } else if (actualFieldName === 'isEditing') {
-      console.log('📝 Updating editing mode...');
-      // Handle both string and boolean values properly
-      const newEditingState = typeof value === 'boolean' ? value : value === 'true';
-      setIsEditing(newEditingState);
-      console.log('✅ setIsEditing called with:', newEditingState);
-    } else {
-      console.warn(`⚠️ Unknown field update: ${fieldName} (mapped to: ${actualFieldName})`);
-      console.log('📋 Available mappings:', Object.keys(fieldMapping));
-      console.log('📋 All variations tried:', [fieldName, normalizedFieldName, actualFieldName]);
     }
   };
 
-  // FIXED: Enhanced handleModeToggle with logging
   const handleModeToggle = () => {
-    console.log('🔄 handleModeToggle called, current editing state:', isEditing);
-    const newEditingState = !isEditing;
-    setIsEditing(newEditingState);
-    console.log('✅ Mode toggled to:', newEditingState ? 'edit' : 'preview');
+    setIsEditing(!isEditing);
   };
 
   if (isProcessing) {
@@ -256,29 +236,48 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         </View>
 
         <View style={styles.actionButtons}>
+          {/* Generate Button - Now Orange */}
           <TouchableOpacity
-            style={styles.generateButton}
+            style={[styles.generateButton, styles.orangeButton]}
             onPress={handleGenerateSummary}
             disabled={!transcription || isProcessing}
           >
             <Text style={styles.generateButtonText}>
-              Generate Closeout Summary
+              Generate Closeout
             </Text>
           </TouchableOpacity>
 
+          {/* Clear Button - Press and Hold with Progress Bar */}
           <TouchableOpacity
-            style={styles.clearButton}
-            onPress={() => {
-              console.log('🔄 Clear button pressed');
-              setTranscription('');
-            }}
+            style={[styles.clearButton, styles.orangeButton]}
+            onPressIn={handleClearPressIn}
+            onPressOut={handleClearPressOut}
+            activeOpacity={0.8}
           >
-            <Text style={styles.clearButtonText}>Clear</Text>
+            {/* Progress Bar Background */}
+            <View style={styles.progressBarBackground}>
+              <Animated.View
+                style={[
+                  styles.progressBar,
+                  {
+                    width: holdProgress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ['0%', '100%'],
+                    }),
+                  },
+                ]}
+              />
+            </View>
+            
+            {/* Button Text */}
+            <Text style={styles.clearButtonText}>
+              {isHoldingClear ? 'Hold to Clear...' : 'Clear'}
+            </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
 
-      {/* FIXED: AI Agent with proper context and enhanced callbacks */}
+      {/* AI Agent */}
       <AIAgent
         screenContext={screenContext}
         onFieldUpdate={handleFieldUpdate}
@@ -364,27 +363,50 @@ const styles = StyleSheet.create({
   },
   generateButton: {
     flex: 1,
-    backgroundColor: '#27ae60',
     paddingVertical: 15,
+    paddingHorizontal: 12,
     borderRadius: 8,
     marginRight: 10,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orangeButton: {
+    backgroundColor: '#FF6B35', // Orange color
   },
   generateButtonText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
+    textAlign: 'center',
   },
   clearButton: {
-    backgroundColor: '#e74c3c',
     paddingVertical: 15,
     paddingHorizontal: 20,
     borderRadius: 8,
     alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    overflow: 'hidden',
+    minWidth: 100,
   },
   clearButtonText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
+    textAlign: 'center',
+    zIndex: 2,
+  },
+  progressBarBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'transparent',
+  },
+  progressBar: {
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 8,
   },
 });
