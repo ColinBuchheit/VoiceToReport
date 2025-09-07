@@ -1,116 +1,73 @@
-// hooks/useScreenContext.ts - UPDATED FOR CLOSEOUT REPORTS WITH BACKWARD COMPATIBILITY
+// voice-report-app/hooks/useScreenContext.ts - Updated: Remove preview mode logic
 import { useMemo } from 'react';
 import { ScreenContext, FieldInfo, CloseoutSummary } from '../types/aiAgent';
 
-// Updated Summary Screen Context Hook for Closeout Reports
+// Summary Screen Context Hook - UPDATED: Always in edit mode
 export const useSummaryScreenContext = (
   editableSummary: CloseoutSummary,
-  isPreviewMode: boolean,
+  isPreviewMode: boolean, // Keep parameter for compatibility but always treat as false
   editableTranscription: string
 ): ScreenContext => {
   return useMemo(() => {
-    // Updated fields for closeout report structure with legacy support
     const fields: FieldInfo[] = [
       // CLOSEOUT NOTES SECTION
       {
         name: 'onsite_contact',
-        label: 'Who did you meet with on-site?', 
+        label: 'Who did you meet with on-site?',
         currentValue: editableSummary.onsite_contact || '',
         type: 'text',
-        isEditable: !isPreviewMode,
-        synonyms: ['onsite contact', 'who did you meet', 'met with', 'contact', 'person on site']
+        isEditable: true, // Always editable
+        synonyms: ['onsite contact', 'met with', 'contact person', 'site contact', 'who did you meet']
       },
       {
         name: 'support_contact',
         label: 'Who did you work with for support?',
         currentValue: editableSummary.support_contact || '',
-        type: 'text', 
-        isEditable: !isPreviewMode,
-        synonyms: ['support contact', 'support person', 'who helped', 'worked with for support']
+        type: 'text',
+        isEditable: true, // Always editable
+        synonyms: ['support contact', 'support team', 'worked with', 'remote support', 'help from']
       },
       {
         name: 'work_completed',
         label: 'What work was completed?',
-        currentValue: editableSummary.work_completed || editableSummary.taskDescription || '',
+        currentValue: editableSummary.work_completed || '',
         type: 'multiline',
-        isEditable: !isPreviewMode,
-        synonyms: ['work completed', 'what work', 'completed work', 'tasks completed', 'work done', 'task description']
+        isEditable: true, // Always editable
+        synonyms: ['work completed', 'tasks completed', 'work done', 'completed work', 'what did you do']
       },
       {
         name: 'delays',
         label: 'Were there any delays?',
         currentValue: editableSummary.delays || '',
         type: 'multiline',
-        isEditable: !isPreviewMode,
-        synonyms: ['delays', 'any delays', 'were there delays', 'problems', 'issues']
+        isEditable: true, // Always editable
+        synonyms: ['delays', 'delayed', 'problems', 'issues', 'held up', 'late']
       },
-      {
-        name: 'troubleshooting_steps',
-        label: 'What troubleshooting steps did you take?',
-        currentValue: editableSummary.troubleshooting_steps || '',
-        type: 'multiline',
-        isEditable: !isPreviewMode,
-        synonyms: ['troubleshooting', 'troubleshooting steps', 'steps taken', 'debugging', 'problem solving']
-      },
-      {
-        name: 'scope_completed',
-        label: 'Was the scope completed successfully?',
-        currentValue: editableSummary.scope_completed || editableSummary.outcome || '',
-        type: 'text',
-        isEditable: !isPreviewMode,
-        synonyms: ['scope completed', 'completed successfully', 'scope', 'success', 'finished', 'outcome']
-      },
-      {
-        name: 'released_by',
-        label: 'Who released you?',
-        currentValue: editableSummary.released_by || '',
-        type: 'text',
-        isEditable: !isPreviewMode,
-        synonyms: ['released by', 'who released', 'release person', 'released me']
-      },
-      {
-        name: 'release_code',
-        label: 'Release code (if any)',
-        currentValue: editableSummary.release_code || '',
-        type: 'text',
-        isEditable: !isPreviewMode,
-        synonyms: ['release code', 'code', 'release number', 'authorization code']
-      },
-      {
-        name: 'return_tracking',
-        label: 'Return tracking number (if any)',
-        currentValue: editableSummary.return_tracking || '',
-        type: 'text',
-        isEditable: !isPreviewMode,
-        synonyms: ['return tracking', 'tracking number', 'return number', 'shipping tracking']
-      },
-      
-      // EXPENSES SECTION
       {
         name: 'expenses',
-        label: 'Any expenses (parking fees, etc)?',
+        label: 'What expenses did you incur?',
         currentValue: editableSummary.expenses || '',
         type: 'multiline',
-        isEditable: !isPreviewMode,
-        synonyms: ['expenses', 'parking fees', 'costs', 'fees', 'money spent']
+        isEditable: true, // Always editable
+        synonyms: ['expenses', 'costs', 'spent', 'parking', 'tolls', 'meals', 'travel costs']
       },
       {
         name: 'materials_used',
         label: 'What materials did you use?',
         currentValue: editableSummary.materials_used || '',
         type: 'multiline',
-        isEditable: !isPreviewMode,
-        synonyms: ['materials used', 'materials', 'parts', 'supplies', 'equipment used']
+        isEditable: true, // Always editable
+        synonyms: ['materials', 'parts', 'supplies', 'equipment', 'used', 'materials used']
       },
       
       // OUT OF SCOPE SECTION
       {
         name: 'out_of_scope_work',
-        label: 'Out of scope work (if any) and who approved it',
+        label: 'Out of scope work and who approved it',
         currentValue: editableSummary.out_of_scope_work || '',
         type: 'multiline',
-        isEditable: !isPreviewMode,
-        synonyms: ['out of scope', 'additional work', 'extra work', 'scope change', 'approved work']
+        isEditable: true, // Always editable
+        synonyms: ['out of scope', 'additional work', 'extra work', 'scope', 'approved by', 'who approved']
       },
       
       // PHOTOS SECTION
@@ -119,7 +76,7 @@ export const useSummaryScreenContext = (
         label: 'How many photos did you upload?',
         currentValue: editableSummary.photos_uploaded || '',
         type: 'text',
-        isEditable: !isPreviewMode,
+        isEditable: true, // Always editable
         synonyms: ['photos uploaded', 'photos', 'pictures', 'how many photos', 'uploaded photos']
       },
       
@@ -129,7 +86,7 @@ export const useSummaryScreenContext = (
         label: 'Location',
         currentValue: editableSummary.location || '',
         type: 'text',
-        isEditable: !isPreviewMode,
+        isEditable: true, // Always editable
         synonyms: ['location', 'place', 'where', 'site', 'address']
       },
       {
@@ -137,7 +94,7 @@ export const useSummaryScreenContext = (
         label: 'Date/Time',
         currentValue: editableSummary.datetime || '',
         type: 'text',
-        isEditable: !isPreviewMode,
+        isEditable: true, // Always editable
         synonyms: ['time', 'date', 'when', 'datetime']
       },
       {
@@ -145,7 +102,7 @@ export const useSummaryScreenContext = (
         label: 'Technician Name',
         currentValue: editableSummary.technician_name || '',
         type: 'text',
-        isEditable: !isPreviewMode,
+        isEditable: true, // Always editable
         synonyms: ['technician', 'my name', 'tech name', 'who am I']
       },
       
@@ -155,7 +112,7 @@ export const useSummaryScreenContext = (
         label: 'Additional Notes',
         currentValue: editableSummary.notes || '',
         type: 'multiline',
-        isEditable: !isPreviewMode,
+        isEditable: true, // Always editable
         synonyms: ['notes', 'comments', 'additional', 'other', 'extra info', 'remarks']
       },
       {
@@ -163,14 +120,13 @@ export const useSummaryScreenContext = (
         label: 'Original Transcription',
         currentValue: editableTranscription || '',
         type: 'multiline',
-        isEditable: !isPreviewMode,
+        isEditable: true, // Always editable
         synonyms: ['transcription', 'transcript', 'recording', 'what I said']
       }
     ];
 
     const availableActions = [
-      'switch to edit mode',
-      'switch to preview mode', 
+      // Removed: 'switch to edit mode', 'switch to preview mode'
       'send email report',
       'generate PDF', // Keep for backward compatibility
       'add current date',
@@ -180,15 +136,15 @@ export const useSummaryScreenContext = (
     ];
 
     return {
-      screenName: 'summary', // Keep as 'summary' for compatibility, not 'closeout_summary'
+      screenName: 'summary',
       visibleFields: fields,
       currentValues: {
         ...editableSummary,
         transcription: editableTranscription,
-        mode: isPreviewMode ? 'preview' : 'edit'
+        mode: 'edit' // Always in edit mode
       },
       availableActions,
-      mode: isPreviewMode ? 'preview' : 'edit',
+      mode: 'edit', // Always in edit mode
       agentCapabilities: [
         'field_updates',
         'wording_help', 
@@ -199,136 +155,5 @@ export const useSummaryScreenContext = (
       ],
       timestamp: new Date().toISOString(),
     };
-  }, [editableSummary, isPreviewMode, editableTranscription]);
+  }, [editableSummary, editableTranscription]); // Removed isPreviewMode dependency
 };
-
-// Email Confirmation Screen Context Hook
-export const useEmailConfirmationScreenContext = (
-  emailResponse: any,
-  summary: any
-): ScreenContext => {
-  return useMemo(() => {
-    const fields: FieldInfo[] = []; // No editable fields in email confirmation
-
-    const availableActions = [
-      'send another report',
-      'create new report',
-      'go back to edit'
-    ];
-
-    return {
-      screenName: 'pdfPreview', // Use existing screen name for compatibility
-      visibleFields: fields,
-      currentValues: {
-        emailResponse,
-        summary
-      },
-      availableActions
-    };
-  }, [emailResponse, summary]);
-};
-
-// Transcript Screen Context Hook  
-export const useTranscriptScreenContext = (
-  transcription: string,
-  isEditing: boolean
-): ScreenContext => {
-  return useMemo(() => {
-    const fields: FieldInfo[] = [
-      {
-        name: 'transcription',
-        label: 'Transcription',
-        currentValue: transcription || '',
-        type: 'multiline',
-        isEditable: isEditing,
-        synonyms: ['transcription', 'transcript', 'text', 'recording']
-      }
-    ];
-
-    const availableActions = [
-      'edit transcription',
-      'stop editing',
-      'generate closeout summary',
-      'clear transcription'
-    ];
-
-    return {
-      screenName: 'transcript',
-      visibleFields: fields,
-      currentValues: {
-        transcription,
-        isEditing
-      },
-      availableActions
-    };
-  }, [transcription, isEditing]);
-};
-
-// Home Screen Context Hook
-export const useHomeScreenContext = (
-  isRecording: boolean,
-  isProcessing: boolean
-): ScreenContext => {
-  return useMemo(() => {
-    const fields: FieldInfo[] = []; // No editable fields on home screen
-
-    const availableActions = [
-      'start recording',
-      'stop recording',
-      'start new closeout report'
-    ];
-
-    return {
-      screenName: 'home',
-      visibleFields: fields,
-      currentValues: {
-        isRecording,
-        isProcessing
-      },
-      availableActions
-    };
-  }, [isRecording, isProcessing]);
-};
-
-// PDF Preview Screen Context Hook (keeping for backward compatibility)
-export const usePDFPreviewScreenContext = (
-  pdfUrl: string,
-  summary: any
-): ScreenContext => {
-  return useMemo(() => {
-    const fields: FieldInfo[] = []; // No editable fields in PDF preview
-
-    const availableActions = [
-      'share PDF',
-      'download PDF', 
-      'create new report',
-      'go back to edit'
-    ];
-
-    return {
-      screenName: 'pdfPreview',
-      visibleFields: fields,
-      currentValues: {
-        pdfUrl,
-        summary
-      },
-      availableActions
-    };
-  }, [pdfUrl, summary]);
-};
-
-// UTILITY: Easy field configuration for future expansion
-export const createCustomField = (
-  name: string,
-  label: string,
-  currentValue: string,
-  type: 'text' | 'multiline' = 'text',
-  synonyms: string[] = []
-): FieldInfo => ({
-  name,
-  label,
-  currentValue,
-  type,
-  isEditable: true,
-  synonyms
-});

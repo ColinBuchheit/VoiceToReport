@@ -1,4 +1,4 @@
-// voice-report-app/screens/SummaryScreen.tsx - COMPLETE VERSION WITHOUT PDF GENERATION
+// voice-report-app/screens/SummaryScreen.tsx - UPDATED: Always editable fields, no Edit/Preview toggle, no title
 import React, { useState } from 'react';
 import {
   View,
@@ -13,7 +13,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
-import { sendCloseoutEmail } from '../services/api'; // REMOVED: generatePDF import
+import { sendCloseoutEmail } from '../services/api';
 import AIAgent from '../components/AIAgent';
 import { useSummaryScreenContext } from '../hooks/useScreenContext';
 import { CloseoutSummary } from '../types/aiAgent';
@@ -120,14 +120,12 @@ export default function SummaryScreen({ navigation, route }: Props) {
     initializeCloseoutSummary(route.params.summary)
   );
   const [editableTranscription, setEditableTranscription] = useState(route.params.transcription);
-  const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
-  // REMOVED: isGeneratingPDF state
 
-  // Enhanced screen context for AI
+  // Enhanced screen context for AI - always in edit mode
   const screenContext = useSummaryScreenContext(
     editableSummary,
-    isPreviewMode,
+    false, // Always false (edit mode)
     editableTranscription
   );
 
@@ -161,8 +159,6 @@ export default function SummaryScreen({ navigation, route }: Props) {
     }
   };
 
-  // REMOVED: handleGeneratePDF function
-
   const handleFieldUpdate = (fieldName: string, value: string) => {
     if (fieldName in editableSummary) {
       updateSummaryField(fieldName as keyof CloseoutSummary, value);
@@ -171,25 +167,10 @@ export default function SummaryScreen({ navigation, route }: Props) {
     }
   };
 
-  const handleModeToggle = () => {
-    setIsPreviewMode(!isPreviewMode);
-  };
-
   return (
     <View style={styles.container}>
       <ScrollView style={styles.scrollContainer}>
-        {/* Header with Mode Toggle */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Closeout Report Summary</Text>
-          <TouchableOpacity
-            style={[styles.modeButton, isPreviewMode && styles.previewModeButton]}
-            onPress={() => setIsPreviewMode(!isPreviewMode)}
-          >
-            <Text style={[styles.modeButtonText, isPreviewMode && styles.previewModeText]}>
-              {isPreviewMode ? 'Preview' : 'Edit'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+        {/* REMOVED: Header with title and mode toggle button */}
 
         {/* CLOSEOUT NOTES SECTION */}
         <View style={styles.sectionContainer}>
@@ -199,7 +180,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="Who did you meet with on-site?"
             value={editableSummary.onsite_contact || ''}
             onChangeText={(text) => updateSummaryField('onsite_contact', text)}
-            isEditing={!isPreviewMode}
+            isEditing={true} // Always editable
             placeholder="Name and role of on-site contact person..."
           />
 
@@ -207,7 +188,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="Who did you work with for support?"
             value={editableSummary.support_contact || ''}
             onChangeText={(text) => updateSummaryField('support_contact', text)}
-            isEditing={!isPreviewMode}
+            isEditing={true} // Always editable
             placeholder="Support team members or remote assistance..."
           />
 
@@ -215,7 +196,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="What work was completed?"
             value={editableSummary.work_completed || ''}
             onChangeText={(text) => updateSummaryField('work_completed', text)}
-            isEditing={!isPreviewMode}
+            isEditing={true} // Always editable
             multiline
             placeholder="Describe all tasks and work that was completed..."
           />
@@ -224,62 +205,16 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="Were there any delays?"
             value={editableSummary.delays || ''}
             onChangeText={(text) => updateSummaryField('delays', text)}
-            isEditing={!isPreviewMode}
+            isEditing={true} // Always editable
             multiline
             placeholder="Any delays encountered and reasons..."
           />
 
           <EditableField
-            label="What troubleshooting steps did you take?"
-            value={editableSummary.troubleshooting_steps || ''}
-            onChangeText={(text) => updateSummaryField('troubleshooting_steps', text)}
-            isEditing={!isPreviewMode}
-            multiline
-            placeholder="Describe troubleshooting steps and problem-solving approaches..."
-          />
-
-          <EditableField
-            label="Was the scope completed successfully?"
-            value={editableSummary.scope_completed || ''}
-            onChangeText={(text) => updateSummaryField('scope_completed', text)}
-            isEditing={!isPreviewMode}
-            placeholder="Yes/No and any additional details..."
-          />
-
-          <EditableField
-            label="Who released you?"
-            value={editableSummary.released_by || ''}
-            onChangeText={(text) => updateSummaryField('released_by', text)}
-            isEditing={!isPreviewMode}
-            placeholder="Name and role of person who released you..."
-          />
-
-          <EditableField
-            label="Release code (if any)"
-            value={editableSummary.release_code || ''}
-            onChangeText={(text) => updateSummaryField('release_code', text)}
-            isEditing={!isPreviewMode}
-            placeholder="Authorization or release code..."
-          />
-
-          <EditableField
-            label="Return tracking number (if any)"
-            value={editableSummary.return_tracking || ''}
-            onChangeText={(text) => updateSummaryField('return_tracking', text)}
-            isEditing={!isPreviewMode}
-            placeholder="Tracking number for returned items..."
-          />
-        </View>
-
-        {/* EXPENSES SECTION */}
-        <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>EXPENSES</Text>
-          
-          <EditableField
-            label="Any expenses (parking fees, etc)?"
+            label="What expenses did you incur?"
             value={editableSummary.expenses || ''}
             onChangeText={(text) => updateSummaryField('expenses', text)}
-            isEditing={!isPreviewMode}
+            isEditing={true} // Always editable
             multiline
             placeholder="Parking fees, tolls, meals, or other expenses..."
           />
@@ -288,7 +223,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="What materials did you use?"
             value={editableSummary.materials_used || ''}
             onChangeText={(text) => updateSummaryField('materials_used', text)}
-            isEditing={!isPreviewMode}
+            isEditing={true} // Always editable
             multiline
             placeholder="Parts, supplies, equipment used during service..."
           />
@@ -302,7 +237,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="Out of scope work and who approved it"
             value={editableSummary.out_of_scope_work || ''}
             onChangeText={(text) => updateSummaryField('out_of_scope_work', text)}
-            isEditing={!isPreviewMode}
+            isEditing={true} // Always editable
             multiline
             placeholder="Any additional work performed and approval details..."
           />
@@ -316,7 +251,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="How many photos did you upload?"
             value={editableSummary.photos_uploaded || ''}
             onChangeText={(text) => updateSummaryField('photos_uploaded', text)}
-            isEditing={!isPreviewMode}
+            isEditing={true} // Always editable
             placeholder="Number of photos taken and uploaded..."
           />
         </View>
@@ -329,7 +264,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="Location"
             value={editableSummary.location || ''}
             onChangeText={(text) => updateSummaryField('location', text)}
-            isEditing={!isPreviewMode}
+            isEditing={true} // Always editable
             placeholder="Work location, address, or site..."
           />
 
@@ -337,7 +272,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="Date/Time"
             value={editableSummary.datetime || ''}
             onChangeText={(text) => updateSummaryField('datetime', text)}
-            isEditing={!isPreviewMode}
+            isEditing={true} // Always editable
             placeholder="When the work was completed..."
           />
 
@@ -345,7 +280,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="Technician Name"
             value={editableSummary.technician_name || ''}
             onChangeText={(text) => updateSummaryField('technician_name', text)}
-            isEditing={!isPreviewMode}
+            isEditing={true} // Always editable
             placeholder="Your name as the technician..."
           />
 
@@ -353,7 +288,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="Additional Notes"
             value={editableSummary.notes || ''}
             onChangeText={(text) => updateSummaryField('notes', text)}
-            isEditing={!isPreviewMode}
+            isEditing={true} // Always editable
             multiline
             placeholder="Any additional notes or comments..."
           />
@@ -367,7 +302,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
               label="Voice Recording Transcription"
               value={editableTranscription}
               onChangeText={setEditableTranscription}
-              isEditing={!isPreviewMode}
+              isEditing={true} // Always editable
               multiline
               placeholder="Original voice recording transcription..."
             />
@@ -382,43 +317,23 @@ export default function SummaryScreen({ navigation, route }: Props) {
             disabled={isSendingEmail}
           >
             {isSendingEmail ? (
-              <View style={styles.sendingContainer}>
-                <ActivityIndicator size="small" color="white" />
-                <Text style={styles.emailButtonText}>Sending Email...</Text>
-              </View>
+              <ActivityIndicator color="white" size="small" />
             ) : (
               <Text style={styles.emailButtonText}>Send Email Report</Text>
             )}
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.homeButton}
-            onPress={() => navigation.navigate('Home')}
-          >
-            <Text style={styles.homeButtonText}>Create New Report</Text>
-          </TouchableOpacity>
         </View>
-
-        {/* Email Recipients Info */}
-        <View style={styles.recipientsInfo}>
-          <Text style={styles.recipientsTitle}>Email will be sent to:</Text>
-          <Text style={styles.recipientsText}>colbol42@gmail.com</Text>
-        </View>
-
-        {/* Bottom spacing */}
-        <View style={styles.bottomSpacing} />
       </ScrollView>
 
-      {/* AI Agent for voice commands */}
+      {/* AI Agent - Floating button always visible */}
       <AIAgent
         screenContext={screenContext}
         onFieldUpdate={handleFieldUpdate}
-        onModeToggle={handleModeToggle}
         onAction={(action) => {
-          if (action === 'send_email_report') {
+          console.log('🎯 AIAgent action triggered:', action);
+          if (action === 'send_email_report' || action === 'send email report') {
             handleSendEmail();
           }
-          // REMOVED: PDF generation action
         }}
         position="bottom-right"
         showDebugInfo={false}
@@ -430,43 +345,13 @@ export default function SummaryScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8f9fa',
   },
   scrollContainer: {
     flex: 1,
+    paddingTop: 20, // Add some top padding since we removed the header
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 10,
-    backgroundColor: 'white',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-  },
-  modeButton: {
-    backgroundColor: '#e74c3c',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 6,
-    marginLeft: 10,
-  },
-  previewModeButton: {
-    backgroundColor: '#27ae60',
-  },
-  modeButtonText: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  previewModeText: {
-    color: 'white',
-  },
+  // REMOVED: header, title, modeButton, previewModeButton, modeButtonText, previewModeText styles
   sectionContainer: {
     backgroundColor: 'white',
     borderRadius: 12,
@@ -520,10 +405,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#ecf0f1',
     borderRadius: 8,
     minHeight: 44,
+    textAlignVertical: 'center',
   },
   transcriptionSection: {
-    marginBottom: 20,
     marginHorizontal: 20,
+    marginBottom: 20,
   },
   transcriptionCard: {
     backgroundColor: 'white',
@@ -540,62 +426,34 @@ const styles = StyleSheet.create({
   },
   actionButtons: {
     flexDirection: 'row',
+    justifyContent: 'center',
     paddingHorizontal: 20,
-    gap: 15,
-    marginBottom: 20,
+    paddingBottom: 30,
+    marginTop: 10,
   },
   emailButton: {
-    flex: 2,
     backgroundColor: '#FF6B35',
+    paddingHorizontal: 32,
     paddingVertical: 16,
-    borderRadius: 8,
+    borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 200,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   emailButtonDisabled: {
-    opacity: 0.7,
+    backgroundColor: '#bdc3c7',
   },
   emailButtonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
-  },
-  homeButton: {
-    flex: 1,
-    backgroundColor: '#6B7280',
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  homeButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  sendingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  recipientsInfo: {
-    backgroundColor: '#EFF6FF',
-    borderWidth: 1,
-    borderColor: '#DBEAFE',
-    borderRadius: 8,
-    padding: 16,
-    marginHorizontal: 20,
-    marginBottom: 20,
-  },
-  recipientsTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1E40AF',
-    marginBottom: 8,
-  },
-  recipientsText: {
-    fontSize: 14,
-    color: '#1E40AF',
-  },
-  bottomSpacing: {
-    height: 100,
   },
 });
