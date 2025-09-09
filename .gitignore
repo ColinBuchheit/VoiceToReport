@@ -1,102 +1,117 @@
-# --- ENV & Secrets ---
-.env
-.env.*
-*.key
-*.pem
-*.p12
-*.crt
-*.cert
-*.jks
-
-# --- Test & Media Files ---
-test_audio.*
-*.wav
-*.mp3
-*.m4a
-*.ogg
-*.webm
-*.flac
-*.log
-
-# --- Python ---
+# Python
 __pycache__/
 *.py[cod]
-*.pyo
+*$py.class
 *.so
-*.egg-info/
-*.egg
-*.pkl
-*.h5
-*.sqlite3
-*.db
 .Python
-.mypy_cache/
-.pytest_cache/
-.tox/
-*.ipynb_checkpoints
-
-# --- Node.js ---
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# --- System Files ---
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# --- IDE & Editor Configs ---
-.vscode/
-.idea/
-*.sublime-project
-*.sublime-workspace
-
-# --- Build Artifacts ---
-dist/
 build/
-*.tgz
-*.zip
-*.tar.gz
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# --- Docker / Containers ---
-*.pid
-*.sock
-docker-compose.override.yml
-
-# --- Jupyter Notebook Checkpoints ---
-.ipynb_checkpoints/
-
-# --- Coverage Reports ---
-.coverage
-.coverage.*
-htmlcov/
-.cache/
-.nox/
-coverage.xml
-
-# --- Virtual Environments ---
+# Virtual environments
 venv/
-.venv/
-ENV/
 env/
+ENV/
 env.bak/
 venv.bak/
 
-# --- Misc ---
-*.bak
-*.tmp
+# pip installer
+get-pip.py
+
+# Site packages (all the installed packages you see)
+site-packages/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
 *.swp
 *.swo
-*.orig
+*~
 
-# --- Local Secrets or Overrides ---
-config.local.*
-secrets.*
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
-# --- Logs ---
-logs/
+# Logs
 *.log
-logfile.log
+logs/
 
-##change
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# Dependency directories
+node_modules/
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# dotenv environment variables file
+.env
+.env.test
+
+# Backend specific
+backend/venv/
+backend/Scripts/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+backend/get-pip.py
+
+# Frontend specific  
+voice-report-app/node_modules/
+voice-report-app/.expo/
+voice-report-app/dist/
+voice-report-app/web-build/
+
+# Ngrok
+ngrok.log
+ngrok_url.txt
+
+# Process files
+*.pid
+backend.log
+frontend.log
