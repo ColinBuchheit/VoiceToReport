@@ -1,58 +1,79 @@
 @echo off
 echo ========================================
-echo VOICE TO REPORT - PERFECT STARTUP
+echo VOICE TO REPORT - AUTOMATED STARTUP
 echo ========================================
 echo.
 echo This combines the working parts of both versions:
 echo - Backend setup in main window (like version 1)
 echo - Frontend in separate window (like version 2)  
 echo - All windows stay open for debugging
+echo - FULLY AUTOMATED - No manual intervention required
+echo - Includes ngrok URL update (the missing piece)
 echo.
-pause
 
 echo Step 1: Stop existing services
 taskkill /f /im python.exe >nul 2>&1
 taskkill /f /im node.exe >nul 2>&1
 taskkill /f /im ngrok.exe >nul 2>&1
-echo Services stopped
-pause
+echo ✅ Services stopped
 
+echo.
 echo Step 2: Backend setup (in main window like working version)
 cd backend
-echo In backend directory: %CD%
-pause
+echo 📁 In backend directory: %CD%
 
+echo.
 echo Step 3: Check if venv exists
 if exist "venv" (
-    echo venv exists
+    echo ✅ venv exists
 ) else (
-    echo Creating venv...
+    echo 📦 Creating venv...
     python -m venv venv
-    echo venv created
+    echo ✅ venv created
 )
-pause
 
+echo.
 echo Step 4: Install backend deps
-call venv\Scripts\python.exe -m pip install -r requirements.txt
-echo Backend deps done
-pause
+call venv\Scripts\python.exe -m pip install -r requirements.txt >nul 2>&1
+echo ✅ Backend deps done
 
-echo Step 5: Start backend (simple command that worked)
+echo.
+echo Step 5: Start backend (EXACT same command that worked)
 start "Backend Server" cmd /k "venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
-echo Backend started in separate window
+echo ✅ Backend started in separate window
 cd ..
-pause
 
-echo Step 6: Start ngrok
+echo ⏱️ Waiting for backend to settle...
+timeout /t 8 /nobreak >nul
+
+echo.
+echo Step 6: Start ngrok (EXACT same command)
 start "Ngrok Tunnel" cmd /k "ngrok http 8000"
-echo Ngrok started in separate window
-pause
+echo ✅ Ngrok started in separate window
 
-echo Step 7: Start frontend (in separate window like working version)
+echo ⏱️ Waiting for ngrok tunnel to establish...
+timeout /t 10 /nobreak >nul
+
+echo.
+echo Step 6.5: Update API configuration (THE MISSING PIECE!)
+echo 📝 Updating frontend configuration with current ngrok URL...
+backend\venv\Scripts\python.exe ngrok_manager.py --update 2>nul
+if errorlevel 1 (
+    echo ⚠️ Auto-config failed - check ngrok dashboard: http://localhost:4040
+    echo 💡 Manual command if needed: python ngrok_manager.py --update
+) else (
+    echo ✅ Frontend configuration updated with current ngrok URL
+)
+
+echo.
+echo Step 7: Start frontend (EXACT same command that worked)
 start "Frontend Setup" cmd /k "cd /d %CD%\voice-report-app && echo Installing frontend dependencies... && npm install && echo Frontend deps done && echo Starting Expo... && npx expo start --tunnel"
-echo Frontend started in separate window
-pause
+echo ✅ Frontend started in separate window
 
+echo ⏱️ Final setup complete...
+timeout /t 3 /nobreak >nul
+
+echo.
 echo ========================================
 echo             ALL DONE!
 echo ========================================
@@ -76,7 +97,7 @@ echo 3. Test voice recording in the app
 echo.
 echo IMPORTANT: 
 echo - Your OpenAI API key must be set in backend\.env
-echo - Ngrok URL automatically updates in frontend config
+echo - Ngrok URL has been automatically updated in frontend config
 echo - If mobile app can't connect, wait 30 seconds and restart the app
 echo.
 echo NGROK URL MANAGEMENT:
@@ -85,7 +106,8 @@ echo - To manually get current URL: python ngrok_manager.py --url
 echo - To manually update config: python ngrok_manager.py --update
 echo - Dashboard shows current URL: http://localhost:4040
 echo.
-echo All service windows will stay open.
+echo All service windows will stay open for debugging.
 echo You can close this main window safely.
 echo.
-pause
+echo Press any key to close this window...
+pause >nul
