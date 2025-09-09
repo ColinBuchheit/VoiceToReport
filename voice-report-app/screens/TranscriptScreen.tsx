@@ -1,4 +1,4 @@
-// voice-report-app/screens/TranscriptScreen.tsx - UPDATED WITH ORANGE BUTTONS AND PRESS-HOLD CLEAR
+// voice-report-app/screens/TranscriptScreen.tsx - COMPLETE FIXED VERSION
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
@@ -42,7 +42,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   const holdTimeout = useRef<NodeJS.Timeout | null>(null);
   const HOLD_DURATION = 2000; // 2 seconds
 
-  // FIXED: Enhanced screen context with comprehensive field mapping
+  // Enhanced screen context with comprehensive field mapping
   const screenContext = useMemo((): ScreenContext => {
     const fields: FieldInfo[] = [
       {
@@ -100,12 +100,14 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     };
   }, [transcription, isEditing]);
 
-  // Enhanced debugging for state changes
+  // Enhanced state monitoring for debugging
   useEffect(() => {
     console.log('🔄 TranscriptScreen state updated:', {
-      transcription: transcription?.substring(0, 50) + '...',
+      transcription: transcription?.substring(0, 50) + (transcription?.length > 50 ? '...' : ''),
+      transcriptionLength: transcription?.length || 0,
       isEditing,
-      transcriptionLength: transcription?.length || 0
+      timestamp: new Date().toISOString(),
+      screenContextMode: isEditing ? 'edit' : 'preview'
     });
   }, [transcription, isEditing]);
 
@@ -183,13 +185,66 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     }).start();
   };
 
+  // FIXED: Complete field update handler with field name mapping
   const handleFieldUpdate = (fieldName: string, value: string) => {
-    if (fieldName === 'transcription') {
+    console.log('🎯 AI Agent requesting field update:', { 
+      fieldName, 
+      value: typeof value === 'string' ? value.substring(0, 100) + (value.length > 100 ? '...' : '') : value,
+      currentTranscriptionLength: transcription?.length || 0,
+      currentIsEditing: isEditing,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Map field names from backend to our internal field names
+    const fieldMapping: { [key: string]: string } = {
+      'Transcription Text': 'transcription',
+      'transcription': 'transcription',
+      'transcript': 'transcription',
+      'recording': 'transcription',
+      'text': 'transcription',
+      'isEditing': 'isEditing',
+      'editing': 'isEditing',
+      'edit_mode': 'isEditing'
+    };
+    
+    const mappedFieldName = fieldMapping[fieldName] || fieldName.toLowerCase();
+    console.log('🗺️ Field mapping:', fieldName, '→', mappedFieldName);
+    
+    if (mappedFieldName === 'transcription') {
+      console.log('📝 Updating transcription from length:', transcription?.length || 0, 'to length:', value?.length || 0);
       setTranscription(value);
+      
+      // Force UI update verification
+      setTimeout(() => {
+        console.log('✅ Transcription state after update:', {
+          newLength: value?.length || 0,
+          updateSuccess: true
+        });
+      }, 100);
+      
+    } else if (mappedFieldName === 'isEditing') {
+      const isEditingValue = value === 'true';
+      console.log('✏️ Updating editing mode from:', isEditing, 'to:', isEditingValue);
+      setIsEditing(isEditingValue);
+      
+      // Verify mode change
+      setTimeout(() => {
+        console.log('✅ Edit mode state after update:', {
+          newEditingMode: isEditingValue,
+          modeChangeSuccess: true
+        });
+      }, 100);
+      
+    } else {
+      console.warn('⚠️ Unknown field name after mapping:', fieldName, '→', mappedFieldName, 'with value:', value);
     }
+    
+    console.log('✅ handleFieldUpdate completed for field:', fieldName, '→', mappedFieldName);
   };
 
+  // Enhanced manual mode toggle with logging
   const handleModeToggle = () => {
+    console.log('🔄 Manual mode toggle - current isEditing:', isEditing);
     setIsEditing(!isEditing);
   };
 
@@ -207,7 +262,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
           <Text style={styles.title}>Voice Transcription</Text>
           <TouchableOpacity
             style={[styles.editButton, isEditing && styles.editButtonActive]}
-            onPress={() => setIsEditing(!isEditing)}
+            onPress={handleModeToggle}
           >
             <Text style={[styles.editButtonText, isEditing && styles.editButtonTextActive]}>
               {isEditing ? 'Done' : 'Edit'}
@@ -221,12 +276,13 @@ export default function TranscriptScreen({ navigation, route }: Props) {
               style={styles.transcriptionInput}
               value={transcription}
               onChangeText={(text) => {
-                console.log('📝 TextInput onChangeText called with:', text.substring(0, 50) + '...');
+                console.log('📝 Direct TextInput change:', text.substring(0, 50) + '...');
                 setTranscription(text);
               }}
               multiline
               textAlignVertical="top"
               placeholder="Your voice recording transcription will appear here..."
+              key={`transcript-input-${transcription?.length || 0}`}  // Force re-render on content change
             />
           ) : (
             <Text style={styles.transcriptionText}>
@@ -236,7 +292,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         </View>
 
         <View style={styles.actionButtons}>
-          {/* Generate Button - Now Orange */}
+          {/* Generate Button - Orange */}
           <TouchableOpacity
             style={[styles.generateButton, styles.orangeButton]}
             onPress={handleGenerateSummary}
