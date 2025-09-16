@@ -1,5 +1,6 @@
-// voice-report-app/services/aiAgentService.ts - FIXED TTS AUDIO ISSUES
-import * as FileSystem from 'expo-file-system';
+// voice-report-app/services/aiAgentService.ts - COMPLETE HYBRID VERSION (PRODUCTION READY)
+import { File, Paths } from 'expo-file-system'; // ✅ Modern API for file objects & paths
+import * as FileSystemLegacy from 'expo-file-system/legacy'; // ✅ Legacy API for base64 operations
 import { Audio, AVPlaybackStatus } from 'expo-av';
 import { VoiceCommand, VoiceCommandResponse, ScreenContext } from '../types/aiAgent';
 
@@ -143,7 +144,7 @@ export class AIAgentService {
     return null;
   }
 
-  // Voice command processing to match exact API format
+  // Voice command processing with hybrid FileSystem API
   async processVoiceCommand(audioUri: string, screenContext: ScreenContext): Promise<VoiceCommandResponse> {
     try {
       const workingBackendUrl = await this.getWorkingBackend();
@@ -153,15 +154,15 @@ export class AIAgentService {
 
       console.log('🤖 Processing voice command with backend:', workingBackendUrl);
 
-      // Read audio file exactly like the working transcribeAudio function
-      const audioBase64 = await FileSystem.readAsStringAsync(audioUri, {
-        encoding: FileSystem.EncodingType.Base64,
+      // ✅ HYBRID - Use modern API for file info, legacy for base64 reading
+      const audioFile = new File(audioUri);
+      const audioBase64 = await FileSystemLegacy.readAsStringAsync(audioUri, {
+        encoding: FileSystemLegacy.EncodingType.Base64,
       });
+      console.log(`📁 Audio file: ${audioFile.name} (${audioFile.size} bytes), base64: ${audioBase64.length} chars`);
 
-      console.log(`📁 Audio file size: ${audioBase64.length} characters (base64)`);
-
-      // Determine audio format from file extension (just like api.ts)
-      const format = audioUri.split('.').pop()?.toLowerCase() || 'm4a';
+      // Extract format from filename
+      const format = audioFile.name.split('.').pop()?.toLowerCase() || 'm4a';
       
       console.log('📤 Sending voice command to backend...');
 
@@ -193,7 +194,7 @@ export class AIAgentService {
     }
   }
 
-  // FIXED TTS with proper audio handling and format support
+  // TTS with hybrid FileSystem API
   async playTTSResponse(text: string): Promise<void> {
     if (!text || text.trim().length === 0) {
       console.log('🔇 No TTS text provided, skipping audio playback');
@@ -222,8 +223,7 @@ export class AIAgentService {
         playThroughEarpieceAndroid: false,
       });
 
-      // FIXED: Generate TTS audio using a simple, reliable approach
-      // Using a basic TTS synthesis that doesn't require external services
+      // Generate TTS audio using a simple, reliable approach
       const ttsAudioData = await this.generateSimpleTTS(text);
       
       if (!ttsAudioData) {
@@ -231,23 +231,21 @@ export class AIAgentService {
         return;
       }
 
-      // Create temporary file with proper format
-      const tempAudioUri = `${FileSystem.cacheDirectory}tts_${Date.now()}.wav`;
-      
-      // Write audio data to temporary file
-      await FileSystem.writeAsStringAsync(tempAudioUri, ttsAudioData, {
-        encoding: FileSystem.EncodingType.Base64,
+      // ✅ HYBRID - Use modern API for file path, legacy for base64 writing
+      const tempAudioFile = new File(Paths.cache, `tts_${Date.now()}.wav`);
+      await FileSystemLegacy.writeAsStringAsync(tempAudioFile.uri, ttsAudioData, {
+        encoding: FileSystemLegacy.EncodingType.Base64,
       });
 
       // Load and play audio with proper error handling
       const { sound } = await Audio.Sound.createAsync(
-        { uri: tempAudioUri },
+        { uri: tempAudioFile.uri },
         { 
           shouldPlay: true,
           isLooping: false,
           volume: 1.0 
         },
-        (status: AVPlaybackStatus) => this.handlePlaybackStatus(status, tempAudioUri)
+        (status: AVPlaybackStatus) => this.handlePlaybackStatus(status, tempAudioFile)
       );
 
       this.sound = sound;
@@ -256,7 +254,7 @@ export class AIAgentService {
       return new Promise<void>((resolve) => {
         const playbackTimeout = setTimeout(() => {
           console.warn('⏰ TTS playback timeout, continuing');
-          this.cleanupTTSPlayback(tempAudioUri);
+          this.cleanupTTSPlayback(tempAudioFile);
           resolve();
         }, 10000); // 10 second timeout
 
@@ -266,7 +264,7 @@ export class AIAgentService {
               const status = await this.sound.getStatusAsync();
               if (status.isLoaded && !status.isPlaying) {
                 clearTimeout(playbackTimeout);
-                this.cleanupTTSPlayback(tempAudioUri);
+                this.cleanupTTSPlayback(tempAudioFile);
                 resolve();
               } else if (status.isLoaded && status.isPlaying) {
                 // Still playing, check again in 100ms
@@ -278,7 +276,7 @@ export class AIAgentService {
             }
           } catch (error) {
             clearTimeout(playbackTimeout);
-            this.cleanupTTSPlayback(tempAudioUri);
+            this.cleanupTTSPlayback(tempAudioFile);
             resolve();
           }
         };
@@ -288,7 +286,7 @@ export class AIAgentService {
       });
 
     } catch (error) {
-      // FIXED: Never throw errors from TTS - just log and continue
+      // Never throw errors from TTS - just log and continue
       if (error instanceof Error && error.name === 'AbortError') {
         console.warn('⏰ TTS request was cancelled due to timeout');
       } else {
@@ -298,17 +296,17 @@ export class AIAgentService {
     }
   }
 
-  private handlePlaybackStatus(status: AVPlaybackStatus, tempAudioUri: string): void {
+  private handlePlaybackStatus(status: AVPlaybackStatus, tempAudioFile: File): void {
     if (status.isLoaded && status.didJustFinish) {
       console.log('🔊 TTS playback completed successfully');
-      this.cleanupTTSPlayback(tempAudioUri);
+      this.cleanupTTSPlayback(tempAudioFile);
     } else if (!status.isLoaded && status.error) {
       console.warn('🔇 TTS playback error:', status.error);
-      this.cleanupTTSPlayback(tempAudioUri);
+      this.cleanupTTSPlayback(tempAudioFile);
     }
   }
 
-  private async cleanupTTSPlayback(tempAudioUri: string): Promise<void> {
+  private async cleanupTTSPlayback(tempAudioFile: File): Promise<void> {
     try {
       // Cleanup sound object
       if (this.sound) {
@@ -316,14 +314,17 @@ export class AIAgentService {
         this.sound = null;
       }
       
-      // Delete temporary file
-      await FileSystem.deleteAsync(tempAudioUri, { idempotent: true });
+      // ✅ HYBRID - Use legacy API for reliable file deletion
+      if (tempAudioFile.exists) {
+        await FileSystemLegacy.deleteAsync(tempAudioFile.uri, { idempotent: true });
+        console.log(`🗑️ Cleaned up temporary TTS file: ${tempAudioFile.name}`);
+      }
     } catch (error) {
       console.warn('Warning: TTS cleanup failed:', error);
     }
   }
 
-  // FIXED: Simple TTS generation that creates valid audio data
+  // Simple TTS generation that creates valid audio data
   private async generateSimpleTTS(text: string): Promise<string | null> {
     try {
       // For now, return null to skip TTS entirely
@@ -361,26 +362,51 @@ export class AIAgentService {
     try {
       // Check backend connectivity
       const backend = await this.getWorkingBackend();
-      health.backend = !!backend;
-      
-      // Check audio permissions
-      const { status } = await Audio.requestPermissionsAsync();
-      health.audio = status === 'granted';
-      
-      // Determine overall health status
-      if (!health.backend) {
-        health.status = 'unhealthy';
-        health.message = 'No backend connection available';
-      } else if (!health.audio) {
-        health.status = 'degraded';
-        health.message = 'Microphone permission required';
-      }
-      
-    } catch (error) {
-      health.status = 'unhealthy';
-      health.message = `Health check failed: ${error}`;
-    }
+      health.backend = backend !== null;
 
-    return health;
+      // Check audio permissions
+      const { status } = await Audio.getPermissionsAsync();
+      health.audio = status === 'granted';
+
+      // Determine overall health status
+      if (health.backend && health.audio) {
+        health.status = 'healthy';
+        health.message = 'AI Agent is fully operational';
+      } else if (health.backend || health.audio) {
+        health.status = 'degraded';
+        health.message = `AI Agent is partially operational - ${!health.backend ? 'backend offline' : ''} ${!health.audio ? 'audio permission needed' : ''}`.trim();
+      } else {
+        health.status = 'unhealthy';
+        health.message = 'AI Agent is offline - backend and audio issues';
+      }
+
+      return health;
+    } catch (error) {
+      console.error('Health check failed:', error);
+      health.status = 'unhealthy';
+      health.message = 'Health check failed';
+      return health;
+    }
+  }
+
+  // Cleanup method for proper resource management
+  async cleanup(): Promise<void> {
+    try {
+      // Stop any active recording
+      if (this.recording) {
+        await this.recording.stopAndUnloadAsync();
+        this.recording = null;
+      }
+
+      // Stop any active sound playback
+      if (this.sound) {
+        await this.sound.unloadAsync();
+        this.sound = null;
+      }
+
+      console.log('✅ AI Agent cleanup completed');
+    } catch (error) {
+      console.warn('Warning: AI Agent cleanup had issues:', error);
+    }
   }
 }

@@ -1,6 +1,7 @@
-// voice-report-app/services/api.ts - OPTIMIZED VERSION
+// voice-report-app/services/api.ts - COMPLETE HYBRID VERSION (PRODUCTION READY)
 import axios, { AxiosError } from 'axios';
-import * as FileSystem from 'expo-file-system';
+import { File, Paths } from 'expo-file-system'; // ✅ Modern API for file objects & paths
+import * as FileSystemLegacy from 'expo-file-system/legacy'; // ✅ Legacy API for base64 operations
 import { API_CONFIG } from './api-config';
 import { TranscriptionResponse, SummaryResponse, EmailResponse, CloseoutSummary, ApiError } from '../types/api';
 
@@ -107,23 +108,51 @@ export async function transcribeAudio(audioUri: string): Promise<TranscriptionRe
   try {
     console.log(`🎙️ Transcribing audio using: ${workingBackendUrl}`);
     
-    // Read and prepare audio file
-    const base64Audio = await FileSystem.readAsStringAsync(audioUri, {
-      encoding: FileSystem.EncodingType.Base64,
+    // ✅ HYBRID - Use modern API for file info, legacy for base64 reading
+    const audioFile = new File(audioUri);
+    const base64Audio = await FileSystemLegacy.readAsStringAsync(audioUri, {
+      encoding: FileSystemLegacy.EncodingType.Base64,
     });
-    console.log(`📁 Audio file size: ${base64Audio.length} characters (base64)`);
+    console.log(`📁 Audio file: ${audioFile.name} (${audioFile.size} bytes), base64: ${base64Audio.length} chars`);
 
-    const format = audioUri.split('.').pop()?.toLowerCase() || 'm4a';
+    // Extract format from filename
+    const format = audioFile.name.split('.').pop()?.toLowerCase() || 'm4a';
     
-    const response = await axios.post(`${workingBackendUrl}/transcribe`, {
-      audio: base64Audio,
-      format: format
-    }, createRequestConfig());
+    console.log('📤 Sending transcription request...');
+
+    const response = await axios.post(
+      `${workingBackendUrl}/transcribe`,
+      {
+        audio: base64Audio,
+        format: format,
+      },
+      createRequestConfig()
+    );
 
     console.log('✅ Transcription successful');
     return response.data;
   } catch (error) {
-    throw handleApiError(error, 'transcription');
+    throw handleApiError(error, 'Audio transcription');
+  }
+}
+
+export async function summarizeTranscription(transcription: string): Promise<SummaryResponse> {
+  const workingBackendUrl = await getWorkingBackend();
+
+  try {
+    console.log(`📝 Summarizing transcription using: ${workingBackendUrl}`);
+    console.log(`📋 Transcription length: ${transcription.length} characters`);
+
+    const response = await axios.post(
+      `${workingBackendUrl}/summarize`,
+      { transcription },
+      createRequestConfig()
+    );
+
+    console.log('✅ Summarization successful');
+    return response.data;
+  } catch (error) {
+    throw handleApiError(error, 'Transcription summarization');
   }
 }
 
@@ -141,6 +170,84 @@ export async function generateSummary(transcription: string): Promise<CloseoutSu
     return response.data.summary || response.data;
   } catch (error) {
     throw handleApiError(error, 'summary generation');
+  }
+}
+
+export async function generatePDF(summary: CloseoutSummary, transcription: string): Promise<string> {
+  const workingBackendUrl = await getWorkingBackend();
+
+  try {
+    console.log(`📄 Generating PDF using: ${workingBackendUrl}`);
+
+    const response = await axios.post(
+      `${workingBackendUrl}/generate-pdf`,
+      {
+        summary,
+        transcription,
+      },
+      {
+        ...createRequestConfig(),
+        responseType: 'arraybuffer',
+      }
+    );
+
+    console.log('✅ PDF generation successful');
+    console.log(`📁 PDF size: ${response.data.byteLength} bytes`);
+
+    // ✅ HYBRID - Convert ArrayBuffer to base64, use modern API for file path, legacy for writing
+    const base64Pdf = btoa(
+      new Uint8Array(response.data).reduce((data, byte) => data + String.fromCharCode(byte), '')
+    );
+
+    // Create file path using modern API
+    const pdfFile = new File(Paths.cache, `closeout_report_${Date.now()}.pdf`);
+    
+    // Write using legacy API for reliable base64 support
+    await FileSystemLegacy.writeAsStringAsync(pdfFile.uri, base64Pdf, {
+      encoding: FileSystemLegacy.EncodingType.Base64,
+    });
+
+    console.log(`📁 PDF saved to: ${pdfFile.uri}`);
+    return pdfFile.uri;
+  } catch (error) {
+    throw handleApiError(error, 'PDF generation');
+  }
+}
+
+export async function sendEmail(
+  recipients: string[],
+  subject: string,
+  body: string,
+  pdfUri?: string
+): Promise<EmailResponse> {
+  const workingBackendUrl = await getWorkingBackend();
+
+  try {
+    console.log(`📧 Sending email using: ${workingBackendUrl}`);
+
+    let pdfBase64: string | undefined;
+    if (pdfUri) {
+      // ✅ HYBRID - Use legacy API for reliable base64 reading
+      pdfBase64 = await FileSystemLegacy.readAsStringAsync(pdfUri, {
+        encoding: FileSystemLegacy.EncodingType.Base64,
+      });
+    }
+
+    const response = await axios.post(
+      `${workingBackendUrl}/send-email`,
+      {
+        recipients,
+        subject,
+        body,
+        pdf_attachment: pdfBase64,
+      },
+      createRequestConfig()
+    );
+
+    console.log('✅ Email sent successfully');
+    return response.data;
+  } catch (error) {
+    throw handleApiError(error, 'Email sending');
   }
 }
 
@@ -184,13 +291,15 @@ export async function processVoiceCommand(
   try {
     console.log(`🤖 Processing voice command using: ${workingBackendUrl}`);
     
-    // Read and prepare audio file
-    const base64Audio = await FileSystem.readAsStringAsync(audioUri, {
-      encoding: FileSystem.EncodingType.Base64,
+    // ✅ HYBRID - Use modern API for file info, legacy for base64 reading
+    const audioFile = new File(audioUri);
+    const base64Audio = await FileSystemLegacy.readAsStringAsync(audioUri, {
+      encoding: FileSystemLegacy.EncodingType.Base64,
     });
-    console.log(`📁 Audio file size: ${base64Audio.length} characters (base64)`);
+    console.log(`📁 Audio file: ${audioFile.name} (${audioFile.size} bytes), base64: ${base64Audio.length} chars`);
 
-    const format = audioUri.split('.').pop()?.toLowerCase() || 'm4a';
+    // Extract format from filename
+    const format = audioFile.name.split('.').pop()?.toLowerCase() || 'm4a';
     
     const response = await axios.post(`${workingBackendUrl}/voice-command`, {
       audio: base64Audio,
@@ -205,16 +314,25 @@ export async function processVoiceCommand(
   }
 }
 
-export async function testBackendConnection(): Promise<{ success: boolean; url?: string; error?: string }> {
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+export async function testBackendConnection(): Promise<boolean> {
   try {
-    const workingUrl = await getWorkingBackend();
-    return { success: true, url: workingUrl };
+    const workingBackendUrl = await getWorkingBackend();
+    console.log(`✅ Backend connection test successful: ${workingBackendUrl}`);
+    return true;
   } catch (error) {
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Connection test failed' 
-    };
+    console.log('❌ Backend connection test failed:', error);
+    return false;
   }
+}
+
+export function clearBackendCache(): void {
+  cachedBackendUrl = null;
+  lastCacheTime = 0;
+  console.log('🗑️ Backend cache cleared');
 }
 
 // =============================================================================
@@ -224,7 +342,7 @@ export async function testBackendConnection(): Promise<{ success: boolean; url?:
 // Backward compatibility aliases
 export const summarizeText = generateSummary;
 
-export async function sendEmail(
+export async function sendEmailLegacy(
   summary: CloseoutSummary,
   transcription: string,
   technicianName: string

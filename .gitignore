@@ -48,6 +48,9 @@ site-packages/
 *.swo
 *~
 
+
+*api-config
+
 # OS
 .DS_Store
 .DS_Store?

@@ -1,4 +1,4 @@
-// voice-report-app/components/AIAgent.tsx - VISUAL UPDATE ONLY (NO FUNCTIONALITY CHANGES)
+// voice-report-app/components/AIAgent.tsx - COMPLETE FULL FILE (PRODUCTION READY)
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -12,7 +12,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system'; // ✅ Modern API for file objects
 import { AIAgentService } from '../services/aiAgentService';
 import { 
   AIAgentProps, 
@@ -155,14 +155,14 @@ export default function AIAgent({
   customStyle,
 }: AIAgentProps) {
   
-  // State Management (NO CHANGES)
+  // State Management
   const [agentState, setAgentState] = useState<AIAgentState>({
     isListening: false,
     isProcessing: false,
     isPlayingResponse: false,
   });
 
-  // Service and Refs (NO CHANGES)
+  // Service and Refs
   const aiService = AIAgentService.getInstance();
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -182,12 +182,14 @@ export default function AIAgent({
   const iconScale = buttonSize / 140;
   const iconSize = Math.round(buttonSize * 0.4);
 
-  // Cleanup on unmount (NO CHANGES)
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (recordingTimer.current) {
         clearTimeout(recordingTimer.current);
       }
+      // Cleanup AI service on unmount
+      aiService.cleanup();
     };
   }, []);
 
@@ -268,7 +270,7 @@ export default function AIAgent({
     pulseAnim.stopAnimation(() => pulseAnim.setValue(1));
   };
 
-  // ALL FUNCTIONALITY METHODS UNCHANGED (just keeping the existing ones)
+  // Audio recording functionality
   const startListening = async () => {
     if (agentState.isListening || agentState.isProcessing) return;
     
@@ -282,13 +284,23 @@ export default function AIAgent({
       
       recordingTimer.current = setTimeout(async () => {
         await stopListening();
-      }, 10000);
+      }, 10000); // 10 second auto-stop
       
     } catch (error) {
       console.error('❌ AI Agent listening failed:', error);
       setAgentState(prev => ({ ...prev, isListening: false }));
       stopAllAnimations();
-      Alert.alert('Error', 'Failed to start voice recording. Please check microphone permissions.');
+      
+      let errorMessage = 'Failed to start voice recording. ';
+      if (error instanceof Error) {
+        if (error.message.includes('permission')) {
+          errorMessage = 'Microphone permission is required. Please enable it in your device settings and try again.';
+        } else {
+          errorMessage += error.message;
+        }
+      }
+      
+      Alert.alert('Microphone Error', errorMessage);
     }
   };
 
@@ -311,26 +323,36 @@ export default function AIAgent({
       
       if (audioUri) {
         await processVoiceCommand(audioUri);
+      } else {
+        console.warn('⚠️ No audio URI received from recording');
+        setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
+        stopAllAnimations();
       }
       
     } catch (error) {
       console.error('❌ AI Agent stop listening failed:', error);
       setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
       stopAllAnimations();
-      Alert.alert('Error', 'Failed to process voice recording. Please try again.');
+      Alert.alert('Recording Error', 'Failed to process voice recording. Please try again.');
     }
   };
 
-  // Keep all the existing processing methods unchanged...
+  // ✅ HYBRID - Voice command processing with modern FileSystem API
   const processVoiceCommand = async (audioUri: string) => {
     try {
       console.log('🤖 AI Agent processing voice command from:', audioUri);
       
-      const fileInfo = await FileSystem.getInfoAsync(audioUri);
-      console.log('📁 Audio file info:', fileInfo);
+      // ✅ HYBRID - Use modern API for file info
+      const audioFile = new File(audioUri);
+      console.log('📁 Audio file info:', {
+        name: audioFile.name,
+        size: audioFile.size,
+        exists: audioFile.exists,
+        uri: audioFile.uri
+      });
       
-      if (!fileInfo.exists) {
-        throw new Error('Audio file does not exist');
+      if (!audioFile.exists) {
+        throw new Error(`Audio file does not exist: ${audioFile.name}`);
       }
       
       const response = await aiService.processVoiceCommand(audioUri, screenContext);
@@ -349,20 +371,30 @@ export default function AIAgent({
           errorMessage = 'Microphone permission denied. Please enable microphone access and try again.';
         } else if (error.message.includes('understand') || error.message.includes('transcription')) {
           errorMessage = 'Could not understand the audio. Please speak clearly and try again.';
+        } else if (error.message.includes('backend') || error.message.includes('server')) {
+          errorMessage = 'Backend service unavailable. Please try again later.';
+        } else {
+          errorMessage += error.message;
         }
       }
       
       Alert.alert('AI Agent Error', errorMessage, [{ text: 'OK' }]);
     } finally {
+      setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
       stopAllAnimations();
     }
   };
 
-  // Keep ALL existing functionality methods unchanged...
+  // Command execution with comprehensive error handling
   const executeCommand = async (response: VoiceCommandResponse) => {
     console.log('🎯 executeCommand called with:', response);
     
     try {
+      if (!response || !response.action) {
+        console.warn('⚠️ Invalid response received:', response);
+        return;
+      }
+
       switch (response.action) {
         case 'update_field':
         case 'edit_field':
@@ -401,6 +433,7 @@ export default function AIAgent({
           
         default:
           console.warn('⚠️ Unknown command action:', response.action);
+          Alert.alert('Unknown Command', `The command "${response.action}" is not recognized.`);
           break;
       }
       
@@ -408,117 +441,175 @@ export default function AIAgent({
       
     } catch (error) {
       console.error('❌ Command execution failed:', error);
-      Alert.alert('Error', 'Command execution failed. Please try again.');
-    } finally {
-      setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
-      stopAllAnimations();
+      Alert.alert('Command Error', 'Failed to execute the voice command. Please try again.');
     }
   };
 
-  // Keep all existing handler methods unchanged...
+  // Field update handler with mode switching
   const handleFieldUpdate = async (response: VoiceCommandResponse) => {
     console.log('🔄 handleFieldUpdate called with:', response);
     
     if (!response.target || response.value === undefined) {
       console.warn('⚠️ Field update missing target or value:', response);
+      Alert.alert('Invalid Command', 'The field update command is missing required information.');
       return;
     }
 
     if (!onFieldUpdate) {
       console.warn('⚠️ onFieldUpdate callback not provided');
+      Alert.alert('Configuration Error', 'Field update functionality is not available on this screen.');
       return;
     }
 
-    const isInPreviewMode = screenContext.mode === 'preview';
-    const isEditingMode = screenContext.currentValues?.isEditing === false;
+    try {
+      const isInPreviewMode = screenContext.mode === 'preview';
+      const isEditingMode = screenContext.currentValues?.isEditing === false;
 
-    if (isInPreviewMode || isEditingMode) {
-      console.log('🔄 Switching to edit mode before field update');
-      try {
-        await onFieldUpdate('isEditing', 'true');
-        await new Promise(resolve => setTimeout(resolve, 150));
+      if (isInPreviewMode || isEditingMode) {
+        console.log('🔄 Switching to edit mode before field update');
+        try {
+          await onFieldUpdate('isEditing', 'true');
+          await new Promise(resolve => setTimeout(resolve, 150)); // Brief delay for UI update
+          await onFieldUpdate(response.target, response.value);
+        } catch (error) {
+          console.error('❌ Error updating field with mode switch:', error);
+          throw error;
+        }
+      } else {
+        console.log('🔄 Updating field directly (already in edit mode)');
         await onFieldUpdate(response.target, response.value);
-      } catch (error) {
-        console.error('❌ Error updating field with mode switch:', error);
-        throw error;
       }
-    } else {
-      console.log('🔄 Updating field directly (already in edit mode)');
-      await onFieldUpdate(response.target, response.value);
-    }
 
-    console.log(`📝 Field updated: ${response.target} = "${response.value}"`);
+      console.log(`📝 Field updated: ${response.target} = "${response.value}"`);
+    } catch (error) {
+      console.error('❌ Field update failed:', error);
+      throw new Error(`Failed to update field ${response.target}: ${error}`);
+    }
   };
 
+  // Mode toggle handler
   const handleModeToggle = async (response: VoiceCommandResponse) => {
     console.log('🔄 handleModeToggle called');
     
-    if (onFieldUpdate) {
-      const currentEditingState = screenContext.currentValues?.isEditing || false;
-      const currentMode = screenContext.mode;
-      
-      let newEditingState: boolean;
-      if (currentMode === 'preview') {
-        newEditingState = true;
+    try {
+      if (onFieldUpdate) {
+        const currentEditingState = screenContext.currentValues?.isEditing || false;
+        const currentMode = screenContext.mode;
+        
+        let newEditingState: boolean;
+        if (currentMode === 'preview') {
+          newEditingState = true;
+        } else {
+          newEditingState = !currentEditingState;
+        }
+        
+        await onFieldUpdate('isEditing', String(newEditingState));
+        console.log(`🔄 Mode toggled: editing = ${newEditingState}`);
+      } else if (onModeToggle) {
+        onModeToggle();
+        console.log('🔄 Mode toggled via onModeToggle callback');
       } else {
-        newEditingState = !currentEditingState;
+        console.warn('⚠️ No mode toggle callback available');
+        Alert.alert('Mode Toggle', 'Mode switching is not available on this screen.');
       }
-      
-      await onFieldUpdate('isEditing', String(newEditingState));
-      console.log(`🔄 Mode toggled: editing = ${newEditingState}`);
-    } else if (onModeToggle) {
-      onModeToggle();
-      console.log('🔄 Mode toggled via onModeToggle callback');
+    } catch (error) {
+      console.error('❌ Mode toggle failed:', error);
+      throw new Error(`Failed to toggle mode: ${error}`);
     }
   };
 
+  // Action execution handler
   const handleActionExecution = async (response: VoiceCommandResponse) => {
     if (onAction) {
       const actionName = response.target || response.action;
-      await onAction(actionName, screenContext.currentValues);
-      console.log(`⚡ Action executed: ${actionName}`);
+      try {
+        await onAction(actionName, screenContext.currentValues);
+        console.log(`⚡ Action executed: ${actionName}`);
+      } catch (error) {
+        console.error(`❌ Action execution failed for ${actionName}:`, error);
+        throw new Error(`Failed to execute action ${actionName}: ${error}`);
+      }
+    } else {
+      console.warn('⚠️ onAction callback not provided');
+      Alert.alert('Action Error', 'Action execution is not available on this screen.');
     }
   };
 
+  // Navigation handler
   const handleNavigation = async (response: VoiceCommandResponse) => {
     if (response.target && onNavigate) {
-      await onNavigate(response.target, response.metadata);
-      console.log(`🧭 Navigation: ${response.target}`);
+      try {
+        await onNavigate(response.target, response.metadata);
+        console.log(`🧭 Navigation: ${response.target}`);
+      } catch (error) {
+        console.error(`❌ Navigation failed for ${response.target}:`, error);
+        throw new Error(`Failed to navigate to ${response.target}: ${error}`);
+      }
+    } else {
+      console.warn('⚠️ Navigation target missing or onNavigate callback not provided');
+      Alert.alert('Navigation Error', 'Navigation is not available or the target is invalid.');
     }
   };
 
+  // Field clear handler
   const handleFieldClear = async (response: VoiceCommandResponse) => {
     if (response.target && onFieldUpdate) {
-      await onFieldUpdate(response.target, '');
-      console.log(`🗑️ Field cleared: ${response.target}`);
+      try {
+        await onFieldUpdate(response.target, '');
+        console.log(`🗑️ Field cleared: ${response.target}`);
+      } catch (error) {
+        console.error(`❌ Field clear failed for ${response.target}:`, error);
+        throw new Error(`Failed to clear field ${response.target}: ${error}`);
+      }
+    } else {
+      console.warn('⚠️ Field clear target missing or onFieldUpdate callback not provided');
+      Alert.alert('Clear Error', 'Field clearing is not available or the target is invalid.');
     }
   };
 
+  // Capability explanation handler
   const handleCapabilityExplanation = (response: VoiceCommandResponse) => {
     if (response.target && onCapabilityExplain) {
       onCapabilityExplain(response.target);
+      console.log(`💡 Capability explained: ${response.target}`);
+    } else {
+      console.warn('⚠️ Capability explanation target missing or callback not provided');
     }
   };
 
+  // Suggestion handler
   const handleSuggestion = (response: VoiceCommandResponse) => {
     if (response.value && onSuggestionProvided) {
       onSuggestionProvided(response.value, response.target);
+      console.log(`💭 Suggestion provided: ${response.value}`);
+    } else {
+      console.warn('⚠️ Suggestion value missing or callback not provided');
     }
   };
 
+  // Main button press handler
   const handlePress = async () => {
-    if (disabled) return;
+    if (disabled) {
+      console.log('🔒 AI Agent disabled, ignoring press');
+      return;
+    }
 
-    if (agentState.isListening) {
-      await stopListening();
-    } else if (!agentState.isProcessing && !agentState.isPlayingResponse) {
-      await startListening();
+    try {
+      if (agentState.isListening) {
+        await stopListening();
+      } else if (!agentState.isProcessing && !agentState.isPlayingResponse) {
+        await startListening();
+      } else {
+        console.log('🔒 AI Agent busy, ignoring press');
+      }
+    } catch (error) {
+      console.error('❌ Button press handler failed:', error);
+      setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
+      stopAllAnimations();
     }
   };
 
-  // VISUAL UPDATES START HERE
-
-  // Get icon and color based on state (matching Recorder logic)
+  // Visual styling functions
   const getIconProps = () => {
     if (agentState.isListening) {
       return {
@@ -535,7 +626,6 @@ export default function AIAgent({
     }
   };
 
-  // Main button style (removed shadow animation to avoid native driver conflicts)
   const getButtonStyle = () => {
     const baseStyle = {
       width: buttonSize,
@@ -572,13 +662,13 @@ export default function AIAgent({
     } else {
       return {
         ...baseStyle,
-        backgroundColor: COLORS.BLACK,
+        backgroundColor: disabled ? COLORS.GRAY : COLORS.BLACK,
         borderColor: COLORS.ORANGE,
+        opacity: disabled ? 0.6 : 1.0,
       };
     }
   };
 
-  // Outer glow style (matching Recorder)
   const getOuterGlowStyle = () => {
     const glowOpacity = glowAnim.interpolate({
       inputRange: [0, 1],
@@ -599,7 +689,6 @@ export default function AIAgent({
     };
   };
 
-  // Outer ring style (matching Recorder)
   const getOuterRingStyle = () => {
     return {
       position: 'absolute' as const,
@@ -615,7 +704,6 @@ export default function AIAgent({
     };
   };
 
-  // Ripple effect style (matching Recorder)
   const getRippleStyle = () => {
     const rippleScale = rippleAnim.interpolate({
       inputRange: [0, 1],
@@ -638,7 +726,6 @@ export default function AIAgent({
     };
   };
 
-  // Position calculation (unchanged)
   const getPositionStyle = (): ViewStyle => {
     const baseStyle: ViewStyle = {
       position: 'absolute',
@@ -663,9 +750,9 @@ export default function AIAgent({
   const iconProps = getIconProps();
 
   return (
-    <View style={[styles.container, getPositionStyle()]}>
+    <View style={[styles.container, getPositionStyle(), customStyle]}>
       {/* Outer Glow Ring */}
-      <Animated.View style={getOuterGlowStyle()} />
+      {agentState.isListening && <Animated.View style={getOuterGlowStyle()} />}
       
       {/* Outer Ring */}
       <Animated.View style={getOuterRingStyle()} />
@@ -704,7 +791,7 @@ export default function AIAgent({
   );
 }
 
-// UPDATED STYLES (matching Recorder styling)
+// Styles
 const styles = StyleSheet.create({
   container: {
     zIndex: 1000,
@@ -716,6 +803,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   dot: {
-    // Dot styles handled inline
+    // Dot styles handled inline for animation performance
   },
 });
