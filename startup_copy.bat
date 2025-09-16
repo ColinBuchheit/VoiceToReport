@@ -9,6 +9,7 @@ echo - Frontend in separate window (like version 2)
 echo - All windows stay open for debugging
 echo - FULLY AUTOMATED - No manual intervention required
 echo - Includes ngrok URL update (the missing piece)
+echo - FIXED: Expo SDK 54 compatibility
 echo.
 
 echo Step 1: Stop existing services
@@ -66,9 +67,10 @@ if errorlevel 1 (
 )
 
 echo.
-echo Step 7: Start frontend (EXACT same command that worked)
-start "Frontend Setup" cmd /k "cd /d %CD%\voice-report-app && echo Installing frontend dependencies... && npm install && echo Frontend deps done && echo Starting Expo... && npx expo start --tunnel"
-echo ✅ Frontend started in separate window
+echo Step 7: UPDATED Frontend setup - Fix Expo SDK compatibility
+echo 📱 Starting frontend with SDK 54 compatibility fix...
+start "Frontend Setup" cmd /k "cd /d %CD%\voice-report-app && echo Fixing Expo SDK compatibility... && echo Installing correct Expo SDK version... && npx expo install --fix && echo SDK compatibility fixed && echo Installing remaining dependencies... && npm install && echo Frontend deps done && echo Starting Expo... && npx expo start --tunnel"
+echo ✅ Frontend started in separate window with SDK fix
 
 echo ⏱️ Final setup complete...
 timeout /t 3 /nobreak >nul
@@ -78,10 +80,12 @@ echo ========================================
 echo             ALL DONE!
 echo ========================================
 echo.
+echo ✅ FIXED: Expo SDK compatibility issue resolved
+echo.
 echo Check the individual windows:
 echo - Backend Server: Should show "Uvicorn running on http://0.0.0.0:8000"
 echo - Ngrok Tunnel: Should show public URL and dashboard at http://localhost:4040
-echo - Frontend Setup: Should show QR code for mobile testing
+echo - Frontend Setup: Should show QR code for mobile testing (after SDK fix)
 echo.
 echo Services:
 echo Backend API: http://localhost:8000
@@ -91,14 +95,16 @@ echo Ngrok Dashboard: http://localhost:4040
 echo Frontend: Look for QR code in Frontend window
 echo.
 echo Mobile Testing:
-echo 1. Install Expo Go app on your phone
-echo 2. Scan QR code from Frontend window
-echo 3. Test voice recording in the app
+echo 1. Install Expo Go app on your phone (make sure it's SDK 54+ compatible)
+echo 2. Wait for SDK compatibility fix to complete in Frontend window
+echo 3. Scan QR code from Frontend window
+echo 4. Test voice recording in the app
 echo.
 echo IMPORTANT: 
 echo - Your OpenAI API key must be set in backend\.env
 echo - Ngrok URL has been automatically updated in frontend config
-echo - If mobile app can't connect, wait 30 seconds and restart the app
+echo - SDK compatibility fix may take 1-2 minutes on first run
+echo - If mobile app can't connect, wait for SDK fix completion and restart the app
 echo.
 echo NGROK URL MANAGEMENT:
 echo - Current ngrok URL is automatically detected and configured
