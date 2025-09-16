@@ -155,6 +155,11 @@ export default function AIAgent({
   customStyle,
 }: AIAgentProps) {
   
+  // Extract custom styling values
+  const buttonSize = customStyle?.size || 80;
+  const buttonColor = customStyle?.buttonColor;
+  const iconColor = customStyle?.iconColor;
+
   // State Management
   const [agentState, setAgentState] = useState<AIAgentState>({
     isListening: false,
@@ -178,9 +183,9 @@ export default function AIAgent({
   // Calculate sizes (matching Recorder responsive approach)
   const { width: screenWidth } = Dimensions.get('window');
   const baseSize = Math.min(screenWidth * 0.15, 70); // Smaller than main recorder
-  const buttonSize = Math.max(baseSize, 60);
-  const iconScale = buttonSize / 140;
-  const iconSize = Math.round(buttonSize * 0.4);
+  const finalButtonSize = customStyle?.size || Math.max(baseSize, 60);
+  const iconScale = finalButtonSize / 140;
+  const iconSize = Math.round(finalButtonSize * 0.4);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -370,151 +375,95 @@ export default function AIAgent({
         } else if (error.message.includes('permission')) {
           errorMessage = 'Microphone permission denied. Please enable microphone access and try again.';
         } else if (error.message.includes('understand') || error.message.includes('transcription')) {
-          errorMessage = 'Could not understand the audio. Please speak clearly and try again.';
-        } else if (error.message.includes('backend') || error.message.includes('server')) {
-          errorMessage = 'Backend service unavailable. Please try again later.';
+          errorMessage = 'Could not understand the audio. Please try speaking more clearly.';
         } else {
           errorMessage += error.message;
         }
       }
       
-      Alert.alert('AI Agent Error', errorMessage, [{ text: 'OK' }]);
+      Alert.alert('Processing Error', errorMessage);
     } finally {
       setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
       stopAllAnimations();
     }
   };
 
-  // Command execution with comprehensive error handling
+  // Command execution router
   const executeCommand = async (response: VoiceCommandResponse) => {
-    console.log('🎯 executeCommand called with:', response);
-    
     try {
-      if (!response || !response.action) {
-        console.warn('⚠️ Invalid response received:', response);
-        return;
-      }
-
+      console.log('🎯 AI Agent executing command:', response.action);
+      
       switch (response.action) {
         case 'update_field':
         case 'edit_field':
           await handleFieldUpdate(response);
           break;
-          
         case 'toggle_mode':
         case 'toggle_edit_mode':
           await handleModeToggle(response);
           break;
-          
-        case 'execute_action':
-          await handleActionExecution(response);
-          break;
-          
         case 'navigate':
           await handleNavigation(response);
           break;
-          
+        case 'execute_action':
+          await handleActionExecution(response);
+          break;
         case 'clear_field':
           await handleFieldClear(response);
           break;
-          
         case 'explain_capabilities':
           handleCapabilityExplanation(response);
           break;
-          
         case 'provide_suggestion':
           handleSuggestion(response);
           break;
-          
-        case 'acknowledge':
         case 'respond':
-          console.log('✅ Command acknowledged:', response.confirmation);
-          break;
-          
+        case 'acknowledge':
+        case 'clarify':
         default:
-          console.warn('⚠️ Unknown command action:', response.action);
-          Alert.alert('Unknown Command', `The command "${response.action}" is not recognized.`);
+          // Play TTS response for acknowledgments
+          if (response.ttsText) {
+            await aiService.playTTSResponse(response.ttsText);
+          }
+          console.log(`💬 AI Agent response: ${response.confirmation}`);
           break;
       }
-      
-      console.log('✅ AI Agent command executed successfully');
       
     } catch (error) {
       console.error('❌ Command execution failed:', error);
-      Alert.alert('Command Error', 'Failed to execute the voice command. Please try again.');
+      Alert.alert('Execution Error', 'Failed to execute voice command. Please try again.');
     }
   };
 
-  // Field update handler with mode switching
+  // Field update handler
   const handleFieldUpdate = async (response: VoiceCommandResponse) => {
-    console.log('🔄 handleFieldUpdate called with:', response);
-    
-    if (!response.target || response.value === undefined) {
-      console.warn('⚠️ Field update missing target or value:', response);
-      Alert.alert('Invalid Command', 'The field update command is missing required information.');
-      return;
-    }
-
-    if (!onFieldUpdate) {
-      console.warn('⚠️ onFieldUpdate callback not provided');
-      Alert.alert('Configuration Error', 'Field update functionality is not available on this screen.');
-      return;
-    }
-
-    try {
-      const isInPreviewMode = screenContext.mode === 'preview';
-      const isEditingMode = screenContext.currentValues?.isEditing === false;
-
-      if (isInPreviewMode || isEditingMode) {
-        console.log('🔄 Switching to edit mode before field update');
-        try {
-          await onFieldUpdate('isEditing', 'true');
-          await new Promise(resolve => setTimeout(resolve, 150)); // Brief delay for UI update
-          await onFieldUpdate(response.target, response.value);
-        } catch (error) {
-          console.error('❌ Error updating field with mode switch:', error);
-          throw error;
-        }
-      } else {
-        console.log('🔄 Updating field directly (already in edit mode)');
+    if (response.target && response.value !== undefined && onFieldUpdate) {
+      try {
         await onFieldUpdate(response.target, response.value);
+        console.log(`📝 Field updated: ${response.target} = ${response.value}`);
+      } catch (error) {
+        console.error(`❌ Field update failed for ${response.target}:`, error);
+        throw new Error(`Failed to update field ${response.target}: ${error}`);
       }
-
-      console.log(`📝 Field updated: ${response.target} = "${response.value}"`);
-    } catch (error) {
-      console.error('❌ Field update failed:', error);
-      throw new Error(`Failed to update field ${response.target}: ${error}`);
+    } else {
+      console.warn('⚠️ Field update target, value, or callback missing');
+      Alert.alert('Update Error', 'Field update information is incomplete or field updating is not available.');
     }
   };
 
   // Mode toggle handler
   const handleModeToggle = async (response: VoiceCommandResponse) => {
-    console.log('🔄 handleModeToggle called');
-    
-    try {
-      if (onFieldUpdate) {
-        const currentEditingState = screenContext.currentValues?.isEditing || false;
-        const currentMode = screenContext.mode;
-        
-        let newEditingState: boolean;
-        if (currentMode === 'preview') {
-          newEditingState = true;
-        } else {
-          newEditingState = !currentEditingState;
-        }
-        
-        await onFieldUpdate('isEditing', String(newEditingState));
-        console.log(`🔄 Mode toggled: editing = ${newEditingState}`);
-      } else if (onModeToggle) {
-        onModeToggle();
-        console.log('🔄 Mode toggled via onModeToggle callback');
-      } else {
-        console.warn('⚠️ No mode toggle callback available');
-        Alert.alert('Mode Toggle', 'Mode switching is not available on this screen.');
+    if (onModeToggle) {
+      try {
+        await onModeToggle();
+        console.log('🔄 Mode toggled successfully');
+      } catch (error) {
+        console.error('❌ Mode toggle failed:', error);
+        throw new Error(`Failed to toggle mode: ${error}`);
       }
-    } catch (error) {
-      console.error('❌ Mode toggle failed:', error);
-      throw new Error(`Failed to toggle mode: ${error}`);
+    } else {
+      console.warn('⚠️ onModeToggle callback not provided');
+      Alert.alert('Mode Error', 'Mode toggling is not available on this screen.');
     }
   };
 
@@ -628,9 +577,9 @@ export default function AIAgent({
 
   const getButtonStyle = () => {
     const baseStyle = {
-      width: buttonSize,
-      height: buttonSize,
-      borderRadius: buttonSize / 2,
+      width: finalButtonSize,
+      height: finalButtonSize,
+      borderRadius: finalButtonSize / 2,
       justifyContent: 'center' as const,
       alignItems: 'center' as const,
       borderWidth: 4,
@@ -650,19 +599,19 @@ export default function AIAgent({
     if (agentState.isListening) {
       return {
         ...baseStyle,
-        backgroundColor: COLORS.ORANGE,
+        backgroundColor: buttonColor || COLORS.ORANGE,
         borderColor: COLORS.BLACK,
       };
     } else if (agentState.isProcessing) {
       return {
         ...baseStyle,
         backgroundColor: COLORS.WHITE,
-        borderColor: COLORS.ORANGE,
+        borderColor: buttonColor || COLORS.ORANGE,
       };
     } else {
       return {
         ...baseStyle,
-        backgroundColor: disabled ? COLORS.GRAY : COLORS.BLACK,
+        backgroundColor: disabled ? COLORS.GRAY : (buttonColor || COLORS.BLACK),
         borderColor: COLORS.ORANGE,
         opacity: disabled ? 0.6 : 1.0,
       };
@@ -677,9 +626,9 @@ export default function AIAgent({
 
     return {
       position: 'absolute' as const,
-      width: buttonSize + 40,
-      height: buttonSize + 40,
-      borderRadius: (buttonSize + 40) / 2,
+      width: finalButtonSize + 40,
+      height: finalButtonSize + 40,
+      borderRadius: (finalButtonSize + 40) / 2,
       backgroundColor: 'transparent',
       borderWidth: 3,
       borderColor: COLORS.ORANGE,
@@ -692,9 +641,9 @@ export default function AIAgent({
   const getOuterRingStyle = () => {
     return {
       position: 'absolute' as const,
-      width: buttonSize + 15,
-      height: buttonSize + 15,
-      borderRadius: (buttonSize + 15) / 2,
+      width: finalButtonSize + 15,
+      height: finalButtonSize + 15,
+      borderRadius: (finalButtonSize + 15) / 2,
       backgroundColor: 'transparent',
       borderWidth: 2,
       borderColor: agentState.isListening ? COLORS.ORANGE : 'transparent',
@@ -717,9 +666,9 @@ export default function AIAgent({
 
     return {
       position: 'absolute' as const,
-      width: buttonSize,
-      height: buttonSize,
-      borderRadius: buttonSize / 2,
+      width: finalButtonSize,
+      height: finalButtonSize,
+      borderRadius: finalButtonSize / 2,
       backgroundColor: COLORS.ORANGE,
       opacity: rippleOpacity,
       transform: [{ scale: rippleScale }],
@@ -739,7 +688,7 @@ export default function AIAgent({
         return { 
           ...baseStyle, 
           left: '50%' as DimensionValue, 
-          marginLeft: -buttonSize / 2 
+          marginLeft: -finalButtonSize / 2 
         };
       case 'bottom-right':
       default:
@@ -750,7 +699,7 @@ export default function AIAgent({
   const iconProps = getIconProps();
 
   return (
-    <View style={[styles.container, getPositionStyle(), customStyle]}>
+    <View style={[styles.container, getPositionStyle()]}>
       {/* Outer Glow Ring */}
       {agentState.isListening && <Animated.View style={getOuterGlowStyle()} />}
       
@@ -775,14 +724,14 @@ export default function AIAgent({
           {agentState.isProcessing ? (
             <AnimatedDots 
               color={COLORS.ORANGE} 
-              dotSize={Math.max(buttonSize * 0.05, 4)}
-              spacing={Math.max(buttonSize * 0.03, 3)}
+              dotSize={Math.max(finalButtonSize * 0.05, 4)}
+              spacing={Math.max(finalButtonSize * 0.03, 3)}
             />
           ) : iconProps ? (
             <Ionicons
               name={iconProps.name}
               size={iconSize}
-              color={iconProps.color}
+              color={iconColor || iconProps.color}
             />
           ) : null}
         </TouchableOpacity>
