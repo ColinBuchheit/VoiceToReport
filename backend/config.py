@@ -1,4 +1,4 @@
-# backend/config.py
+# backend/config.py - ADD THE EMAIL_RECIPIENTS FIELD
 import os
 from typing import List, Union
 from pydantic import field_validator
@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     gpt_max_tokens: int = 500
     gpt_temperature: float = 0.3
     
+    # Email Configuration
+    email_user: str = ""
+    email_password: str = ""
+    email_recipients: str = "colbol42@gmail.com"  # ADD THIS LINE - comma-separated list
+    smtp_server: str = "smtp.gmail.com"
+    smtp_port: str = "587"
+    
     @field_validator('allowed_origins', mode='before')
     @classmethod
     def parse_allowed_origins(cls, v):
@@ -44,6 +51,13 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [x.strip() for x in v.split(',') if x.strip()]
         return v
+    
+    @field_validator('smtp_port', mode='before')
+    @classmethod
+    def parse_smtp_port(cls, v):
+        if isinstance(v, str):
+            return v
+        return str(v)
     
     class Config:
         env_file = ".env"

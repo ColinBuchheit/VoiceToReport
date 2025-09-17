@@ -1,140 +1,231 @@
-import json
+# backend/services/summarization.py - FIXED TO EXTRACT INFORMATION PROPERLY
 import logging
-from datetime import datetime
+import json
 from typing import Dict, Any
 from openai import OpenAI
-
 from config import settings
 
 logger = logging.getLogger(__name__)
 
 class SummarizationService:
-    """Service for generating structured summaries using OpenAI GPT"""
+    """Service for generating structured closeout summaries from transcriptions"""
     
-    def __init__(self):
-        self.client = OpenAI(api_key=settings.openai_api_key)
+    def __init__(self, openai_client: OpenAI):
+        self.client = openai_client
     
-    async def generate_summary(self, transcription: str) -> Dict[str, Any]:
+    def generate_closeout_summary(self, transcription: str) -> Dict[str, Any]:
         """
-        Generate structured summary from transcription text
+        Generate structured closeout summary from transcription
         
         Args:
-            transcription: Text to summarize
+            transcription: Raw voice transcription text
             
         Returns:
-            Dictionary containing structured summary data
-            
-        Raises:
-            ValueError: If transcription is invalid
-            Exception: If summarization fails
+            Dictionary with closeout report fields
         """
-        if not transcription or len(transcription.strip()) < 10:
-            raise ValueError("Transcription text too short to summarize")
-        
-        logger.info(f"Starting summarization for {len(transcription)} character transcription")
-        
-        # Create structured prompt for GPT
-        system_prompt = self._get_system_prompt()
-        user_prompt = self._get_user_prompt(transcription)
-        
         try:
-            # Call OpenAI GPT
-            logger.info("Calling OpenAI GPT API...")
+            logger.info("Generating closeout summary from transcription")
+            logger.info(f"Transcription length: {len(transcription)} characters")
+            
+            # Create detailed prompt for field extraction
+            prompt = self._build_extraction_prompt(transcription)
+            
+            # Get GPT response
             response = self.client.chat.completions.create(
                 model=settings.gpt_model,
                 messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
+                    {
+                        "role": "system",
+                        "content": "You are an expert at extracting structured information from field service reports. Extract the requested information accurately and format it as valid JSON."
+                    },
+                    {"role": "user", "content": prompt}
                 ],
-                temperature=settings.gpt_temperature,
                 max_tokens=settings.gpt_max_tokens,
-                response_format={"type": "json_object"}
+                temperature=0.1  # Low temperature for consistent extraction
             )
             
-            # Extract the response content
+            # Parse the response
             summary_text = response.choices[0].message.content.strip()
-            logger.info("GPT summarization completed")
+            logger.info("GPT summary generation completed")
             
-            # Parse JSON response
-            summary_data = self._parse_summary_response(summary_text)
+            # Extract JSON from response
+            summary = self._parse_summary_response(summary_text)
             
-            return {
-                'summary': summary_data,
-                'timestamp': datetime.now().isoformat(),
-                'model_used': settings.gpt_model
-            }
+            # Log extraction results
+            populated_fields = sum(1 for v in summary.values() if v and v != "Not mentioned" and v != "")
+            logger.info(f"Summary extraction completed: {populated_fields}/16 fields populated")
+            
+            return summary
             
         except Exception as e:
-            logger.error(f"Error during GPT summarization: {e}")
-            # Return fallback summary
-            return self._create_fallback_summary(transcription)
+            logger.error(f"Summary generation failed: {e}")
+            # Return empty structure on failure
+            return self._get_empty_summary()
     
-    def _get_system_prompt(self) -> str:
-        """Get the system prompt for GPT"""
-        return """You are an AI assistant that analyzes work activity transcriptions and extracts structured information. 
+    def _build_extraction_prompt(self, transcription: str) -> str:
+        """Build detailed prompt for extracting closeout information"""
+        
+        prompt = f"""Extract field service closeout information from this transcription. 
 
-Your task is to analyze the given transcription and extract the following information in JSON format:
-- taskDescription: A clear, concise description of the main task or activity described
-- location: Where this activity took place (if mentioned, otherwise null)
-- datetime: When this occurred (if mentioned, otherwise null)
-- outcome: The result, completion status, or achievement described
-- notes: Any additional relevant details, insights, or next steps mentioned
+TRANSCRIPTION:
+"{transcription}"
 
-Be precise and only include information that is actually mentioned in the transcription. If something isn't mentioned, use null for that field.
-Always respond with valid JSON only, no additional text or formatting."""
+TASK: Extract the following closeout report fields. Be thorough and look for this information throughout the entire transcription:
+
+CLOSEOUT NOTES:
+- onsite_contact: Who did the technician meet with on-site? (names, titles, roles)
+- support_contact: Who provided support? (remote support person, help desk, colleague)
+- work_completed: What specific work was done? (tasks, repairs, installations, troubleshooting)
+- delays: Were there any delays mentioned? (traffic, waiting for parts, access issues)
+- troubleshooting_steps: What troubleshooting or diagnostic steps were taken?
+- scope_completed: Was the work scope completed successfully? (yes/no/partial with details)
+- released_by: Who released/dismissed the technician? (name or title)
+- release_code: Any release or completion code mentioned?
+- return_tracking: Any return tracking numbers for parts/equipment?
+
+EXPENSES:
+- expenses: Any expenses mentioned? (parking, tolls, materials purchased)
+- materials_used: What materials/parts were used?
+
+OUT OF SCOPE:
+- out_of_scope_work: Any additional work outside the original scope?
+
+PHOTOS:
+- photos_uploaded: How many photos were taken/uploaded?
+
+ADDITIONAL:
+- location: Where was the work performed? (address, building, site name)
+- datetime: When was the work performed? (date/time if mentioned)
+- technician_name: Name of the technician (if mentioned)
+
+EXTRACTION RULES:
+1. Look for this information ANYWHERE in the transcription, not just in order
+2. Extract names, specific details, and numbers where mentioned
+3. Use "Not mentioned" ONLY if the information is truly not present
+4. Be flexible with phrasing (e.g., "met with John" = onsite_contact: "John")
+5. Extract partial information rather than marking as "Not mentioned"
+
+EXAMPLES OF GOOD EXTRACTION:
+- "I worked with Sarah from IT" → support_contact: "Sarah from IT"
+- "Met with the front desk manager Mark" → onsite_contact: "Mark (front desk manager)"
+- "Replaced the faulty switch" → work_completed: "Replaced faulty switch"
+- "No issues, everything went smoothly" → delays: "None"
+
+Return ONLY a JSON object with the exact field names above:
+
+{{
+  "onsite_contact": "extracted value or Not mentioned",
+  "support_contact": "extracted value or Not mentioned", 
+  "work_completed": "extracted value or Not mentioned",
+  "delays": "extracted value or Not mentioned",
+  "troubleshooting_steps": "extracted value or Not mentioned",
+  "scope_completed": "extracted value or Not mentioned",
+  "released_by": "extracted value or Not mentioned",
+  "release_code": "extracted value or Not mentioned",
+  "return_tracking": "extracted value or Not mentioned",
+  "expenses": "extracted value or Not mentioned",
+  "materials_used": "extracted value or Not mentioned",
+  "out_of_scope_work": "extracted value or Not mentioned",
+  "photos_uploaded": "extracted value or Not mentioned",
+  "location": "extracted value or Not mentioned",
+  "datetime": "extracted value or Not mentioned",
+  "technician_name": "extracted value or Not mentioned"
+}}"""
+        
+        return prompt
     
-    def _get_user_prompt(self, transcription: str) -> str:
-        """Get the user prompt with transcription"""
-        return f"""Please analyze this work activity transcription and provide a structured summary:
-
-Transcription: "{transcription}"
-
-Return your response as a valid JSON object with the fields: taskDescription, location, datetime, outcome, and notes."""
-    
-    def _parse_summary_response(self, summary_text: str) -> Dict[str, Any]:
-        """Parse and validate GPT response"""
+    def _parse_summary_response(self, response_text: str) -> Dict[str, Any]:
+        """Parse and validate the GPT summary response"""
         try:
-            # Remove markdown code blocks if present
-            if summary_text.startswith('```json'):
-                summary_text = summary_text.replace('```json', '').replace('```', '').strip()
-            elif summary_text.startswith('```'):
-                summary_text = summary_text.replace('```', '').strip()
+            # Extract JSON from response
+            start_idx = response_text.find('{')
+            end_idx = response_text.rfind('}') + 1
             
-            summary_data = json.loads(summary_text)
+            if start_idx == -1 or end_idx == 0:
+                logger.warning("No JSON found in summary response, using fallback parsing")
+                return self._fallback_parse(response_text)
             
-            # Validate and ensure required fields exist
-            required_fields = ['taskDescription', 'location', 'datetime', 'outcome', 'notes']
+            json_str = response_text[start_idx:end_idx]
+            summary = json.loads(json_str)
+            
+            # Ensure all required fields are present
+            required_fields = [
+                'onsite_contact', 'support_contact', 'work_completed', 'delays',
+                'troubleshooting_steps', 'scope_completed', 'released_by', 
+                'release_code', 'return_tracking', 'expenses', 'materials_used',
+                'out_of_scope_work', 'photos_uploaded', 'location', 'datetime', 
+                'technician_name'
+            ]
+            
             for field in required_fields:
-                if field not in summary_data:
-                    summary_data[field] = None
+                if field not in summary:
+                    summary[field] = "Not mentioned"
             
-            # Ensure taskDescription is not empty
-            if not summary_data.get('taskDescription'):
-                summary_data['taskDescription'] = "Work activity completed"
+            # Clean up values
+            for key, value in summary.items():
+                if not value or str(value).strip() == "":
+                    summary[key] = "Not mentioned"
+                elif isinstance(value, str):
+                    summary[key] = value.strip()
             
-            logger.info("Summary parsing successful")
-            return summary_data
+            return summary
             
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse GPT response as JSON: {e}")
-            logger.error(f"GPT response was: {summary_text}")
-            raise ValueError("Failed to parse AI response")
+            logger.error(f"Failed to parse summary JSON: {e}")
+            logger.error(f"Response text: {response_text}")
+            return self._fallback_parse(response_text)
+        except Exception as e:
+            logger.error(f"Unexpected error parsing summary: {e}")
+            return self._get_empty_summary()
     
-    def _create_fallback_summary(self, transcription: str) -> Dict[str, Any]:
-        """Create fallback summary when AI parsing fails"""
-        logger.warning("Creating fallback summary due to AI parsing failure")
+    def _fallback_parse(self, response_text: str) -> Dict[str, Any]:
+        """Fallback parsing using simple text extraction"""
+        logger.info("Using fallback parsing for summary extraction")
         
-        fallback_summary = {
-            'taskDescription': transcription[:200] + "..." if len(transcription) > 200 else transcription,
-            'location': None,
-            'datetime': None,
-            'outcome': "Summary generation failed - manual review needed",
-            'notes': "AI was unable to parse this transcription into structured format"
+        summary = self._get_empty_summary()
+        text_lower = response_text.lower()
+        
+        # Simple keyword extraction patterns
+        patterns = {
+            'onsite_contact': ['met with', 'on-site contact', 'front desk', 'manager', 'receptionist'],
+            'support_contact': ['support', 'help desk', 'it support', 'technical support', 'worked with'],
+            'work_completed': ['replaced', 'fixed', 'repaired', 'installed', 'completed', 'work done'],
+            'location': ['location', 'site', 'building', 'office', 'address'],
+            'technician_name': ['i am', 'my name is', 'this is', 'technician']
         }
         
+        for field, keywords in patterns.items():
+            for keyword in keywords:
+                if keyword in text_lower:
+                    # Try to extract surrounding context
+                    idx = text_lower.find(keyword)
+                    if idx != -1:
+                        # Get surrounding words for context
+                        start = max(0, idx - 50)
+                        end = min(len(response_text), idx + 100)
+                        context = response_text[start:end].strip()
+                        summary[field] = context
+                        break
+        
+        return summary
+    
+    def _get_empty_summary(self) -> Dict[str, Any]:
+        """Get empty summary structure with all required fields"""
         return {
-            'summary': fallback_summary,
-            'timestamp': datetime.now().isoformat(),
-            'model_used': settings.gpt_model,
-            'warning': 'Fallback summary used due to parsing error'
+            "onsite_contact": "Not mentioned",
+            "support_contact": "Not mentioned", 
+            "work_completed": "Not mentioned",
+            "delays": "Not mentioned",
+            "troubleshooting_steps": "Not mentioned",
+            "scope_completed": "Not mentioned",
+            "released_by": "Not mentioned",
+            "release_code": "Not mentioned",
+            "return_tracking": "Not mentioned",
+            "expenses": "Not mentioned",
+            "materials_used": "Not mentioned",
+            "out_of_scope_work": "Not mentioned",
+            "photos_uploaded": "Not mentioned",
+            "location": "Not mentioned",
+            "datetime": "Not mentioned",
+            "technician_name": "Not mentioned"
         }

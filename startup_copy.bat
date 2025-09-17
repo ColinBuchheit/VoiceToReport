@@ -1,0 +1,119 @@
+@echo off
+echo ========================================
+echo VOICE TO REPORT - AUTOMATED STARTUP
+echo ========================================
+echo.
+echo This combines the working parts of both versions:
+echo - Backend setup in main window (like version 1)
+echo - Frontend in separate window (like version 2)  
+echo - All windows stay open for debugging
+echo - FULLY AUTOMATED - No manual intervention required
+echo - Includes ngrok URL update (the missing piece)
+echo - FIXED: Expo SDK 54 compatibility
+echo.
+
+echo Step 1: Stop existing services
+taskkill /f /im python.exe >nul 2>&1
+taskkill /f /im node.exe >nul 2>&1
+taskkill /f /im ngrok.exe >nul 2>&1
+echo ✅ Services stopped
+
+echo.
+echo Step 2: Backend setup (in main window like working version)
+cd backend
+echo 📁 In backend directory: %CD%
+
+echo.
+echo Step 3: Check if venv exists
+if exist "venv" (
+    echo ✅ venv exists
+) else (
+    echo 📦 Creating venv...
+    python -m venv venv
+    echo ✅ venv created
+)
+
+echo.
+echo Step 4: Install backend deps
+call venv\Scripts\python.exe -m pip install -r requirements.txt >nul 2>&1
+echo ✅ Backend deps done
+
+echo.
+echo Step 5: Start backend (EXACT same command that worked)
+start "Backend Server" cmd /k "venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+echo ✅ Backend started in separate window
+cd ..
+
+echo ⏱️ Waiting for backend to settle...
+timeout /t 8 /nobreak >nul
+
+echo.
+echo Step 6: Start ngrok (EXACT same command)
+start "Ngrok Tunnel" cmd /k "ngrok http 8000"
+echo ✅ Ngrok started in separate window
+
+echo ⏱️ Waiting for ngrok tunnel to establish...
+timeout /t 10 /nobreak >nul
+
+echo.
+echo Step 6.5: Update API configuration (THE MISSING PIECE!)
+echo 📝 Updating frontend configuration with current ngrok URL...
+backend\venv\Scripts\python.exe ngrok_manager.py --update 2>nul
+if errorlevel 1 (
+    echo ⚠️ Auto-config failed - check ngrok dashboard: http://localhost:4040
+    echo 💡 Manual command if needed: python ngrok_manager.py --update
+) else (
+    echo ✅ Frontend configuration updated with current ngrok URL
+)
+
+echo.
+echo Step 7: UPDATED Frontend setup - Fix Expo SDK compatibility
+echo 📱 Starting frontend with SDK 54 compatibility fix...
+start "Frontend Setup" cmd /k "cd /d %CD%\voice-report-app && echo Fixing Expo SDK compatibility... && echo Installing correct Expo SDK version... && npx expo install --fix && echo SDK compatibility fixed && echo Installing remaining dependencies... && npm install && echo Frontend deps done && echo Starting Expo... && npx expo start --tunnel"
+echo ✅ Frontend started in separate window with SDK fix
+
+echo ⏱️ Final setup complete...
+timeout /t 3 /nobreak >nul
+
+echo.
+echo ========================================
+echo             ALL DONE!
+echo ========================================
+echo.
+echo ✅ FIXED: Expo SDK compatibility issue resolved
+echo.
+echo Check the individual windows:
+echo - Backend Server: Should show "Uvicorn running on http://0.0.0.0:8000"
+echo - Ngrok Tunnel: Should show public URL and dashboard at http://localhost:4040
+echo - Frontend Setup: Should show QR code for mobile testing (after SDK fix)
+echo.
+echo Services:
+echo Backend API: http://localhost:8000
+echo Backend Health: http://localhost:8000/health
+echo Backend Docs: http://localhost:8000/docs
+echo Ngrok Dashboard: http://localhost:4040
+echo Frontend: Look for QR code in Frontend window
+echo.
+echo Mobile Testing:
+echo 1. Install Expo Go app on your phone (make sure it's SDK 54+ compatible)
+echo 2. Wait for SDK compatibility fix to complete in Frontend window
+echo 3. Scan QR code from Frontend window
+echo 4. Test voice recording in the app
+echo.
+echo IMPORTANT: 
+echo - Your OpenAI API key must be set in backend\.env
+echo - Ngrok URL has been automatically updated in frontend config
+echo - SDK compatibility fix may take 1-2 minutes on first run
+echo - If mobile app can't connect, wait for SDK fix completion and restart the app
+echo.
+echo NGROK URL MANAGEMENT:
+echo - Current ngrok URL is automatically detected and configured
+echo - To manually get current URL: python ngrok_manager.py --url
+echo - To manually update config: python ngrok_manager.py --update
+echo - Dashboard shows current URL: http://localhost:4040
+echo.
+echo All service windows will stay open for debugging.
+echo You can close this main window safely.
+echo.
+echo Press any key to close this window...
+pause >nul

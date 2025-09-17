@@ -64,7 +64,6 @@ def validate_services():
         from config import settings
         from services.transcription import TranscriptionService
         from services.summarization import SummarizationService
-        from services.pdf_generator import PDFGenerator
         from models import TranscribeRequest, SummarizeRequest, GeneratePDFRequest
         
         print("✅ All services validated")

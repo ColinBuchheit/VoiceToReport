@@ -1,3 +1,4 @@
+// voice-report-app/App.tsx - FIXED VERSION with correct type imports
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -6,8 +7,9 @@ import { StatusBar } from 'react-native';
 import HomeScreen from './screens/HomeScreen';
 import TranscriptScreen from './screens/TranscriptScreen';
 import SummaryScreen from './screens/SummaryScreen';
-import PDFPreviewScreen from './screens/PDFPreviewScreen';
+import { CloseoutSummary } from './types/aiAgent'; // FIXED: Import from correct types file
 
+// Navigation types to match API structure
 export type RootStackParamList = {
   Home: undefined;
   Transcript: {
@@ -16,17 +18,7 @@ export type RootStackParamList = {
   };
   Summary: {
     transcription: string;
-    summary: {
-      taskDescription: string;
-      location?: string;
-      datetime?: string;
-      outcome?: string;
-      notes?: string;
-    };
-  };
-  PDFPreview: {
-    pdfUrl: string;
-    summary: any;
+    summary: CloseoutSummary;
   };
 };
 
@@ -62,11 +54,6 @@ export default function App() {
             name="Summary" 
             component={SummaryScreen} 
             options={{ title: 'Summary' }}
-          />
-          <Stack.Screen 
-            name="PDFPreview" 
-            component={PDFPreviewScreen} 
-            options={{ title: 'PDF Report' }}
           />
         </Stack.Navigator>
       </NavigationContainer>

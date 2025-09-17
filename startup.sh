@@ -1,30 +1,27 @@
 #!/bin/bash
 
-# Voice-to-Report App Complete Startup Automation
-# Place this file in your project root directory
-# Make executable with: chmod +x startup.sh
-
-set -e  # Exit on any error
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Enhanced Voice-to-Report App Startup Script
+# This script ensures proper gateway routing and API configuration
 
 # Configuration
 BACKEND_DIR="backend"
 FRONTEND_DIR="voice-report-app"
 BACKEND_PORT=8000
-NGROK_CONFIG_FILE=".ngrok_url"
-API_CONFIG_FILE="${FRONTEND_DIR}/services/api-config.ts"
+NGROK_CONFIG_FILE="ngrok_url.txt"
 
-echo -e "${BLUE}🚀 Voice-to-Report App Startup Automation${NC}"
-echo "================================================"
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
 
-# Function to print colored output
-print_status() {
+# Logging functions
+print_info() {
+    echo -e "${BLUE}ℹ️  $1${NC}"
+}
+
+print_success() {
     echo -e "${GREEN}✅ $1${NC}"
 }
 
@@ -36,40 +33,57 @@ print_error() {
     echo -e "${RED}❌ $1${NC}"
 }
 
-print_info() {
-    echo -e "${BLUE}ℹ️  $1${NC}"
+print_status() {
+    echo -e "${GREEN}🟢 $1${NC}"
 }
 
-# Function to check if a command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-# Check prerequisites
+# Function to check prerequisites
 check_prerequisites() {
     print_info "Checking prerequisites..."
     
-    if ! command_exists python3; then
+    local missing=false
+    
+    if ! command -v python3 &> /dev/null; then
         print_error "Python 3 is not installed"
-        exit 1
+        missing=true
     fi
     
-    if ! command_exists node; then
+    if ! command -v node &> /dev/null; then
         print_error "Node.js is not installed"
-        exit 1
+        missing=true
     fi
     
-    if ! command_exists npm; then
+    if ! command -v npm &> /dev/null; then
         print_error "npm is not installed"
+        missing=true
+    fi
+    
+    if ! command -v ngrok &> /dev/null; then
+        print_error "ngrok is not installed"
+        missing=true
+    fi
+    
+    if [ "$missing" = true ]; then
+        print_error "Missing prerequisites. Please install the required software."
         exit 1
     fi
     
-    if ! command_exists ngrok; then
-        print_error "ngrok is not installed. Please install it from https://ngrok.com/"
-        exit 1
-    fi
+    print_success "All prerequisites found"
+}
+
+# Function to stop existing services
+stop_existing_services() {
+    print_info "Stopping existing services..."
     
-    print_status "All prerequisites are installed"
+    # Kill existing processes
+    pkill -f "uvicorn main:app" || true
+    pkill -f "ngrok" || true
+    pkill -f "expo start" || true
+    
+    # Remove PID files
+    rm -f backend.pid ngrok.pid frontend.pid
+    
+    print_success "Existing services stopped"
 }
 
 # Function to start backend
@@ -78,20 +92,22 @@ start_backend() {
     
     cd "$BACKEND_DIR"
     
-    # Check if virtual environment exists, create if not
+    # Check for Python virtual environment
     if [ ! -d "venv" ]; then
-        print_info "Creating virtual environment..."
+        print_info "Creating Python virtual environment..."
         python3 -m venv venv
     fi
     
     # Activate virtual environment
     source venv/bin/activate
     
-    # Install dependencies
-    print_info "Installing Python dependencies..."
-    pip install -r requirements.txt > /dev/null 2>&1
+    # Install requirements
+    if [ -f "requirements.txt" ]; then
+        print_info "Installing Python dependencies..."
+        pip install -r requirements.txt > /dev/null 2>&1
+    fi
     
-    # Check .env file
+    # Check for .env file
     if [ ! -f ".env" ]; then
         if [ -f ".env.example" ]; then
             cp .env.example .env
@@ -104,7 +120,7 @@ start_backend() {
     
     # Start the backend server in background
     print_info "Starting FastAPI server on port $BACKEND_PORT..."
-    nohup python -m uvicorn main:app --host 0.0.0.0 --port $BACKEND_PORT --reload > backend.log 2>&1 &
+    nohup python -m uvicorn main:app --host 0.0.0.0 --port $BACKEND_PORT --reload > ../backend.log 2>&1 &
     BACKEND_PID=$!
     echo $BACKEND_PID > ../backend.pid
     
@@ -114,9 +130,10 @@ start_backend() {
     
     # Check if backend is running
     if curl -s http://localhost:$BACKEND_PORT/health > /dev/null; then
-        print_status "Backend server started successfully (PID: $BACKEND_PID)"
+        print_success "Backend server started successfully (PID: $BACKEND_PID)"
     else
-        print_error "Failed to start backend server"
+        print_error "Failed to start backend server. Check backend.log for details."
+        cat ../backend.log
         exit 1
     fi
     
@@ -138,180 +155,41 @@ start_ngrok() {
     
     # Wait for ngrok to start and get URL
     print_info "Waiting for ngrok to establish tunnel..."
-    sleep 5
+    sleep 8
     
-    # Use Python script to get ngrok URL
-    python3 ngrok_manager.py --url > /dev/null
+    # Use Python script to get ngrok URL and update config
+    python3 ngrok_manager.py --update
     if [ $? -eq 0 ]; then
         NGROK_URL=$(python3 ngrok_manager.py --url)
-        echo "$NGROK_URL" > "$NGROK_CONFIG_FILE"
-        print_status "Ngrok tunnel established: $NGROK_URL"
+        if [ ! -z "$NGROK_URL" ]; then
+            echo "$NGROK_URL" > "$NGROK_CONFIG_FILE"
+            print_success "Ngrok tunnel established: $NGROK_URL"
+        else
+            print_warning "Ngrok tunnel started but URL not yet available"
+        fi
     else
-        print_error "Failed to get ngrok URL"
-        exit 1
+        print_warning "Failed to get ngrok URL immediately - it may still be starting"
     fi
 }
 
 # Function to update frontend configuration
 update_frontend_config() {
-    print_info "Updating frontend configuration with ngrok URL..."
+    print_info "Updating frontend configuration with current URLs..."
+    
+    # Ensure frontend directory exists
+    if [ ! -d "$FRONTEND_DIR" ]; then
+        print_error "Frontend directory '$FRONTEND_DIR' not found"
+        exit 1
+    fi
     
     # Use Python script to update configuration
     python3 ngrok_manager.py --update
     
-    print_status "Frontend configuration updated"
-}
-
-# Function to update the main API service file
-update_api_service() {
-    print_info "Updating API service to use dynamic configuration..."
-    
-    # Backup original file if it doesn't have .backup extension
-    if [ -f "${FRONTEND_DIR}/services/api.ts" ] && [ ! -f "${FRONTEND_DIR}/services/api.ts.backup" ]; then
-        cp "${FRONTEND_DIR}/services/api.ts" "${FRONTEND_DIR}/services/api.ts.backup"
+    if [ $? -eq 0 ]; then
+        print_success "Frontend configuration updated"
+    else
+        print_warning "Frontend configuration update had issues"
     fi
-    
-    # Create updated api.ts file
-    cat > "${FRONTEND_DIR}/services/api.ts" << 'EOF'
-import axios from 'axios';
-import * as FileSystem from 'expo-file-system';
-import { API_CONFIG } from './api-config';
-
-interface TranscriptionResponse {
-  transcription: string;
-}
-
-interface SummaryResponse {
-  summary: {
-    taskDescription: string;
-    location?: string;
-    datetime?: string;
-    outcome?: string;
-    notes?: string;
-  };
-}
-
-// Test network connectivity to all possible backends
-async function findWorkingBackend(): Promise<string | null> {
-  console.log('🔍 Testing backend connectivity...');
-  
-  for (const url of API_CONFIG.BACKEND_URLS) {
-    try {
-      console.log(`Testing: ${url}`);
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-      
-      const response = await fetch(`${url}/health`, {
-        method: 'GET',
-        signal: controller.signal,
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'VoiceReportApp/1.0',
-        },
-      });
-      
-      clearTimeout(timeoutId);
-      
-      console.log(`📡 ${url} responded with status: ${response.status}`);
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log(`✅ Backend found at ${url}:`, data);
-        return url;
-      } else {
-        console.log(`❌ ${url} returned status ${response.status}`);
-      }
-      
-    } catch (error) {
-      console.log(`❌ ${url} failed:`, error instanceof Error ? error.message : String(error));
-    }
-  }
-  
-  console.log('❌ No working backend found');
-  return null;
-}
-
-export async function transcribeAudio(audioUri: string): Promise<TranscriptionResponse> {
-  const workingBackendUrl = await findWorkingBackend();
-  
-  if (!workingBackendUrl) {
-    throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
-  }
-
-  const formData = new FormData();
-  formData.append('audio', {
-    uri: audioUri,
-    type: 'audio/m4a',
-    name: 'audio.m4a',
-  } as any);
-
-  try {
-    console.log(`🎙️ Transcribing audio using: ${workingBackendUrl}`);
-    const response = await axios.post(`${workingBackendUrl}/transcribe`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      timeout: 60000,
-    });
-
-    return response.data;
-  } catch (error) {
-    console.error('Transcription failed:', error);
-    throw new Error('Failed to transcribe audio. Please check your connection and try again.');
-  }
-}
-
-export async function summarizeText(transcription: string): Promise<SummaryResponse> {
-  const workingBackendUrl = await findWorkingBackend();
-  
-  if (!workingBackendUrl) {
-    throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
-  }
-
-  try {
-    console.log(`📝 Summarizing text using: ${workingBackendUrl}`);
-    const response = await axios.post(`${workingBackendUrl}/summarize`, {
-      text: transcription
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      timeout: 30000,
-    });
-
-    return response.data;
-  } catch (error) {
-    console.error('Summarization failed:', error);
-    throw new Error('Failed to summarize text. Please check your connection and try again.');
-  }
-}
-
-export async function generatePDF(summary: any): Promise<{ pdf_url: string }> {
-  const workingBackendUrl = await findWorkingBackend();
-  
-  if (!workingBackendUrl) {
-    throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
-  }
-
-  try {
-    console.log(`📄 Generating PDF using: ${workingBackendUrl}`);
-    const response = await axios.post(`${workingBackendUrl}/generate-pdf`, summary, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      timeout: 30000,
-    });
-
-    return response.data;
-  } catch (error) {
-    console.error('PDF generation failed:', error);
-    throw new Error('Failed to generate PDF. Please check your connection and try again.');
-  }
-}
-EOF
-    
-    print_status "API service updated with dynamic configuration"
 }
 
 # Function to start frontend
@@ -324,17 +202,37 @@ start_frontend() {
     if [ ! -d "node_modules" ]; then
         print_info "Installing frontend dependencies..."
         npm install
+        if [ $? -ne 0 ]; then
+            print_error "Failed to install frontend dependencies"
+            exit 1
+        fi
+    fi
+    
+    # Check if Expo CLI is available
+    if ! command -v expo &> /dev/null && ! npx expo --version &> /dev/null; then
+        print_info "Installing Expo CLI..."
+        npm install -g @expo/cli
     fi
     
     # Start the frontend in TUNNEL mode for mobile connectivity
     print_info "Starting Expo development server in TUNNEL mode..."
     print_info "This enables mobile device connectivity through Expo's tunneling service"
-    npx expo start --tunnel &
+    
+    # Start expo in background
+    nohup npx expo start --tunnel --clear > ../frontend.log 2>&1 &
     FRONTEND_PID=$!
     echo $FRONTEND_PID > ../frontend.pid
     
     cd ..
-    print_status "Frontend started in tunnel mode (PID: $FRONTEND_PID)"
+    print_success "Frontend started in tunnel mode (PID: $FRONTEND_PID)"
+}
+
+# Function to test connectivity
+test_connectivity() {
+    print_info "Testing backend connectivity..."
+    
+    # Use the Python script to test all URLs
+    python3 ngrok_manager.py --test
 }
 
 # Function to display connection info
@@ -343,7 +241,15 @@ display_info() {
     echo -e "${GREEN}🎉 Startup Complete!${NC}"
     echo "=================================="
     echo -e "${BLUE}Backend:${NC} http://localhost:$BACKEND_PORT"
-    echo -e "${BLUE}Ngrok URL:${NC} $NGROK_URL"
+    
+    # Try to get ngrok URL
+    NGROK_URL=$(python3 ngrok_manager.py --url 2>/dev/null)
+    if [ ! -z "$NGROK_URL" ]; then
+        echo -e "${BLUE}Ngrok URL:${NC} $NGROK_URL"
+    else
+        echo -e "${YELLOW}Ngrok URL:${NC} Still establishing..."
+    fi
+    
     echo -e "${BLUE}Frontend:${NC} Expo DevTools (tunnel mode enabled)"
     echo -e "${BLUE}Ngrok Dashboard:${NC} http://localhost:4040"
     echo ""
@@ -351,15 +257,16 @@ display_info() {
     echo "1. Wait for Expo tunnel to establish (may take 30-60 seconds)"
     echo "2. Open Expo Go app on your phone"
     echo "3. Scan the QR code from the Expo DevTools"
-    echo "4. The app will connect through Expo's tunnel service"
-    echo "5. Your app will automatically use the ngrok URL for API calls"
+    echo "4. The app will automatically find the working backend URL"
     echo ""
-    echo -e "${YELLOW}⚠️ Note: First tunnel connection may be slow, please be patient${NC}"
+    echo -e "${YELLOW}🔧 Troubleshooting:${NC}"
+    echo "• Check backend.log if backend issues occur"
+    echo "• Check frontend.log if Expo issues occur" 
+    echo "• Check ngrok.log if tunnel issues occur"
+    echo "• Visit http://localhost:4040 for ngrok dashboard"
+    echo "• Run 'python3 ngrok_manager.py --test' to test connectivity"
     echo ""
-    echo -e "${YELLOW}🔄 To restart ngrok tunnel:${NC}"
-    echo "./startup.sh --restart-ngrok"
-    echo ""
-    echo -e "${YELLOW}🛑 To stop all services:${NC}"
+    echo -e "${BLUE}🛑 To stop all services:${NC}"
     echo "./startup.sh --stop"
 }
 
@@ -369,84 +276,197 @@ stop_services() {
     
     # Stop backend
     if [ -f "backend.pid" ]; then
-        kill $(cat backend.pid) 2>/dev/null || true
-        rm backend.pid
+        BACKEND_PID=$(cat backend.pid)
+        kill $BACKEND_PID 2>/dev/null || true
+        rm -f backend.pid
+        print_success "Backend stopped"
     fi
     
     # Stop ngrok
     if [ -f "ngrok.pid" ]; then
-        kill $(cat ngrok.pid) 2>/dev/null || true
-        rm ngrok.pid
+        NGROK_PID=$(cat ngrok.pid)
+        kill $NGROK_PID 2>/dev/null || true
+        rm -f ngrok.pid
+        print_success "Ngrok stopped"
     fi
     
     # Stop frontend
     if [ -f "frontend.pid" ]; then
-        kill $(cat frontend.pid) 2>/dev/null || true
-        rm frontend.pid
+        FRONTEND_PID=$(cat frontend.pid)
+        kill $FRONTEND_PID 2>/dev/null || true
+        rm -f frontend.pid
+        print_success "Frontend stopped"
     fi
     
     # Kill any remaining processes
     pkill -f "uvicorn main:app" || true
-    pkill -f ngrok || true
+    pkill -f "ngrok" || true
     pkill -f "expo start" || true
     
-    print_status "All services stopped"
+    print_success "All services stopped"
 }
 
-# Function to restart ngrok only
+# Function to restart just ngrok
 restart_ngrok() {
     print_info "Restarting ngrok tunnel..."
     
     # Stop ngrok
     if [ -f "ngrok.pid" ]; then
-        kill $(cat ngrok.pid) 2>/dev/null || true
-        rm ngrok.pid
+        NGROK_PID=$(cat ngrok.pid)
+        kill $NGROK_PID 2>/dev/null || true
+        rm -f ngrok.pid
     fi
     pkill -f ngrok || true
+    sleep 2
     
-    # Start ngrok again
+    # Start ngrok
     start_ngrok
     update_frontend_config
     
-    print_status "Ngrok tunnel restarted with new URL: $NGROK_URL"
+    print_success "Ngrok restarted and configuration updated"
 }
 
-# Main execution
-case "${1:-}" in
-    --stop)
-        stop_services
-        exit 0
-        ;;
-    --restart-ngrok)
-        restart_ngrok
-        exit 0
-        ;;
-    --help)
-        echo "Usage: $0 [--stop|--restart-ngrok|--help]"
-        echo "  --stop          Stop all running services"
-        echo "  --restart-ngrok Restart ngrok tunnel with new URL"
-        echo "  --help          Show this help message"
-        exit 0
-        ;;
-esac
+# Function to show help
+show_help() {
+    echo ""
+    echo -e "${BLUE}Voice-to-Report App Startup Script${NC}"
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  --stop              Stop all running services"
+    echo "  --restart-ngrok     Restart ngrok tunnel with new URL"
+    echo "  --test              Test backend connectivity"
+    echo "  --status            Show service status"
+    echo "  --help              Show this help message"
+    echo ""
+    echo "Default (no options): Start all services"
+    echo ""
+}
 
-# Stop any existing services first
-stop_services
+# Function to show service status
+show_status() {
+    echo ""
+    echo -e "${BLUE}Service Status:${NC}"
+    echo "=============="
+    
+    # Check backend
+    if [ -f "backend.pid" ] && kill -0 $(cat backend.pid) 2>/dev/null; then
+        echo -e "${GREEN}Backend: Running (PID: $(cat backend.pid))${NC}"
+        if curl -s http://localhost:$BACKEND_PORT/health > /dev/null; then
+            echo -e "  └─ Health check: ${GREEN}OK${NC}"
+        else
+            echo -e "  └─ Health check: ${RED}Failed${NC}"
+        fi
+    else
+        echo -e "${RED}Backend: Not running${NC}"
+    fi
+    
+    # Check ngrok
+    if [ -f "ngrok.pid" ] && kill -0 $(cat ngrok.pid) 2>/dev/null; then
+        echo -e "${GREEN}Ngrok: Running (PID: $(cat ngrok.pid))${NC}"
+        NGROK_URL=$(python3 ngrok_manager.py --url 2>/dev/null)
+        if [ ! -z "$NGROK_URL" ]; then
+            echo -e "  └─ URL: ${GREEN}$NGROK_URL${NC}"
+        else
+            echo -e "  └─ URL: ${YELLOW}Not available yet${NC}"
+        fi
+    else
+        echo -e "${RED}Ngrok: Not running${NC}"
+    fi
+    
+    # Check frontend
+    if [ -f "frontend.pid" ] && kill -0 $(cat frontend.pid) 2>/dev/null; then
+        echo -e "${GREEN}Frontend: Running (PID: $(cat frontend.pid))${NC}"
+    else
+        echo -e "${RED}Frontend: Not running${NC}"
+    fi
+    
+    echo ""
+}
 
-# Run the startup sequence
-check_prerequisites
-start_backend
-start_ngrok
-update_frontend_config
-update_api_service
-start_frontend
-display_info
+# Main execution logic
+main() {
+    echo ""
+    echo -e "${BLUE}🚀 Voice-to-Report App Manager${NC}"
+    echo "==============================="
+    
+    case "${1:-}" in
+        --stop)
+            stop_services
+            exit 0
+            ;;
+        --restart-ngrok)
+            restart_ngrok
+            display_info
+            exit 0
+            ;;
+        --test)
+            test_connectivity
+            exit 0
+            ;;
+        --status)
+            show_status
+            exit 0
+            ;;
+        --help)
+            show_help
+            exit 0
+            ;;
+        "")
+            # Default: start all services
+            ;;
+        *)
+            print_error "Unknown option: $1"
+            show_help
+            exit 1
+            ;;
+    esac
+    
+    # Start all services
+    check_prerequisites
+    stop_existing_services
+    start_backend
+    start_ngrok
+    update_frontend_config
+    start_frontend
+    
+    # Wait a moment for services to fully initialize
+    sleep 3
+    
+    # Test connectivity
+    test_connectivity
+    
+    # Display final information
+    display_info
+    
+    # Keep script running to show real-time status
+    echo ""
+    echo -e "${YELLOW}⏳ Services are starting up...${NC}"
+    echo "Press Ctrl+C to stop monitoring (services will continue running)"
+    echo ""
+    
+    # Monitor for the first 60 seconds
+    for i in {1..12}; do
+        sleep 5
+        echo -ne "${BLUE}⏱️  Monitoring... (${i}0s)${NC}\r"
+        
+        # Check if ngrok URL is available now
+        if [ $i -eq 6 ]; then  # After 30 seconds
+            NGROK_URL=$(python3 ngrok_manager.py --url 2>/dev/null)
+            if [ ! -z "$NGROK_URL" ]; then
+                echo ""
+                print_success "Ngrok URL now available: $NGROK_URL"
+                python3 ngrok_manager.py --update
+                print_success "Frontend configuration refreshed"
+            fi
+        fi
+    done
+    
+    echo ""
+    echo -e "${GREEN}✅ All services should now be fully operational!${NC}"
+    echo ""
+    show_status
+}
 
-# Keep script running
-print_info "Press Ctrl+C to stop all services"
-trap stop_services INT TERM
-
-# Wait for user interrupt
-while true; do
-    sleep 1
-done
+# Run main function with all arguments
+main "$@"

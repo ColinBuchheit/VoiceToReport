@@ -1,252 +1,355 @@
-import axios from 'axios';
-import * as FileSystem from 'expo-file-system';
+// voice-report-app/services/api.ts - COMPLETE HYBRID VERSION (PRODUCTION READY)
+import axios, { AxiosError } from 'axios';
+import { File, Paths } from 'expo-file-system'; // ✅ Modern API for file objects & paths
+import * as FileSystemLegacy from 'expo-file-system/legacy'; // ✅ Legacy API for base64 operations
+import { API_CONFIG } from './api-config';
+import { TranscriptionResponse, SummaryResponse, EmailResponse, CloseoutSummary, ApiError } from '../types/api';
 
-// Try to import API_CONFIG, fallback to default config if not available
-let API_CONFIG: {
-  NGROK_URL: string;
-  LOCAL_URL: string;
-  BACKEND_URLS: string[];
-};
+// Simple backend connection cache
+let cachedBackendUrl: string | null = null;
+let lastCacheTime = 0;
+const CACHE_DURATION = 60000; // 1 minute
 
-try {
-  const config = require('./api-config');
-  API_CONFIG = config.API_CONFIG;
-} catch (error) {
-  console.warn('⚠️ API config not found, using fallback configuration');
-  API_CONFIG = {
-    NGROK_URL: 'http://localhost:8000',
-    LOCAL_URL: 'http://localhost:8000',
-    BACKEND_URLS: [
-      'http://localhost:8000'
-    ]
-  };
-}
-
-interface TranscriptionResponse {
-  transcription: string;
-}
-
-interface SummaryResponse {
-  summary: {
-    taskDescription: string;
-    location?: string;
-    datetime?: string;
-    outcome?: string;
-    notes?: string;
-  };
-}
-
-// Test network connectivity to all possible backends
-async function findWorkingBackend(): Promise<string | null> {
+// Core backend discovery function
+async function getWorkingBackend(): Promise<string> {
+  const now = Date.now();
+  
+  // Return cached URL if still fresh
+  if (cachedBackendUrl && (now - lastCacheTime) < CACHE_DURATION) {
+    return cachedBackendUrl;
+  }
+  
   console.log('🔍 Testing backend connectivity...');
   
+  // Test each backend URL
   for (const url of API_CONFIG.BACKEND_URLS) {
     try {
-      console.log(`Testing: ${url}`);
+      console.log(`📡 Testing: ${url}`);
       
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-      
-      const response = await fetch(`${url}/health`, {
-        method: 'GET',
-        signal: controller.signal,
+      const response = await axios.get(`${url}/health`, {
+        timeout: 10000,
         headers: {
           'Accept': 'application/json',
-          'User-Agent': 'VoiceReportApp/1.0',
+          'User-Agent': 'VoiceReportApp/2.0',
+          'ngrok-skip-browser-warning': 'true',
+          'Cache-Control': 'no-cache',
         },
       });
       
-      clearTimeout(timeoutId);
-      
-      console.log(`📡 ${url} responded with status: ${response.status}`);
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log(`✅ Backend found at ${url}:`, data);
+      if (response.status === 200) {
+        console.log(`✅ Backend healthy: ${url}`);
+        cachedBackendUrl = url;
+        lastCacheTime = now;
         return url;
-      } else {
-        console.log(`❌ ${url} returned status ${response.status}`);
       }
-      
     } catch (error) {
-      console.log(`❌ ${url} failed:`, error instanceof Error ? error.message : String(error));
+      console.log(`❌ Backend failed: ${url}`);
+      continue;
     }
   }
   
-  console.log('❌ No working backend found');
-  return null;
+  cachedBackendUrl = null;
+  throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
 }
 
-export async function transcribeAudio(audioUri: string): Promise<TranscriptionResponse> {
-  const workingBackendUrl = await findWorkingBackend();
+// Common request configuration
+const createRequestConfig = (timeout: number = API_CONFIG.CONNECTION.TIMEOUT) => ({
+  headers: {
+    'Content-Type': 'application/json',
+    'User-Agent': 'VoiceReportApp/2.0',
+    'ngrok-skip-browser-warning': 'true',
+  },
+  timeout,
+});
+
+// Enhanced error handling
+const handleApiError = (error: any, operation: string): Error => {
+  console.error(`${operation} failed:`, error);
+  cachedBackendUrl = null; // Clear cache on error
   
-  if (!workingBackendUrl) {
-    throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
+  if (axios.isAxiosError(error)) {
+    const axiosError = error as AxiosError<ApiError>;
+    
+    // Handle specific HTTP status codes
+    if (axiosError.response?.status === 503) {
+      return new Error(`${operation} service unavailable - check OpenAI API configuration`);
+    }
+    if (axiosError.response?.status === 400) {
+      return new Error(`Invalid request - ${axiosError.response.data?.detail || 'bad request'}`);
+    }
+    if (axiosError.response?.status === 413) {
+      return new Error('File too large (max 25MB)');
+    }
+    if (axiosError.response?.status === 500) {
+      return new Error(`Server error during ${operation} - please try again`);
+    }
+    
+    // Handle detailed error responses
+    if (axiosError.response?.data?.detail) {
+      return new Error(`${operation} error: ${axiosError.response.data.detail}`);
+    }
+    
+    // Handle network errors
+    if (axiosError.code === 'NETWORK_ERROR' || axiosError.code === 'ECONNREFUSED') {
+      return new Error('Network connection failed - check your internet connection');
+    }
   }
+  
+  return new Error(`Failed to ${operation}. Please check your connection and try again.`);
+};
+
+// =============================================================================
+// CORE API FUNCTIONS
+// =============================================================================
+
+export async function transcribeAudio(audioUri: string): Promise<TranscriptionResponse> {
+  const workingBackendUrl = await getWorkingBackend();
 
   try {
     console.log(`🎙️ Transcribing audio using: ${workingBackendUrl}`);
     
-    // Read audio file as base64
-    const base64Audio = await FileSystem.readAsStringAsync(audioUri, {
-      encoding: FileSystem.EncodingType.Base64,
+    // ✅ HYBRID - Use modern API for file info, legacy for base64 reading
+    const audioFile = new File(audioUri);
+    const base64Audio = await FileSystemLegacy.readAsStringAsync(audioUri, {
+      encoding: FileSystemLegacy.EncodingType.Base64,
     });
+    console.log(`📁 Audio file: ${audioFile.name} (${audioFile.size} bytes), base64: ${base64Audio.length} chars`);
 
-    console.log(`📁 Audio file size: ${base64Audio.length} characters (base64)`);
+    // Extract format from filename
+    const format = audioFile.name.split('.').pop()?.toLowerCase() || 'm4a';
+    
+    console.log('📤 Sending transcription request...');
 
-    // Determine audio format from file extension
-    const format = audioUri.split('.').pop()?.toLowerCase() || 'm4a';
-    
-    // Create request payload matching backend expectations
-    const payload = {
-      audio: base64Audio,
-      format: format
-    };
-    
-    const response = await axios.post(`${workingBackendUrl}/transcribe`, payload, {
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'VoiceReportApp/1.0',
+    const response = await axios.post(
+      `${workingBackendUrl}/transcribe`,
+      {
+        audio: base64Audio,
+        format: format,
       },
-      timeout: 60000,
-    });
+      createRequestConfig()
+    );
 
     console.log('✅ Transcription successful');
     return response.data;
   } catch (error) {
-    console.error('Transcription failed:', error);
-    
-    if (axios.isAxiosError(error)) {
-      if (error.response?.status === 400) {
-        throw new Error('Invalid audio format or data');
-      }
-      if (error.response?.status === 500) {
-        throw new Error('Server error during transcription');
-      }
-      if (error.response?.data?.detail) {
-        throw new Error(`Backend error: ${error.response.data.detail}`);
-      }
-    }
-    
-    throw new Error('Failed to transcribe audio. Please check your connection and try again.');
+    throw handleApiError(error, 'Audio transcription');
   }
 }
 
-export async function generateSummary(transcription: string): Promise<SummaryResponse> {
-  const workingBackendUrl = await findWorkingBackend();
-  
-  if (!workingBackendUrl) {
-    throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
-  }
+export async function summarizeTranscription(transcription: string): Promise<SummaryResponse> {
+  const workingBackendUrl = await getWorkingBackend();
 
   try {
-    console.log(`📝 Generating summary using: ${workingBackendUrl}`);
-    
-    // Create request payload matching backend expectations (/summarize endpoint)
-    const payload = {
-      transcription: transcription
-    };
-    
-    const response = await axios.post(`${workingBackendUrl}/summarize`, payload, {
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'VoiceReportApp/1.0',
-      },
-      timeout: 30000,
-    });
+    console.log(`📝 Summarizing transcription using: ${workingBackendUrl}`);
+    console.log(`📋 Transcription length: ${transcription.length} characters`);
 
-    console.log('✅ Summary generation successful');
+    const response = await axios.post(
+      `${workingBackendUrl}/summarize`,
+      { transcription },
+      createRequestConfig()
+    );
+
+    console.log('✅ Summarization successful');
     return response.data;
   } catch (error) {
-    console.error('Summary generation failed:', error);
-    throw new Error('Failed to generate summary. Please check your connection and try again.');
+    throw handleApiError(error, 'Transcription summarization');
   }
 }
 
-// Alias for backward compatibility
-export async function summarizeText(transcription: string): Promise<SummaryResponse> {
-  return generateSummary(transcription);
+export async function generateSummary(transcription: string): Promise<CloseoutSummary> {
+  const workingBackendUrl = await getWorkingBackend();
+
+  try {
+    console.log(`🔄 Generating summary from transcription: ${transcription.substring(0, 50)}...`);
+    
+    const response = await axios.post(`${workingBackendUrl}/summarize`, {
+      transcription: transcription
+    }, createRequestConfig());
+
+    console.log('✅ Summary generation successful');
+    return response.data.summary || response.data;
+  } catch (error) {
+    throw handleApiError(error, 'summary generation');
+  }
 }
 
-export async function generatePDF(data: {
-  summary: any;
-  transcription: string;
-}): Promise<string> {
-  const workingBackendUrl = await findWorkingBackend();
-  
-  if (!workingBackendUrl) {
-    throw new Error(`No backend server found! Tried: ${API_CONFIG.BACKEND_URLS.join(', ')}`);
-  }
+export async function generatePDF(summary: CloseoutSummary, transcription: string): Promise<string> {
+  const workingBackendUrl = await getWorkingBackend();
 
   try {
     console.log(`📄 Generating PDF using: ${workingBackendUrl}`);
-    
-    // Create request payload matching backend expectations (/generate-pdf endpoint)
-    const payload = {
-      summary: data.summary,
-      transcription: data.transcription
-    };
-    
-    const response = await axios.post(`${workingBackendUrl}/generate-pdf`, payload, {
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'VoiceReportApp/1.0',
+
+    const response = await axios.post(
+      `${workingBackendUrl}/generate-pdf`,
+      {
+        summary,
+        transcription,
       },
-      timeout: 30000,
-      responseType: 'arraybuffer', // Important: PDF comes as binary data
-    });
+      {
+        ...createRequestConfig(),
+        responseType: 'arraybuffer',
+      }
+    );
 
-    console.log(`📁 PDF received: ${response.data.byteLength} bytes`);
+    console.log('✅ PDF generation successful');
+    console.log(`📁 PDF size: ${response.data.byteLength} bytes`);
+
+    // ✅ HYBRID - Convert ArrayBuffer to base64, use modern API for file path, legacy for writing
+    const base64Pdf = btoa(
+      new Uint8Array(response.data).reduce((data, byte) => data + String.fromCharCode(byte), '')
+    );
+
+    // Create file path using modern API
+    const pdfFile = new File(Paths.cache, `closeout_report_${Date.now()}.pdf`);
     
-    // Convert binary data to base64 and save to file
-    const bytes = new Uint8Array(response.data);
-    const base64 = btoa(String.fromCharCode(...bytes));
-
-    const fileUri = `${FileSystem.documentDirectory}report_${Date.now()}.pdf`;
-    await FileSystem.writeAsStringAsync(fileUri, base64, {
-      encoding: FileSystem.EncodingType.Base64,
+    // Write using legacy API for reliable base64 support
+    await FileSystemLegacy.writeAsStringAsync(pdfFile.uri, base64Pdf, {
+      encoding: FileSystemLegacy.EncodingType.Base64,
     });
 
-    console.log('✅ PDF saved to:', fileUri);
-    return fileUri;
+    console.log(`📁 PDF saved to: ${pdfFile.uri}`);
+    return pdfFile.uri;
   } catch (error) {
-    console.error('PDF generation failed:', error);
-    throw new Error('Failed to generate PDF. Please check your connection and try again.');
+    throw handleApiError(error, 'PDF generation');
   }
 }
 
-// Additional utility functions for debugging
-export async function checkBackendHealth(): Promise<boolean> {
+export async function sendEmail(
+  recipients: string[],
+  subject: string,
+  body: string,
+  pdfUri?: string
+): Promise<EmailResponse> {
+  const workingBackendUrl = await getWorkingBackend();
+
   try {
-    const workingBackendUrl = await findWorkingBackend();
-    return workingBackendUrl !== null;
+    console.log(`📧 Sending email using: ${workingBackendUrl}`);
+
+    let pdfBase64: string | undefined;
+    if (pdfUri) {
+      // ✅ HYBRID - Use legacy API for reliable base64 reading
+      pdfBase64 = await FileSystemLegacy.readAsStringAsync(pdfUri, {
+        encoding: FileSystemLegacy.EncodingType.Base64,
+      });
+    }
+
+    const response = await axios.post(
+      `${workingBackendUrl}/send-email`,
+      {
+        recipients,
+        subject,
+        body,
+        pdf_attachment: pdfBase64,
+      },
+      createRequestConfig()
+    );
+
+    console.log('✅ Email sent successfully');
+    return response.data;
   } catch (error) {
-    console.error('Health check failed:', error);
+    throw handleApiError(error, 'Email sending');
+  }
+}
+
+export async function sendCloseoutEmail({
+  summary,
+  transcription,
+  technician_name
+}: {
+  summary: CloseoutSummary;
+  transcription: string;
+  technician_name?: string;
+}): Promise<EmailResponse> {
+  const workingBackendUrl = await getWorkingBackend();
+
+  try {
+    console.log(`📧 Sending closeout email using: ${workingBackendUrl}`);
+    
+    const response = await axios.post(`${workingBackendUrl}/send-email`, {
+      summary: summary,
+      transcription: transcription,
+      technician_name: technician_name || 'Field Technician'
+    }, createRequestConfig());
+
+    console.log('✅ Closeout email sent successfully');
+    return {
+      success: true,
+      message: response.data.message || 'Email sent successfully',
+      recipients: response.data.recipients || ['colbol42@gmail.com']
+    };
+  } catch (error) {
+    throw handleApiError(error, 'email sending');
+  }
+}
+
+export async function processVoiceCommand(
+  audioUri: string, 
+  screenContext: any
+): Promise<any> {
+  const workingBackendUrl = await getWorkingBackend();
+
+  try {
+    console.log(`🤖 Processing voice command using: ${workingBackendUrl}`);
+    
+    // ✅ HYBRID - Use modern API for file info, legacy for base64 reading
+    const audioFile = new File(audioUri);
+    const base64Audio = await FileSystemLegacy.readAsStringAsync(audioUri, {
+      encoding: FileSystemLegacy.EncodingType.Base64,
+    });
+    console.log(`📁 Audio file: ${audioFile.name} (${audioFile.size} bytes), base64: ${base64Audio.length} chars`);
+
+    // Extract format from filename
+    const format = audioFile.name.split('.').pop()?.toLowerCase() || 'm4a';
+    
+    const response = await axios.post(`${workingBackendUrl}/voice-command`, {
+      audio: base64Audio,
+      format: format,
+      screenContext: screenContext
+    }, createRequestConfig());
+
+    console.log('✅ Voice command processed successfully');
+    return response.data;
+  } catch (error) {
+    throw handleApiError(error, 'voice command processing');
+  }
+}
+
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+export async function testBackendConnection(): Promise<boolean> {
+  try {
+    const workingBackendUrl = await getWorkingBackend();
+    console.log(`✅ Backend connection test successful: ${workingBackendUrl}`);
+    return true;
+  } catch (error) {
+    console.log('❌ Backend connection test failed:', error);
     return false;
   }
 }
 
-export async function getBackendInfo(): Promise<any> {
-  const workingBackendUrl = await findWorkingBackend();
-  
-  if (!workingBackendUrl) {
-    throw new Error('No backend server available');
-  }
-
-  try {
-    const response = await axios.get(`${workingBackendUrl}/health`, {
-      timeout: 5000,
-    });
-    return {
-      url: workingBackendUrl,
-      status: response.status,
-      data: response.data,
-    };
-  } catch (error) {
-    console.error('Failed to get backend info:', error);
-    throw new Error('Failed to get backend information');
-  }
+export function clearBackendCache(): void {
+  cachedBackendUrl = null;
+  lastCacheTime = 0;
+  console.log('🗑️ Backend cache cleared');
 }
 
-// Export the current configuration for debugging
-export const getAPIConfig = () => API_CONFIG;
+// =============================================================================
+// LEGACY COMPATIBILITY FUNCTIONS
+// =============================================================================
+
+// Backward compatibility aliases
+export const summarizeText = generateSummary;
+
+export async function sendEmailLegacy(
+  summary: CloseoutSummary,
+  transcription: string,
+  technicianName: string
+): Promise<EmailResponse> {
+  return sendCloseoutEmail({
+    summary,
+    transcription,
+    technician_name: technicianName
+  });
+}
