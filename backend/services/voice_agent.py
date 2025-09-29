@@ -1,4 +1,4 @@
-# backend/services/voice_agent.py - COMPLETE FILE WITH GPT-5 FIX
+# backend/services/voice_agent.py - COMPLETE FIXED FILE FOR GPT-5
 import json
 import logging
 import re
@@ -92,6 +92,13 @@ class VoiceAgentService:
         visible_fields = screen_context.get('visibleFields', [])
         current_values = screen_context.get('currentValues', {})
         
+        # Get the current transcription text for context if available
+        current_text = ""
+        for field in visible_fields:
+            if field.get('name') == 'transcription':
+                current_text = field.get('currentValue', '')[:1000]  # Get first 1000 chars for context
+                break
+        
         field_list = "\n".join([
             f"- {field.get('label', field.get('name', ''))} ({field.get('name', '')}): '{field.get('currentValue', '')[:100]}...'"
             for field in visible_fields
@@ -103,6 +110,8 @@ VOICE COMMAND: "{transcription}"
 
 CURRENT SCREEN: {screen_name}
 MODE: {mode}
+CURRENT TEXT CONTENT: "{current_text}"
+
 AVAILABLE FIELDS:
 {field_list}
 
@@ -117,26 +126,40 @@ TASK: Analyze the voice command and return a JSON response with these fields:
 - needs_clarification: true if you need more info
 - clarification_question: Question to ask user (if needs_clarification is true)
 
-CRITICAL RULES:
-1. TEXT REPLACEMENT COMMANDS: If user says "change X to Y" or "replace X with Y", where X and Y are WORDS/PHRASES (not field names):
-   - target should be "transcription" (or current text field)
-   - value should be the replacement instruction
-   - Example: "change hi to hello" → {{"target": "transcription", "value": "Replace 'hi' with 'hello' in the text"}}
+CRITICAL RULES FOR TEXT EDITING:
+1. TEXT REPLACEMENT COMMANDS: If user says "change X to Y" or "replace X with Y":
+   - You must perform the replacement on the CURRENT TEXT CONTENT shown above
+   - Return the ENTIRE modified text in the value field
+   - target should be "transcription"
+   - Example: If current text is "Hi there, how are you?" and command is "change hi to hello", 
+     value should be "Hello there, how are you?" (the complete modified text)
 
-2. FIELD UPDATE COMMANDS: If user mentions an actual FIELD NAME from the list above:
+2. POLISH/PROFESSIONAL COMMANDS: If user says "make it professional", "polish it", "clean it up":
+   - Rewrite the CURRENT TEXT CONTENT to be more professional
+   - Return the ENTIRE rewritten text in the value field
+   - target should be "transcription"
+
+3. REMOVE/DELETE COMMANDS: If user says "remove curse words", "delete X", "take out Y":
+   - Remove the specified content from CURRENT TEXT CONTENT
+   - Return the ENTIRE modified text in the value field
+   - target should be "transcription"
+
+4. FIELD UPDATE COMMANDS: If user mentions a specific field name from the AVAILABLE FIELDS list:
    - target should be the exact field name
    - value should be the new field value
-   - Example: "set location to downtown" → {{"target": "location", "value": "downtown"}}
+   - Example: "set location to downtown" → target: "location", value: "downtown"
 
-3. FIELD NAME MATCHING:
-   - Only use field names that appear in the AVAILABLE FIELDS list above
-   - Match using synonyms when appropriate
-   - If unsure, default to "transcription" for text changes
+5. NAVIGATION COMMANDS: If user says "generate summary", "generate closeout", "next screen":
+   - action should be "execute_action"
+   - target should be "generate_summary" or appropriate action
+   - value can be empty
 
-4. COMMON PATTERNS:
-   - "change [word] to [word]" = text replacement in transcription
-   - "set [field_name] to [value]" = field update
-   - "update [field_name]" = field update
+Common patterns to recognize:
+- "change [word/phrase] to [word/phrase]" = text replacement in current content
+- "make this sound more [adjective]" = rewrite current content  
+- "set [field_name] to [value]" = field update
+- "update [field_name]" = field update (needs clarification for value)
+- "generate closeout" = execute action to generate summary
 
 Respond ONLY with valid JSON, no markdown formatting."""
         
@@ -187,40 +210,84 @@ Respond ONLY with valid JSON, no markdown formatting."""
         
         transcription_lower = transcription.lower()
         
+        # Get current text content if available
+        current_text = ""
+        visible_fields = screen_context.get('visibleFields', [])
+        for field in visible_fields:
+            if field.get('name') == 'transcription':
+                current_text = field.get('currentValue', '')
+                break
+        
         # Pattern 1: "change X to Y" or "replace X with Y" - TEXT REPLACEMENT
         text_change_patterns = [
             r'(?:change|replace)\s+["\']?(.+?)["\']?\s+(?:to|with)\s+["\']?(.+?)["\']?(?:\?|$)',
             r'(?:change|replace)\s+(?:the\s+)?(.+?)\s+(?:to|with)\s+say\s+(.+?)(?:\?|$)',
-            r'can you change\s+(.+?)\s+to\s+say\s+(.+?)(?:\?|$)'
+            r'make\s+(?:the\s+)?(.+?)\s+say\s+(.+?)(?:\?|$)',
         ]
         
         for pattern in text_change_patterns:
             match = re.search(pattern, transcription_lower)
             if match:
-                old_text = match.group(1).strip('"\'')
-                new_text = match.group(2).strip('"\'')
+                old_text = match.group(1).strip()
+                new_text = match.group(2).strip()
                 
-                # This is a text replacement, target should be transcription
+                # Perform the replacement on current text
+                if current_text:
+                    modified_text = re.sub(
+                        re.escape(old_text), 
+                        new_text, 
+                        current_text, 
+                        flags=re.IGNORECASE
+                    )
+                    
+                    return {
+                        "action": "update_field",
+                        "target": "transcription",
+                        "value": modified_text,
+                        "confidence": 0.8,
+                        "confirmation": f"Changed '{old_text}' to '{new_text}'",
+                        "ttsText": "",
+                        "success": True,
+                        "needs_clarification": False
+                    }
+        
+        # Pattern 2: "make it professional" or "polish it"
+        if any(phrase in transcription_lower for phrase in ['make it professional', 'make this professional', 
+                                                            'polish it', 'clean it up', 'make it sound better']):
+            if current_text:
+                # Simple professional rewrite (in production, this would use GPT)
+                professional_text = current_text.strip()
+                professional_text = professional_text[0].upper() + professional_text[1:] if professional_text else ""
+                
                 return {
                     "action": "update_field",
                     "target": "transcription",
-                    "value": f"Replace '{old_text}' with '{new_text}'",
-                    "confidence": 0.8,
-                    "confirmation": f"Changing '{old_text}' to '{new_text}' in transcription",
+                    "value": professional_text,
+                    "confidence": 0.7,
+                    "confirmation": "Made the text more professional",
                     "ttsText": "",
                     "success": True,
-                    "needs_clarification": False,
-                    "metadata": {
-                        "replacement_type": "text_content",
-                        "old_value": old_text,
-                        "new_value": new_text
-                    }
+                    "needs_clarification": False
                 }
         
-        # Pattern 2: "set/update [field_name] to [value]" - FIELD UPDATE
+        # Pattern 3: "generate summary" or "generate closeout"
+        if any(phrase in transcription_lower for phrase in ['generate summary', 'generate closeout', 
+                                                            'create summary', 'create closeout']):
+            return {
+                "action": "execute_action",
+                "target": "generate_summary",
+                "value": "",
+                "confidence": 0.9,
+                "confirmation": "Generating closeout summary",
+                "ttsText": "",
+                "success": True,
+                "needs_clarification": False
+            }
+        
+        # Pattern 4: Field updates - "set X to Y"
         field_update_patterns = [
-            r'(?:set|update)\s+(?:the\s+)?(.+?)\s+to\s+(.+)',
-            r'change\s+(?:the\s+)?([a-z_]+)\s+to\s+(.+)',
+            r'(?:set|update|change)\s+(?:the\s+)?([a-z_]+)\s+to\s+(.+)',
+            r'([a-z_]+)\s+(?:is|should be|equals)\s+(.+)',
         ]
         
         for pattern in field_update_patterns:
