@@ -1,4 +1,4 @@
-# backend/services/summarization.py - FIXED TO EXTRACT INFORMATION PROPERLY
+# backend/services/summarization.py - COMPLETE FILE WITH GPT-5 FIX
 import logging
 import json
 from typing import Dict, Any
@@ -30,7 +30,7 @@ class SummarizationService:
             # Create detailed prompt for field extraction
             prompt = self._build_extraction_prompt(transcription)
             
-            # Get GPT response
+            # Get GPT response - FIXED for GPT-5
             response = self.client.chat.completions.create(
                 model=settings.gpt_model,
                 messages=[
@@ -40,7 +40,7 @@ class SummarizationService:
                     },
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=settings.gpt_max_tokens,
+                max_completion_tokens=settings.gpt_max_tokens,  # FIXED: Changed from max_tokens for GPT-5
                 temperature=0.1  # Low temperature for consistent extraction
             )
             
@@ -65,12 +65,12 @@ class SummarizationService:
     def _build_extraction_prompt(self, transcription: str) -> str:
         """Build detailed prompt for extracting closeout information"""
         
-        prompt = f"""Extract field service closeout information from this transcription. 
+        prompt = f"""Extract field service closeout information from this transcription. Be thorough and look for this information throughout the entire transcription:
 
 TRANSCRIPTION:
 "{transcription}"
 
-TASK: Extract the following closeout report fields. Be thorough and look for this information throughout the entire transcription:
+TASK: Extract the following closeout report fields:
 
 CLOSEOUT NOTES:
 - onsite_contact: Who did the technician meet with on-site? (names, titles, roles)
@@ -145,49 +145,37 @@ Return ONLY a JSON object with the exact field names above:
                 logger.warning("No JSON found in summary response, using fallback parsing")
                 return self._fallback_parse(response_text)
             
-            json_str = response_text[start_idx:end_idx]
-            summary = json.loads(json_str)
+            json_text = response_text[start_idx:end_idx]
+            summary = json.loads(json_text)
             
-            # Ensure all required fields are present
+            # Validate and fill in missing fields
             required_fields = [
                 'onsite_contact', 'support_contact', 'work_completed', 'delays',
-                'troubleshooting_steps', 'scope_completed', 'released_by', 
-                'release_code', 'return_tracking', 'expenses', 'materials_used',
-                'out_of_scope_work', 'photos_uploaded', 'location', 'datetime', 
-                'technician_name'
+                'troubleshooting_steps', 'scope_completed', 'released_by', 'release_code',
+                'return_tracking', 'expenses', 'materials_used', 'out_of_scope_work',
+                'photos_uploaded', 'location', 'datetime', 'technician_name'
             ]
             
             for field in required_fields:
                 if field not in summary:
                     summary[field] = "Not mentioned"
             
-            # Clean up values
-            for key, value in summary.items():
-                if not value or str(value).strip() == "":
-                    summary[key] = "Not mentioned"
-                elif isinstance(value, str):
-                    summary[key] = value.strip()
-            
             return summary
             
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse summary JSON: {e}")
-            logger.error(f"Response text: {response_text}")
+            logger.warning(f"JSON parsing failed: {e}")
             return self._fallback_parse(response_text)
-        except Exception as e:
-            logger.error(f"Unexpected error parsing summary: {e}")
-            return self._get_empty_summary()
     
     def _fallback_parse(self, response_text: str) -> Dict[str, Any]:
-        """Fallback parsing using simple text extraction"""
-        logger.info("Using fallback parsing for summary extraction")
+        """Fallback parsing using keyword extraction"""
+        logger.info("Using fallback keyword extraction")
         
         summary = self._get_empty_summary()
         text_lower = response_text.lower()
         
-        # Simple keyword extraction patterns
+        # Simple keyword-based extraction patterns
         patterns = {
-            'onsite_contact': ['met with', 'on-site contact', 'front desk', 'manager', 'receptionist'],
+            'onsite_contact': ['met with', 'on-site contact', 'onsite contact', 'greeted by'],
             'support_contact': ['support', 'help desk', 'it support', 'technical support', 'worked with'],
             'work_completed': ['replaced', 'fixed', 'repaired', 'installed', 'completed', 'work done'],
             'location': ['location', 'site', 'building', 'office', 'address'],

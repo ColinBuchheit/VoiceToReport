@@ -1,4 +1,4 @@
-# backend/config.py - ADD THE EMAIL_RECIPIENTS FIELD
+# backend/config.py - UPDATED VERSION (keeping your structure, fixing CORS)
 import os
 from typing import List, Union
 from pydantic import field_validator
@@ -14,8 +14,9 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = False
     
-    # CORS Configuration - can be string or list
-    allowed_origins: Union[str, List[str]] = "*"
+    # CORS Configuration - FIXED: Remove wildcard, add environment awareness
+    allowed_origins: Union[str, List[str]] = ""  # Changed from "*" to ""
+    environment: str = "development"  # Added environment detection
     
     # Logging Configuration
     log_level: str = "INFO"
@@ -32,7 +33,7 @@ class Settings(BaseSettings):
     # Email Configuration
     email_user: str = ""
     email_password: str = ""
-    email_recipients: str = "colbol42@gmail.com"  # ADD THIS LINE - comma-separated list
+    email_recipients: str = "colbol42@gmail.com"  # Your existing email
     smtp_server: str = "smtp.gmail.com"
     smtp_port: str = "587"
     
@@ -41,7 +42,10 @@ class Settings(BaseSettings):
     def parse_allowed_origins(cls, v):
         if isinstance(v, str):
             if v == "*":
-                return ["*"]
+                # SECURITY FIX: Never allow wildcard in production
+                return [""]  # Empty list for auto-detection
+            elif v == "":
+                return [""]  # Empty for auto-detection
             return [x.strip() for x in v.split(',') if x.strip()]
         return v
     
@@ -59,6 +63,28 @@ class Settings(BaseSettings):
             return v
         return str(v)
     
+    # NEW: Helper methods for CORS system
+    def get_allowed_origins_list(self) -> List[str]:
+        """Get allowed origins as a list for CORS validation"""
+        if isinstance(self.allowed_origins, list):
+            return [origin for origin in self.allowed_origins if origin]
+        elif isinstance(self.allowed_origins, str) and self.allowed_origins:
+            return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+        return []  # Empty list means use dynamic validation
+    
+    def is_development(self) -> bool:
+        """Check if running in development mode"""
+        return self.environment.lower() == "development" or self.debug
+    
+    def is_production(self) -> bool:
+        """Check if running in production mode"""
+        return self.environment.lower() == "production"
+    
+    def should_use_dynamic_cors(self) -> bool:
+        """Determine if we should use dynamic CORS validation"""
+        # Use dynamic CORS if no specific origins are configured
+        return len(self.get_allowed_origins_list()) == 0
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -66,3 +92,15 @@ class Settings(BaseSettings):
 
 # Global settings instance
 settings = Settings()
+
+# Log CORS configuration on startup
+if settings.should_use_dynamic_cors():
+    print("🔒 CORS: Using dynamic validation (development mode)")
+    print("   ✅ Ngrok domains allowed")
+    print("   ✅ Localhost allowed") 
+    print("   ✅ Local network allowed")
+else:
+    origins = settings.get_allowed_origins_list()
+    print(f"🔒 CORS: Using specific origins ({len(origins)} configured)")
+    for origin in origins:
+        print(f"   ✅ {origin}")

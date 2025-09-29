@@ -1,9 +1,9 @@
-# backend/services/email_service.py
+# backend/services/email_service.py - COMPLETE FILE WITH ALL FIXES
 import logging
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 from datetime import datetime
 from config import settings
 
@@ -27,17 +27,31 @@ class EmailService:
             self.recipients = ['colbol42@gmail.com']
         
         logger.info(f"Email service initialized with {len(self.recipients)} recipients: {', '.join(self.recipients)}")
-        
+    
+    def _safe_get(self, data: Union[Dict[str, Any], object], key: str, default: str = 'Not specified') -> str:
+        """
+        Safely get value from either a dictionary or an object with attributes
+        """
+        try:
+            if isinstance(data, dict):
+                return data.get(key, default)
+            else:
+                # Handle Pydantic objects or other objects with attributes
+                return getattr(data, key, default)
+        except (AttributeError, TypeError):
+            return default
+    
     def get_recipients(self) -> List[str]:
         """Get current list of email recipients"""
         return self.recipients.copy()
     
-    def format_closeout_email(self, closeout_data: Dict[str, Any], transcription: str) -> str:
-        """Format the closeout data into a professional email body"""
+    def format_closeout_email(self, closeout_data: Union[Dict[str, Any], object], transcription: str) -> str:
+        """Format the closeout data into a professional email body - FIXED for objects"""
         
         # Generate timestamp
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
+        # Use safe_get to handle both dictionaries and objects
         email_body = f"""Field Service Closeout Report
 Generated: {timestamp}
 
@@ -45,55 +59,63 @@ CLOSEOUT NOTES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Who did you meet with on-site?
-{closeout_data.get('onsite_contact', 'Not specified')}
+{self._safe_get(closeout_data, 'onsite_contact')}
 
 Who did you work with for support?
-{closeout_data.get('support_contact', 'Not specified')}
+{self._safe_get(closeout_data, 'support_contact')}
 
 What work was completed?
-{closeout_data.get('work_completed', 'Not specified')}
+{self._safe_get(closeout_data, 'work_completed')}
 
 Were there any delays?
-{closeout_data.get('delays', 'Not specified')}
+{self._safe_get(closeout_data, 'delays')}
 
 What troubleshooting steps did you take?
-{closeout_data.get('troubleshooting_steps', 'Not specified')}
+{self._safe_get(closeout_data, 'troubleshooting_steps')}
 
 Was the scope completed successfully?
-{closeout_data.get('scope_completed', 'Not specified')}
+{self._safe_get(closeout_data, 'scope_completed')}
 
 Who released you?
-{closeout_data.get('released_by', 'Not specified')}
+{self._safe_get(closeout_data, 'released_by')}
 
 Is there a release code? If so, what is it?
-{closeout_data.get('release_code', 'Not specified')}
+{self._safe_get(closeout_data, 'release_code')}
 
 Is there a return tracking number? If so, what is it?
-{closeout_data.get('return_tracking', 'Not specified')}
+{self._safe_get(closeout_data, 'return_tracking')}
 
 
 EXPENSES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Did you have any expenses (parking fees, etc)?
-{closeout_data.get('expenses', 'Not specified')}
+{self._safe_get(closeout_data, 'expenses')}
 
 What materials did you use?
-{closeout_data.get('materials_used', 'Not specified')}
+{self._safe_get(closeout_data, 'materials_used')}
 
 
 OUT OF SCOPE:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Was there any out of scope work? If so, what is it and who approved the work?
-{closeout_data.get('out_of_scope_work', 'Not specified')}
+{self._safe_get(closeout_data, 'out_of_scope_work')}
 
 
 PHOTOS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 How many photos did you upload?
-{closeout_data.get('photos_uploaded', 'Not specified')}
+{self._safe_get(closeout_data, 'photos_uploaded')}
+
+
+ADDITIONAL INFORMATION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Location: {self._safe_get(closeout_data, 'location')}
+Date/Time: {self._safe_get(closeout_data, 'datetime')}
+Technician: {self._safe_get(closeout_data, 'technician_name')}
 
 
 ORIGINAL TRANSCRIPTION:
@@ -107,18 +129,26 @@ This report was automatically generated from voice input using the Bear Technolo
 """
         return email_body
     
-    def send_closeout_email(self, closeout_data: Dict[str, Any], transcription: str, technician_name: str = None) -> bool:
-        """Send the closeout email to the specified recipients"""
+    def send_closeout_email(self, closeout_data: Union[Dict[str, Any], object], transcription: str, technician_name: str = None) -> Dict[str, Any]:
+        """Send the closeout email to the specified recipients - FIXED return type"""
         
         try:
             # Validate email configuration
             if not self.email_user or not self.email_password:
                 logger.error("Email credentials not configured - check EMAIL_USER and EMAIL_PASSWORD in .env file")
-                return False
+                return {
+                    "success": False,
+                    "message": "Email credentials not configured",
+                    "recipients": []
+                }
             
             if not self.recipients:
                 logger.error("No email recipients configured")
-                return False
+                return {
+                    "success": False,
+                    "message": "No recipients configured",
+                    "recipients": []
+                }
             
             logger.info(f"Sending closeout email to {len(self.recipients)} recipients: {', '.join(self.recipients)}")
             
@@ -127,9 +157,9 @@ This report was automatically generated from voice input using the Bear Technolo
             msg['From'] = self.email_user
             msg['To'] = ', '.join(self.recipients)
             
-            # Generate subject line
-            tech_name = technician_name or "Field Technician"
-            location = closeout_data.get('location', 'Unknown Location')
+            # Generate subject line using safe_get
+            tech_name = technician_name or self._safe_get(closeout_data, 'technician_name', 'Field Technician')
+            location = self._safe_get(closeout_data, 'location', 'Unknown Location')
             timestamp = datetime.now().strftime("%Y-%m-%d")
             
             msg['Subject'] = f"Field Service Closeout - {tech_name} - {location} - {timestamp}"
@@ -147,11 +177,19 @@ This report was automatically generated from voice input using the Bear Technolo
                 server.send_message(msg)
             
             logger.info(f"Closeout email sent successfully to {len(self.recipients)} recipients")
-            return True
+            return {
+                "success": True,
+                "message": "Email sent successfully",
+                "recipients": self.recipients
+            }
             
         except Exception as e:
             logger.error(f"Failed to send closeout email: {str(e)}")
-            return False
+            return {
+                "success": False,
+                "message": f"Failed to send email: {str(e)}",
+                "recipients": []
+            }
     
     def test_email_connection(self) -> Dict[str, Any]:
         """Test email configuration and connection"""
