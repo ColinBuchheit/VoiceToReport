@@ -145,7 +145,8 @@ export class AIAgentService {
   }
 
   // Voice command processing with hybrid FileSystem API
-  async processVoiceCommand(audioUri: string, screenContext: ScreenContext): Promise<VoiceCommandResponse> {
+  // Accept optional AbortSignal to allow callers to cancel the backend request
+  async processVoiceCommand(audioUri: string, screenContext: ScreenContext, signal?: AbortSignal): Promise<VoiceCommandResponse> {
     try {
       const workingBackendUrl = await this.getWorkingBackend();
       if (!workingBackendUrl) {
@@ -178,7 +179,7 @@ export class AIAgentService {
           format: format,
           screenContext: screenContext
         })
-      });
+      , signal });
 
       if (!response.ok) {
         throw new Error(`Voice command failed: ${response.status} ${response.statusText}`);

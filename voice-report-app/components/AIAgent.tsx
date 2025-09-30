@@ -92,6 +92,8 @@ export default function AIAgent({
 
   // Service and Animation Refs
   const aiService = AIAgentService.getInstance();
+  // Abort controller for cancelling in-flight processing (transcription/summarization/voice-command)
+  const processingController = useRef<AbortController | null>(null);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
 
@@ -105,6 +107,18 @@ export default function AIAgent({
     scaleAnim.setValue(1);
     glowAnim.setValue(0);
   };
+
+  // Cleanup on unmount - cancel any in-flight processing and cleanup audio
+  useEffect(() => {
+    return () => {
+      if (processingController.current) {
+        try { processingController.current.abort(); } catch {}
+        processingController.current = null;
+      }
+      // Ensure any audio playback/recording is cleaned up
+      try { aiService.cleanup(); } catch {}
+    };
+  }, []);
 
   // Start animations for listening state
   const startListeningAnimations = () => {
@@ -174,14 +188,19 @@ export default function AIAgent({
       console.log('⏹️ Stopping recording...');
       stopAllAnimations();
       setAgentState({ isListening: false, isProcessing: true, isPlayingResponse: false });
-
       const audioFile = await aiService.stopListening();
       if (!audioFile) {
         throw new Error('No audio recorded');
       }
 
       console.log('📤 Sending voice command to backend...');
-      const response = await aiService.processVoiceCommand(audioFile, screenContext);
+      // Cancel any previous processing
+      if (processingController.current) {
+        processingController.current.abort();
+      }
+      processingController.current = new AbortController();
+
+      const response = await aiService.processVoiceCommand(audioFile, screenContext, processingController.current.signal);
       console.log('📥 Received response:', response);
 
       await executeCommand(response);
