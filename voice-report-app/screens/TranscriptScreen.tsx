@@ -35,6 +35,10 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   const [transcription, setTranscription] = useState(route.params.transcription);
   const [isEditing, setIsEditing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [estimateSeconds, setEstimateSeconds] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [progressPercent, setProgressPercent] = useState<number>(0);
+  const progressInterval = useRef<NodeJS.Timeout | null>(null);
   
   // Press and hold state for clear button
   const [isHoldingClear, setIsHoldingClear] = useState(false);
@@ -112,15 +116,51 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   }, [transcription, isEditing]);
 
   const handleGenerateSummary = async () => {
+    // Heuristic progress simulation based on transcription length
+    const chars = transcription ? transcription.length : 0;
+    // Estimate formula: base 6s + 0.02s per character, capped to 180s (API timeout)
+    const estimate = Math.min(180, Math.max(6, Math.round(chars * 0.02 + 6)));
+    setEstimateSeconds(estimate);
+    setElapsedSeconds(0);
+    setProgressPercent(0);
+
+    // Start simulated progress timer
+    if (progressInterval.current) {
+      clearInterval(progressInterval.current);
+      progressInterval.current = null;
+    }
+
+    setIsProcessing(true);
+
+    let completed = false;
+    progressInterval.current = setInterval(() => {
+      setElapsedSeconds(prev => {
+        const next = prev + 0.5;
+        // Compute progress with staged weights: upload/transcribe 15%, summarize 70%, finalize 15%
+        const est = estimate;
+        const raw = (() => {
+          if (next <= est * 0.15) {
+            return Math.round((next / (est * 0.15)) * 15);
+          } else if (next <= est * 0.85) {
+            return Math.round(15 + ((next - est * 0.15) / (est * 0.7)) * 70);
+          } else {
+            return Math.round(85 + ((next - est * 0.85) / (est * 0.15)) * 15);
+          }
+        })();
+
+        // Stall at 99% until completed
+        const p = completed ? raw : Math.min(99, raw);
+        setProgressPercent(Math.max(0, Math.min(99, p)));
+        return next;
+      });
+    }, 500);
+
     try {
-      setIsProcessing(true);
-      console.log('🔄 Generating summary from transcription:', transcription.substring(0, 100) + '...');
-      
+      console.log('🔄 Generating summary from transcription (with heuristic):', transcription.substring(0, 100) + '...');
       const response = await generateSummary(transcription);
+
       console.log('📥 Raw API response:', response);
-      
       let closeoutSummary: CloseoutSummary;
-      
       if (response && typeof response === 'object' && 'summary' in response) {
         closeoutSummary = (response as any).summary;
         console.log('✅ Using CloseoutSummary from response.summary');
@@ -128,22 +168,30 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         closeoutSummary = response as CloseoutSummary;
         console.log('✅ Using response as CloseoutSummary directly');
       }
-      
-      console.log('📋 Extracted closeout summary:', closeoutSummary);
-      
+
+      // Immediately fill to 100% and navigate after a short visual pause
+      if (progressInterval.current) {
+        clearInterval(progressInterval.current);
+        progressInterval.current = null;
+      }
+      setProgressPercent(100);
+      // Small delay so user sees 100%
+      await new Promise(res => setTimeout(res, 250));
       navigation.navigate('Summary', {
         transcription,
         summary: closeoutSummary,
       });
-      
     } catch (error) {
       console.error('❌ Error generating summary:', error);
-      Alert.alert(
-        'Error', 
-        `Failed to generate summary: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      Alert.alert('Error', `Failed to generate summary: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsProcessing(false);
+      setEstimateSeconds(null);
+      setElapsedSeconds(0);
+      if (progressInterval.current) {
+        clearInterval(progressInterval.current);
+        progressInterval.current = null;
+      }
     }
   };
 
@@ -248,8 +296,31 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     setIsEditing(!isEditing);
   };
 
+  // Progress UI while generating summary
   if (isProcessing) {
-    return <Loader message="Generating summary..." />;
+    let phase = 'Preparing';
+    if (estimateSeconds) {
+      const ratio = elapsedSeconds / estimateSeconds;
+      if (ratio < 0.15) phase = 'Uploading & Transcribing';
+      else if (ratio < 0.85) phase = 'Summarizing';
+      else phase = 'Finalizing';
+    }
+
+    return (
+      <View style={{flex:1, justifyContent:'center', alignItems:'center', padding:20}}>
+        <View style={{width:'100%', backgroundColor:'#fff', borderRadius:12, padding:20, alignItems:'center', elevation:2}}>
+          <Text style={{fontSize:18, fontWeight:'600', marginBottom:8}}>Generating summary</Text>
+          <Text style={{color:'#6B7280', marginBottom:12}}>{phase}</Text>
+
+          {/* Progress bar background */}
+          <View style={{height:12, width:'100%', backgroundColor:'#E5E7EB', borderRadius:6, overflow:'hidden', marginBottom:8}}>
+            <View style={{height:'100%', width:`${progressPercent}%`, backgroundColor:'#FF6B35'}} />
+          </View>
+
+          <Text style={{fontSize:14, fontWeight:'600', marginBottom:4}}>{progressPercent}%</Text>
+        </View>
+      </View>
+    );
   }
 
   return (
