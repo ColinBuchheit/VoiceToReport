@@ -21,7 +21,7 @@ try {
     NGROK_URL: 'http://localhost:8000',
     LOCAL_URL: 'http://localhost:8000',
     BACKEND_URLS: ['http://localhost:8000'],
-    CONNECTION: { TIMEOUT: 30000 }
+    CONNECTION: { TIMEOUT: 3000000 }
   };
 }
 

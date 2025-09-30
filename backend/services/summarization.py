@@ -225,7 +225,7 @@ EXTRACT ALL THESE FIELDS:
 16. photos_uploaded: Photos taken/uploaded
 
 IMPORTANT:
-- Extract EVERYTHING mentioned, don't summarize
+- Extract EVERYTHING mentioned summarize within reason making sure key points are covered
 - For location, include full details (e.g., "Westfield Manufacturing, building three")
 - For datetime, include all time references (e.g., "2:45 p.m.")
 - For work_completed, list ALL tasks mentioned

@@ -157,7 +157,7 @@ export default function AIAgent({
         if (agentState.isListening) {
           stopListening();
         }
-      }, 30000);
+      }, 3000000);
       
     } catch (error) {
       console.error('❌ Failed to start recording:', error);
