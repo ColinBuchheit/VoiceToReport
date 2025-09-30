@@ -1,254 +1,353 @@
-# backend/services/summarization.py - COMPLETE FIXED FILE FOR GPT-5
+# backend/services/summarization.py - FIXED VERSION FOR ACCURATE EXTRACTION
 import logging
 import json
 import re
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 from openai import OpenAI
 from config import settings
 
 logger = logging.getLogger(__name__)
 
 class SummarizationService:
-    """Service for generating structured closeout summaries from transcriptions"""
+    """Service for generating structured closeout summaries with high accuracy"""
     
     def __init__(self, openai_client: OpenAI):
+        """Initialize the summarization service"""
         self.client = openai_client
+        logger.info("SummarizationService initialized - High Accuracy version")
     
     def generate_closeout_summary(self, transcription: str) -> Dict[str, Any]:
         """
         Generate structured closeout summary from transcription
-        
-        Args:
-            transcription: Raw voice transcription text
-            
-        Returns:
-            Dictionary with closeout report fields
+        FIXED: Ensures accurate extraction of all fields
         """
         try:
-            logger.info("Generating closeout summary from transcription")
-            logger.info(f"Transcription length: {len(transcription)} characters")
+            logger.info(f"Starting summary generation for transcription: {transcription[:100]}...")
             
-            # Create detailed prompt for field extraction
-            prompt = self._build_extraction_prompt(transcription)
+            # Step 1: Pattern-based extraction for immediate results
+            pattern_results = self._extract_with_patterns(transcription)
+            logger.info(f"Pattern extraction found: {sum(1 for v in pattern_results.values() if v != 'Not mentioned')} fields")
             
-            # Get GPT response - FIXED for GPT-5
+            # Step 2: Comprehensive GPT-5 extraction with better prompting
+            gpt_results = self._enhanced_gpt_extraction(transcription, pattern_results)
+            
+            # Step 3: Merge results (GPT takes precedence for complex fields)
+            final_summary = self._merge_results(pattern_results, gpt_results)
+            
+            # Log final results
+            populated = sum(1 for v in final_summary.values() if v != "Not mentioned")
+            logger.info(f"Final extraction complete: {populated}/16 fields populated")
+            for field, value in final_summary.items():
+                if value != "Not mentioned":
+                    logger.info(f"  - {field}: {value[:50]}...")
+            
+            return final_summary
+            
+        except Exception as e:
+            logger.error(f"Summary generation failed: {e}", exc_info=True)
+            # Return pattern results as fallback
+            if pattern_results:
+                return pattern_results
+            return self._get_empty_summary()
+    
+    def _extract_with_patterns(self, transcription: str) -> Dict[str, Any]:
+        """Extract fields using regex patterns - very fast and accurate for structured data"""
+        result = self._get_empty_summary()
+        text_lower = transcription.lower()
+        
+        # DATETIME extraction - multiple patterns
+        datetime_patterns = [
+            r'(?:at|on|completed at)\s+(\d{1,2}:\d{2}\s*[ap]\.?m\.?)',  # times
+            r'(?:at|on)\s+(\d{1,2}:\d{2})',  # 24hr times
+            r'(today|yesterday|this morning|this afternoon)',  # relative times
+            r'(\d{1,2}/\d{1,2}/\d{2,4})',  # dates
+            r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}',  # month day
+        ]
+        for pattern in datetime_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                result['datetime'] = match.group(1)
+                logger.info(f"Found datetime: {result['datetime']}")
+                break
+        
+        # LOCATION extraction - look for building/facility names
+        location_patterns = [
+            r'at\s+([A-Z][A-Za-z\s]+(?:manufacturing|building|facility|office|center|plant|factory|site))',
+            r'(?:location|site|facility|building)(?:\s+was)?\s+([A-Za-z0-9\s,]+)',
+            r'at\s+([A-Z][A-Za-z\s]+),?\s+building\s+(\w+)',
+            r'(?:went to|arrived at|at)\s+([A-Z][A-Za-z\s]+)',
+        ]
+        for pattern in location_patterns:
+            match = re.search(pattern, transcription, re.IGNORECASE)
+            if match:
+                location = match.group(0).replace('at ', '').strip()
+                result['location'] = location
+                logger.info(f"Found location: {result['location']}")
+                break
+        
+        # TECHNICIAN NAME - from introduction
+        name_patterns = [
+            r'(?:my name is|i\'m|this is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
+            r'^([A-Z][a-z]+)\s+here',
+            r'technician\s+([A-Z][a-z]+)',
+        ]
+        for pattern in name_patterns:
+            match = re.search(pattern, transcription, re.IGNORECASE)
+            if match:
+                result['technician_name'] = match.group(1).strip()
+                logger.info(f"Found technician: {result['technician_name']}")
+                break
+        
+        # ONSITE CONTACT
+        contact_patterns = [
+            r'(?:met with|worked with|spoke to|contact was|customer was)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
+            r'([A-Z][a-z]+)\s+(?:was|is)\s+(?:my|the)\s+(?:contact|customer|client)',
+            r'onsite contact\s+(?:was|is)?\s*([A-Z][a-z]+)',
+        ]
+        for pattern in contact_patterns:
+            match = re.search(pattern, transcription, re.IGNORECASE)
+            if match:
+                result['onsite_contact'] = match.group(1).strip()
+                logger.info(f"Found onsite contact: {result['onsite_contact']}")
+                break
+        
+        # SUPPORT CONTACT
+        support_patterns = [
+            r'([A-Z][a-z]+)\s+(?:from|in)\s+(?:tech\s+)?support',
+            r'(?:called|spoke to)\s+([A-Z][a-z]+)\s+(?:for support|for help)',
+            r'support from\s+([A-Z][a-z]+)',
+        ]
+        for pattern in support_patterns:
+            match = re.search(pattern, transcription, re.IGNORECASE)
+            if match:
+                result['support_contact'] = match.group(1).strip()
+                logger.info(f"Found support contact: {result['support_contact']}")
+                break
+        
+        # WORK COMPLETED - extract action items
+        work_verbs = ['replaced', 'installed', 'fixed', 'repaired', 'configured', 
+                     'tested', 'completed', 'upgraded', 'removed', 'checked']
+        work_items = []
+        for verb in work_verbs:
+            pattern = rf'{verb}\s+(?:the\s+)?([^.,;]+)'
+            matches = re.findall(pattern, text_lower)
+            for match in matches:
+                # Clean up the match
+                item = f"{verb} {match.strip()}"
+                if len(item) < 100:  # Avoid capturing too much
+                    work_items.append(item)
+        
+        if work_items:
+            result['work_completed'] = '; '.join(work_items[:10])  # Limit to 10 items
+            logger.info(f"Found work items: {len(work_items)}")
+        
+        # RELEASE CODE - alphanumeric codes
+        code_patterns = [
+            r'(?:code|ticket|number|reference)\s*#?\s*(?:is|was)?\s*([A-Z0-9]{4,})',
+            r'([A-Z0-9]{6,})\b',  # Any 6+ char alphanumeric
+        ]
+        for pattern in code_patterns:
+            match = re.search(pattern, transcription)
+            if match:
+                result['release_code'] = match.group(1)
+                logger.info(f"Found code: {result['release_code']}")
+                break
+        
+        # EXPENSES
+        expense_patterns = [
+            r'\$(\d+(?:\.\d{2})?)\s*(?:for\s+)?([a-z\s]+)',
+            r'(?:parking|gas|meals?|tolls?)\s*(?:was|cost)?\s*\$?(\d+(?:\.\d{2})?)',
+        ]
+        for pattern in expense_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                result['expenses'] = match.group(0).strip()
+                logger.info(f"Found expenses: {result['expenses']}")
+                break
+        
+        # PHOTOS
+        photo_patterns = [
+            r'(\d+)\s*(?:photos?|pictures?|images?)',
+            r'took\s+(?:photos?|pictures?)',
+            r'uploaded\s+(\d+)\s*(?:photos?|pictures?)',
+        ]
+        for pattern in photo_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                if match.group(1) if match.groups() else "Yes":
+                    result['photos_uploaded'] = f"{match.group(1)} photos" if match.group(1) else "Yes"
+                logger.info(f"Found photos: {result['photos_uploaded']}")
+                break
+        
+        # SCOPE COMPLETED
+        if 'complet' in text_lower:
+            if 'not complet' in text_lower or 'incomplete' in text_lower:
+                result['scope_completed'] = "No"
+            elif 'partially' in text_lower or 'partial' in text_lower:
+                result['scope_completed'] = "Partially"
+            elif 'completed' in text_lower or 'complete' in text_lower:
+                result['scope_completed'] = "Yes"
+        
+        return result
+    
+    def _enhanced_gpt_extraction(self, transcription: str, pattern_hints: Dict[str, Any]) -> Dict[str, Any]:
+        """Enhanced GPT extraction with better prompting and examples"""
+        try:
+            # Count what we already found
+            found_fields = [k for k, v in pattern_hints.items() if v != "Not mentioned"]
+            
+            # Build a focused prompt
+            prompt = f"""Extract ALL field service information from this transcription. Be thorough and accurate.
+
+TRANSCRIPTION:
+"{transcription}"
+
+ALREADY IDENTIFIED (verify these):
+{chr(10).join(f'- {field}: {value}' for field, value in pattern_hints.items() if value != "Not mentioned")}
+
+EXTRACT ALL THESE FIELDS:
+
+1. onsite_contact: Person met at job site (e.g., "met with John" → "John")
+2. support_contact: Remote/phone support person (e.g., "Sarah from support" → "Sarah")  
+3. work_completed: ALL tasks performed (be comprehensive, list everything done)
+4. delays: Any delays mentioned and causes
+5. troubleshooting_steps: Diagnostic steps taken
+6. scope_completed: Was work finished? (Yes/No/Partially)
+7. released_by: Who approved/signed off
+8. release_code: Any codes/ticket numbers
+9. return_tracking: Shipping/tracking numbers
+10. expenses: Money spent (parking, gas, etc)
+11. materials_used: Parts/materials used
+12. out_of_scope_work: Extra work performed
+13. location: Where work was done (building, address)
+14. datetime: When work was done (time, date)
+15. technician_name: Person speaking/technician name
+16. photos_uploaded: Photos taken/uploaded
+
+IMPORTANT:
+- Extract EVERYTHING mentioned, don't summarize
+- For location, include full details (e.g., "Westfield Manufacturing, building three")
+- For datetime, include all time references (e.g., "2:45 p.m.")
+- For work_completed, list ALL tasks mentioned
+
+Return ONLY this JSON (no markdown):
+{{
+  "onsite_contact": "value or Not mentioned",
+  "support_contact": "value or Not mentioned",
+  "work_completed": "value or Not mentioned",
+  "delays": "value or Not mentioned",
+  "troubleshooting_steps": "value or Not mentioned",
+  "scope_completed": "value or Not mentioned",
+  "released_by": "value or Not mentioned",
+  "release_code": "value or Not mentioned",
+  "return_tracking": "value or Not mentioned",
+  "expenses": "value or Not mentioned",
+  "materials_used": "value or Not mentioned",
+  "out_of_scope_work": "value or Not mentioned",
+  "location": "value or Not mentioned",
+  "datetime": "value or Not mentioned",
+  "technician_name": "value or Not mentioned",
+  "photos_uploaded": "value or Not mentioned"
+}}"""
+
+            logger.info("Calling GPT-5 for enhanced extraction...")
             response = self.client.chat.completions.create(
                 model=settings.gpt_model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an expert at extracting structured information from field service reports. Extract the requested information accurately and format it as valid JSON."
+                        "content": "You are a precise data extractor. Extract ALL information mentioned in the transcription. Be comprehensive and accurate. Never summarize or shorten the extracted data."
                     },
                     {"role": "user", "content": prompt}
-                ],
-                max_completion_tokens=settings.gpt_max_tokens,  # FIXED: Changed from max_tokens for GPT-5
-                temperature=0.1  # Low temperature for consistent extraction
+                ]
             )
             
-            # Parse the response
-            summary_text = response.choices[0].message.content.strip()
-            logger.info("GPT summary generation completed")
+            response_text = response.choices[0].message.content.strip()
+            logger.info(f"GPT-5 response length: {len(response_text)}")
             
-            # Extract JSON from response
-            summary = self._parse_summary_response(summary_text)
-            
-            # Log extraction results
-            populated_fields = sum(1 for v in summary.values() if v and v != "Not mentioned" and v != "")
-            logger.info(f"Summary extraction completed: {populated_fields}/16 fields populated")
-            
-            return summary
+            # Parse response
+            return self._parse_gpt_response(response_text)
             
         except Exception as e:
-            logger.error(f"Summary generation failed: {e}")
-            # Return empty structure on failure
+            logger.error(f"GPT extraction failed: {e}")
             return self._get_empty_summary()
     
-    def _build_extraction_prompt(self, transcription: str) -> str:
-        """Build detailed prompt for extracting closeout information with better field mapping"""
-        
-        prompt = f"""Extract field service closeout information from this voice transcription. The person is describing work they completed.
-
-TRANSCRIPTION:
-"{transcription}"
-
-Your task is to extract ALL of the following information. Look for natural language patterns and contextual clues. If something is not explicitly mentioned, use "Not mentioned".
-
-CLOSEOUT NOTES TO EXTRACT:
-
-1. **onsite_contact**: Name of person met on-site
-   - Look for: "met with", "on-site contact", "spoke to", "worked with", "customer was", "client"
-   - Example: "I met with John" → "John"
-
-2. **support_contact**: Support person/company worked with remotely
-   - Look for: "support", "helped by", "assisted by", "called", "remote support", "tech support"
-   - Example: "Sarah from tech support helped me" → "Sarah from tech support"
-
-3. **work_completed**: Detailed description of all work done
-   - Look for: "installed", "configured", "fixed", "replaced", "updated", "completed", "did", "performed"
-   - Include ALL technical work mentioned
-
-4. **delays**: Any delays mentioned
-   - Look for: "delayed", "waited", "held up", "postponed", "late", "behind schedule"
-   - If they say "no delays" or "on time", put "No delays"
-
-5. **troubleshooting_steps**: Any debugging, testing, or problem-solving steps
-   - Look for: "tested", "debugged", "troubleshot", "diagnosed", "checked", "verified", "tried"
-   - Include all technical troubleshooting mentioned
-
-6. **scope_completed**: Was the scope/job completed successfully?
-   - Look for: "completed", "finished", "done", "successful", "working", "resolved"
-   - Answer with "Yes - [details]" or "No - [reason]"
-
-7. **released_by**: Who released/signed off
-   - Look for: "released by", "signed off", "approved by", "let me go", "said I could leave"
-   - Example: "Bob released me" → "Bob"
-
-8. **release_code**: Any release/completion code
-   - Look for: "release code", "completion code", "ticket number", "reference", "code"
-   - Include any alphanumeric codes mentioned
-
-9. **return_tracking**: Return tracking number for parts/equipment
-   - Look for: "tracking number", "return label", "RMA", "shipping", "sent back"
-
-EXPENSES TO EXTRACT:
-
-10. **expenses**: Parking fees, tolls, meals, or other expenses
-    - Look for: "parking", "toll", "lunch", "dinner", "gas", "expense", "paid for", "cost"
-    - Example: "$10 for parking" → "$10 for parking"
-
-11. **materials_used**: Parts, supplies, or equipment used
-    - Look for: "used", "installed", "parts", "equipment", "supplies", "materials", "cables", "hardware"
-    - List all items mentioned
-
-OUT OF SCOPE TO EXTRACT:
-
-12. **out_of_scope_work**: Work outside original scope and who approved
-    - Look for: "additional", "extra", "out of scope", "not planned", "also did", "approved by"
-    - Include what work and who approved it
-
-ADDITIONAL CONTEXT TO EXTRACT:
-
-13. **location**: Where the work was performed
-    - Look for: addresses, building names, cities, "at", "location", "site", "facility"
-
-14. **datetime**: When the work was done
-    - Look for: dates, times, "today", "yesterday", "this morning", days of week
-
-15. **technician_name**: Name of the technician (person speaking)
-    - Look for: "I'm", "my name is", self-references
-
-16. **photos_uploaded**: Any mention of photos taken
-    - Look for: "photos", "pictures", "images", "took a photo", "documented"
-
-IMPORTANT EXTRACTION RULES:
-- Use natural language understanding - people don't speak in formal terms
-- Extract implied information from context
-- If multiple people are mentioned, identify their roles correctly
-- Keep original wording when possible, don't over-formalize
-- For yes/no questions, provide clear answers with brief context
-
-Return ONLY a valid JSON object with these exact field names:
-{{
-    "onsite_contact": "extracted value or Not mentioned",
-    "support_contact": "extracted value or Not mentioned",
-    "work_completed": "extracted value or Not mentioned",
-    "delays": "extracted value or Not mentioned",
-    "troubleshooting_steps": "extracted value or Not mentioned",
-    "scope_completed": "extracted value or Not mentioned",
-    "released_by": "extracted value or Not mentioned",
-    "release_code": "extracted value or Not mentioned",
-    "return_tracking": "extracted value or Not mentioned",
-    "expenses": "extracted value or Not mentioned",
-    "materials_used": "extracted value or Not mentioned",
-    "out_of_scope_work": "extracted value or Not mentioned",
-    "location": "extracted value or Not mentioned",
-    "datetime": "extracted value or Not mentioned",
-    "technician_name": "extracted value or Not mentioned",
-    "photos_uploaded": "extracted value or Not mentioned"
-}}
-
-No markdown, no code blocks, just the JSON object."""
-        
-        return prompt
-    
-    def _parse_summary_response(self, response_text: str) -> Dict[str, Any]:
-        """Parse GPT response and extract JSON with robust error handling"""
+    def _parse_gpt_response(self, text: str) -> Dict[str, Any]:
+        """Parse GPT response robustly"""
         try:
-            # Clean up response - remove markdown code blocks if present
-            if "```json" in response_text:
-                json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
-                if json_match:
-                    response_text = json_match.group(1)
-            elif "```" in response_text:
-                json_match = re.search(r'```\s*(.*?)\s*```', response_text, re.DOTALL)
-                if json_match:
-                    response_text = json_match.group(1)
+            # Remove markdown
+            text = re.sub(r'```(?:json)?\s*(.*?)\s*```', r'\1', text, flags=re.DOTALL)
             
-            # Try to parse as JSON
-            summary = json.loads(response_text)
+            # Find JSON object
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text)
+            if json_match:
+                text = json_match.group(0)
             
-            # Ensure all required fields exist
-            required_fields = self._get_empty_summary()
-            for field in required_fields:
-                if field not in summary:
-                    summary[field] = "Not mentioned"
+            # Parse JSON
+            parsed = json.loads(text)
             
-            # Clean up values - remove empty strings, normalize "Not mentioned"
-            for key, value in summary.items():
-                if value is None or value == "" or value.lower() in ["n/a", "none", "null"]:
-                    summary[key] = "Not mentioned"
-                elif isinstance(value, str):
-                    summary[key] = value.strip()
+            # Ensure all fields exist
+            result = self._get_empty_summary()
+            for field, value in parsed.items():
+                if value and str(value).strip() and str(value).strip().lower() not in ['null', 'none', '']:
+                    result[field] = str(value).strip()
             
-            logger.info(f"Successfully parsed summary with {len(summary)} fields")
-            return summary
+            return result
             
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON from GPT response: {e}")
-            logger.error(f"Response text: {response_text[:500]}...")
-            
-            # Try to extract key-value pairs manually as fallback
-            summary = self._extract_fields_manually(response_text)
-            if summary:
-                return summary
-            
-            # Return empty structure if all parsing fails
-            return self._get_empty_summary()
         except Exception as e:
-            logger.error(f"Unexpected error parsing summary: {e}")
-            return self._get_empty_summary()
+            logger.error(f"Failed to parse GPT response: {e}")
+            # Try manual extraction
+            result = self._get_empty_summary()
+            
+            for field in result.keys():
+                patterns = [
+                    rf'"{field}"\s*:\s*"([^"]*)"',
+                    rf'{field}:\s*"([^"]*)"',
+                    rf'{field}:\s*([^,\n}}]+)',
+                ]
+                
+                for pattern in patterns:
+                    match = re.search(pattern, text, re.IGNORECASE)
+                    if match:
+                        value = match.group(1).strip().strip('"').strip("'")
+                        if value and value.lower() != 'not mentioned':
+                            result[field] = value
+                            break
+            
+            return result
     
-    def _extract_fields_manually(self, text: str) -> Dict[str, Any]:
-        """Fallback method to extract fields from text if JSON parsing fails"""
-        try:
-            summary = {}
-            field_names = [
-                "onsite_contact", "support_contact", "work_completed", "delays",
-                "troubleshooting_steps", "scope_completed", "released_by", "release_code",
-                "return_tracking", "expenses", "materials_used", "out_of_scope_work",
-                "location", "datetime", "technician_name", "photos_uploaded"
-            ]
-            
-            for field in field_names:
-                # Try to find pattern like "field_name": "value"
-                pattern = rf'"{field}"\s*:\s*"([^"]*)"'
-                match = re.search(pattern, text, re.IGNORECASE)
-                if match:
-                    summary[field] = match.group(1)
-                else:
-                    summary[field] = "Not mentioned"
-            
-            if summary:
-                logger.info(f"Successfully extracted {len(summary)} fields manually")
-                return summary
-            
-        except Exception as e:
-            logger.error(f"Manual extraction failed: {e}")
+    def _merge_results(self, pattern_results: Dict[str, Any], gpt_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge pattern and GPT results intelligently"""
+        final = self._get_empty_summary()
         
-        return None
+        # For each field, prefer non-empty values
+        for field in final.keys():
+            gpt_val = gpt_results.get(field, "Not mentioned")
+            pattern_val = pattern_results.get(field, "Not mentioned")
+            
+            # Prefer GPT for complex fields
+            if field in ['work_completed', 'troubleshooting_steps', 'delays', 'out_of_scope_work']:
+                if gpt_val != "Not mentioned":
+                    final[field] = gpt_val
+                elif pattern_val != "Not mentioned":
+                    final[field] = pattern_val
+            # Prefer patterns for structured data
+            elif field in ['datetime', 'location', 'release_code', 'expenses']:
+                if pattern_val != "Not mentioned":
+                    final[field] = pattern_val
+                elif gpt_val != "Not mentioned":
+                    final[field] = gpt_val
+            # For names, check both
+            else:
+                if gpt_val != "Not mentioned":
+                    final[field] = gpt_val
+                elif pattern_val != "Not mentioned":
+                    final[field] = pattern_val
+        
+        return final
     
     def _get_empty_summary(self) -> Dict[str, Any]:
-        """Return empty summary structure with all required fields"""
+        """Return empty summary structure"""
         return {
             "onsite_contact": "Not mentioned",
             "support_contact": "Not mentioned",

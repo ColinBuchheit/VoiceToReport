@@ -58,7 +58,7 @@ class VoiceAgentService:
         try:
             prompt = self._build_enhanced_prompt(transcription, screen_context)
             
-            # FIXED: Use max_completion_tokens for GPT-5 instead of max_tokens
+            # FIXED: Remove temperature parameter for GPT-5
             response = self.client.chat.completions.create(
                 model=settings.gpt_model,
                 messages=[
@@ -66,67 +66,93 @@ class VoiceAgentService:
                         "role": "system",
                         "content": "You are a voice command processor for a mobile field service app. Always respond with valid JSON. Be action-focused and avoid unnecessary responses."
                     },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                max_completion_tokens=settings.gpt_max_tokens,  # FIXED: Changed from max_tokens
-                temperature=settings.gpt_temperature
+                    {"role": "user", "content": prompt}
+                ]
+                # NO temperature parameter for GPT-5
             )
             
             response_text = response.choices[0].message.content.strip()
-            logger.info(f"GPT response: {response_text[:200]}...")
+            logger.info(f"GPT response received: {response_text[:200]}...")
             
-            return self._parse_gpt_response(response_text)
+            # Parse and validate response
+            parsed_response = self._parse_gpt_response(response_text)
+            
+            # Ensure response has all required fields
+            return self._validate_response_structure(parsed_response)
             
         except Exception as e:
             logger.error(f"GPT processing failed: {e}")
             raise e
     
+    def _validate_response_structure(self, response: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensure response has all required fields for frontend"""
+        required_fields = {
+            'action': 'acknowledge',
+            'target': '',
+            'value': '',
+            'confidence': 0.5,
+            'confirmation': 'Command processed',
+            'ttsText': '',
+            'success': True,
+            'needs_clarification': False,
+            'clarification_question': ''
+        }
+        
+        for field, default in required_fields.items():
+            if field not in response:
+                response[field] = default
+        
+        return response
+    
     def _build_enhanced_prompt(self, transcription: str, screen_context: Dict[str, Any]) -> str:
-        """Build enhanced prompt for GPT with screen context - IMPROVED for text replacement"""
+        """Build comprehensive prompt for GPT-5 with better context understanding"""
         
-        screen_name = screen_context.get('screenName', 'unknown')
-        mode = screen_context.get('mode', 'view')
-        visible_fields = screen_context.get('visibleFields', [])
-        current_values = screen_context.get('currentValues', {})
-        
-        # Get the current transcription text for context if available
+        # Extract current content if available
         current_text = ""
+        visible_fields = screen_context.get('visibleFields', [])
         for field in visible_fields:
             if field.get('name') == 'transcription':
-                current_text = field.get('currentValue', '')[:1000]  # Get first 1000 chars for context
+                current_text = field.get('currentValue', '')
                 break
         
-        field_list = "\n".join([
-            f"- {field.get('label', field.get('name', ''))} ({field.get('name', '')}): '{field.get('currentValue', '')[:100]}...'"
-            for field in visible_fields
-        ])
+        # Build field descriptions
+        field_info = []
+        for field in visible_fields:
+            field_name = field.get('name', '')
+            field_label = field.get('label', '')
+            field_type = field.get('type', 'text')
+            current_value = field.get('currentValue', '')
+            
+            if field_name and field_name != 'transcription':
+                field_info.append(f"- {field_name} ({field_label}): {field_type} field, current value: '{current_value}'")
         
-        prompt = f"""Process this voice command for a field service app:
+        fields_description = "\n".join(field_info) if field_info else "No additional fields available"
+        
+        prompt = f"""Voice Command: "{transcription}"
 
-VOICE COMMAND: "{transcription}"
+CURRENT SCREEN: {screen_context.get('screenName', 'unknown')}
+MODE: {screen_context.get('mode', 'unknown')}
 
-CURRENT SCREEN: {screen_name}
-MODE: {mode}
-CURRENT TEXT CONTENT: "{current_text}"
+CURRENT TEXT CONTENT:
+"{current_text}"
 
 AVAILABLE FIELDS:
-{field_list}
+{fields_description}
 
-TASK: Analyze the voice command and return a JSON response with these fields:
-- action: One of [update_field, navigate, acknowledge, execute_action, clarify]
-- target: The field name or navigation target (if applicable)
-- value: The new value for the field (if updating a field)
-- confidence: Your confidence level (0.0 to 1.0)
-- confirmation: A brief confirmation message for the user
-- ttsText: Text-to-speech response (can be empty)
-- success: true/false
-- needs_clarification: true if you need more info
-- clarification_question: Question to ask user (if needs_clarification is true)
+INSTRUCTIONS:
+Analyze the voice command and determine the appropriate action. Return a JSON response with these fields:
+- action: "update_field" | "execute_action" | "navigate" | "clarify" | "acknowledge"
+- target: field name or action name
+- value: new value or complete modified text for replacements
+- confidence: 0.0 to 1.0
+- confirmation: brief confirmation message
+- ttsText: text to speak (if any)
+- success: boolean
+- needs_clarification: boolean
+- clarification_question: question to ask if clarification needed
 
-CRITICAL RULES FOR TEXT EDITING:
+CRITICAL RULES:
+
 1. TEXT REPLACEMENT COMMANDS: If user says "change X to Y" or "replace X with Y":
    - You must perform the replacement on the CURRENT TEXT CONTENT shown above
    - Return the ENTIRE modified text in the value field
@@ -222,71 +248,72 @@ Respond ONLY with valid JSON, no markdown formatting."""
         text_change_patterns = [
             r'(?:change|replace)\s+["\']?(.+?)["\']?\s+(?:to|with)\s+["\']?(.+?)["\']?(?:\?|$)',
             r'(?:change|replace)\s+(?:the\s+)?(.+?)\s+(?:to|with)\s+say\s+(.+?)(?:\?|$)',
-            r'make\s+(?:the\s+)?(.+?)\s+say\s+(.+?)(?:\?|$)',
+            r'make\s+(?:the\s+)?(.+?)\s+say\s+(.+?)(?:\?|$)'
         ]
         
         for pattern in text_change_patterns:
             match = re.search(pattern, transcription_lower)
             if match:
-                old_text = match.group(1).strip()
-                new_text = match.group(2).strip()
+                find_text = match.group(1).strip()
+                replace_text = match.group(2).strip()
                 
-                # Perform the replacement on current text
+                # Perform replacement on current text
                 if current_text:
+                    # Case-insensitive replacement
+                    import re
                     modified_text = re.sub(
-                        re.escape(old_text), 
-                        new_text, 
+                        re.escape(find_text), 
+                        replace_text, 
                         current_text, 
                         flags=re.IGNORECASE
                     )
                     
+                    if modified_text != current_text:
+                        return {
+                            "action": "update_field",
+                            "target": "transcription",
+                            "value": modified_text,  # Return complete modified text
+                            "confidence": 0.9,
+                            "confirmation": f"Changed '{find_text}' to '{replace_text}'",
+                            "ttsText": "",
+                            "success": True,
+                            "needs_clarification": False
+                        }
+        
+        # Pattern 2: Professional/Polish commands
+        professional_patterns = ['make it professional', 'polish it', 'clean it up', 'make it formal']
+        for pattern in professional_patterns:
+            if pattern in transcription_lower:
+                if current_text:
+                    # Simple professional rewrite (in production, use GPT for better results)
+                    professional_text = self._make_professional(current_text)
                     return {
                         "action": "update_field",
                         "target": "transcription",
-                        "value": modified_text,
+                        "value": professional_text,
                         "confidence": 0.8,
-                        "confirmation": f"Changed '{old_text}' to '{new_text}'",
+                        "confirmation": "Made the text more professional",
                         "ttsText": "",
                         "success": True,
                         "needs_clarification": False
                     }
         
-        # Pattern 2: "make it professional" or "polish it"
-        if any(phrase in transcription_lower for phrase in ['make it professional', 'make this professional', 
-                                                            'polish it', 'clean it up', 'make it sound better']):
-            if current_text:
-                # Simple professional rewrite (in production, this would use GPT)
-                professional_text = current_text.strip()
-                professional_text = professional_text[0].upper() + professional_text[1:] if professional_text else ""
-                
-                return {
-                    "action": "update_field",
-                    "target": "transcription",
-                    "value": professional_text,
-                    "confidence": 0.7,
-                    "confirmation": "Made the text more professional",
-                    "ttsText": "",
-                    "success": True,
-                    "needs_clarification": False
-                }
-        
-        # Pattern 3: "generate summary" or "generate closeout"
-        if any(phrase in transcription_lower for phrase in ['generate summary', 'generate closeout', 
-                                                            'create summary', 'create closeout']):
+        # Pattern 3: Navigation commands
+        if any(phrase in transcription_lower for phrase in ['generate summary', 'create summary', 'generate closeout']):
             return {
                 "action": "execute_action",
                 "target": "generate_summary",
                 "value": "",
                 "confidence": 0.9,
-                "confirmation": "Generating closeout summary",
+                "confirmation": "Generating summary",
                 "ttsText": "",
                 "success": True,
                 "needs_clarification": False
             }
         
-        # Pattern 4: Field updates - "set X to Y"
+        # Pattern 4: Field updates
         field_update_patterns = [
-            r'(?:set|update|change)\s+(?:the\s+)?([a-z_]+)\s+to\s+(.+)',
+            r'set\s+([a-z_]+)\s+to\s+(.+)',
             r'([a-z_]+)\s+(?:is|should be|equals)\s+(.+)',
         ]
         
@@ -313,6 +340,35 @@ Respond ONLY with valid JSON, no markdown formatting."""
         
         # Default: acknowledge
         return self._create_acknowledge_response(transcription)
+    
+    def _make_professional(self, text: str) -> str:
+        """Simple function to make text more professional (placeholder for GPT enhancement)"""
+        # Remove casual phrases
+        replacements = {
+            "hi": "Hello",
+            "hey": "Hello",
+            "yeah": "yes",
+            "nope": "no",
+            "gonna": "going to",
+            "wanna": "want to",
+            "gotta": "have to",
+            "kinda": "kind of",
+            "sorta": "sort of"
+        }
+        
+        professional_text = text
+        for casual, formal in replacements.items():
+            professional_text = re.sub(r'\b' + casual + r'\b', formal, professional_text, flags=re.IGNORECASE)
+        
+        # Ensure first letter is capitalized
+        if professional_text:
+            professional_text = professional_text[0].upper() + professional_text[1:]
+        
+        # Ensure ends with period if not already punctuated
+        if professional_text and professional_text[-1] not in '.!?':
+            professional_text += '.'
+        
+        return professional_text
     
     def _match_field_name(self, field_ref: str, screen_context: Dict[str, Any]) -> Optional[str]:
         """Match a field reference to an actual field name"""
