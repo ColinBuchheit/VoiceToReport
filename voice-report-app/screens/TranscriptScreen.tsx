@@ -353,7 +353,6 @@ export default function TranscriptScreen({ navigation, route }: Props) {
               multiline
               textAlignVertical="top"
               placeholder="Your voice recording transcription will appear here..."
-              key={`transcript-input-${transcription?.length || 0}`}  // Force re-render on content change
             />
           ) : (
             <Text style={styles.transcriptionText}>
