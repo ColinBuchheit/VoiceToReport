@@ -55,68 +55,74 @@ class SummarizationService:
         result = self._get_empty_summary()
         text_lower = transcription.lower()
         
+        # LOCATION extraction - FIXED to avoid "Site Delay"
+        location_patterns = [
+            # Look for "Site: [Location Name]" pattern first
+            r'(?:site|location|facility|building):\s*([^,\n-]+)',
+            # Company names with location context
+            r'at\s+([A-Z][A-Za-z\s]+(?:packaging|manufacturing|building|facility|office|center|plant|factory))',
+            # City/state patterns
+            r'([A-Z][A-Za-z\s]+,\s*[A-Z][A-Za-z\s]+)',
+            # Building/location references
+            r'(?:went to|arrived at|located at)\s+([A-Z][A-Za-z\s]+)',
+        ]
+        
+        for pattern in location_patterns:
+            match = re.search(pattern, transcription, re.IGNORECASE)
+            if match:
+                location = match.group(1).strip()
+                # Avoid extracting "Delay" or similar non-location words
+                if 'delay' not in location.lower() and len(location) > 3:
+                    result['location'] = location
+                    logger.info(f"Found location: {result['location']}")
+                    break
+        
         # DATETIME extraction - multiple patterns
         datetime_patterns = [
+            r'arrival:\s*(\d{1,2}:\d{2})',  # Arrival time
+            r'departure:\s*(\d{1,2}:\d{2})', # Departure time  
             r'(?:at|on|completed at)\s+(\d{1,2}:\d{2}\s*[ap]\.?m\.?)',  # times
             r'(?:at|on)\s+(\d{1,2}:\d{2})',  # 24hr times
             r'(today|yesterday|this morning|this afternoon)',  # relative times
             r'(\d{1,2}/\d{1,2}/\d{2,4})',  # dates
-            r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}',  # month day
         ]
+        
+        time_info = []
         for pattern in datetime_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                result['datetime'] = match.group(1)
-                logger.info(f"Found datetime: {result['datetime']}")
-                break
+            matches = re.findall(pattern, text_lower)
+            time_info.extend(matches)
         
-        # LOCATION extraction - look for building/facility names
-        location_patterns = [
-            r'at\s+([A-Z][A-Za-z\s]+(?:manufacturing|building|facility|office|center|plant|factory|site))',
-            r'(?:location|site|facility|building)(?:\s+was)?\s+([A-Za-z0-9\s,]+)',
-            r'at\s+([A-Z][A-Za-z\s]+),?\s+building\s+(\w+)',
-            r'(?:went to|arrived at|at)\s+([A-Z][A-Za-z\s]+)',
-        ]
-        for pattern in location_patterns:
-            match = re.search(pattern, transcription, re.IGNORECASE)
-            if match:
-                location = match.group(0).replace('at ', '').strip()
-                result['location'] = location
-                logger.info(f"Found location: {result['location']}")
-                break
+        if time_info:
+            result['datetime'] = ', '.join(time_info[:3])  # Combine multiple time references
+            logger.info(f"Found datetime: {result['datetime']}")
         
-        # TECHNICIAN NAME - from introduction
-        name_patterns = [
-            r'(?:my name is|i\'m|this is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
-            r'^([A-Z][a-z]+)\s+here',
-            r'technician\s+([A-Z][a-z]+)',
-        ]
-        for pattern in name_patterns:
-            match = re.search(pattern, transcription, re.IGNORECASE)
-            if match:
-                result['technician_name'] = match.group(1).strip()
-                logger.info(f"Found technician: {result['technician_name']}")
-                break
-        
-        # ONSITE CONTACT
+        # ONSITE CONTACT - specific patterns
         contact_patterns = [
-            r'(?:met with|worked with|spoke to|contact was|customer was)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
-            r'([A-Z][a-z]+)\s+(?:was|is)\s+(?:my|the)\s+(?:contact|customer|client)',
-            r'onsite contact\s+(?:was|is)?\s*([A-Z][a-z]+)',
+            r'contacts?:\s*([^,\n-]+(?:,\s*[^,\n-]+)?)',  # "Contacts: John Miller, Sarah Lopez"
+            r'(?:met with|worked with|contact was)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
+            r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+\([^)]*(?:operations|manager|supervisor|contact)\)',
         ]
+        
         for pattern in contact_patterns:
             match = re.search(pattern, transcription, re.IGNORECASE)
             if match:
-                result['onsite_contact'] = match.group(1).strip()
+                contact = match.group(1).strip()
+                # Extract first person if multiple listed
+                if ',' in contact:
+                    contact = contact.split(',')[0].strip()
+                # Remove role descriptions in parentheses
+                contact = re.sub(r'\s*\([^)]+\)', '', contact)
+                result['onsite_contact'] = contact
                 logger.info(f"Found onsite contact: {result['onsite_contact']}")
                 break
         
-        # SUPPORT CONTACT
+        # SUPPORT CONTACT - look for IT/support/contractor mentions
         support_patterns = [
+            r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+\((?:IT|support|tech|contractor)\)',
             r'([A-Z][a-z]+)\s+(?:from|in)\s+(?:tech\s+)?support',
-            r'(?:called|spoke to)\s+([A-Z][a-z]+)\s+(?:for support|for help)',
-            r'support from\s+([A-Z][a-z]+)',
+            r'(?:support from|helped by)\s+([A-Z][a-z]+)',
         ]
+        
         for pattern in support_patterns:
             match = re.search(pattern, transcription, re.IGNORECASE)
             if match:
@@ -124,111 +130,121 @@ class SummarizationService:
                 logger.info(f"Found support contact: {result['support_contact']}")
                 break
         
-        # WORK COMPLETED - extract action items
-        work_verbs = ['replaced', 'installed', 'fixed', 'repaired', 'configured', 
-                     'tested', 'completed', 'upgraded', 'removed', 'checked']
-        work_items = []
-        for verb in work_verbs:
-            pattern = rf'{verb}\s+(?:the\s+)?([^.,;]+)'
-            matches = re.findall(pattern, text_lower)
-            for match in matches:
-                # Clean up the match
-                item = f"{verb} {match.strip()}"
-                if len(item) < 100:  # Avoid capturing too much
-                    work_items.append(item)
+        # DELAYS - specific delay mentions
+        delay_patterns = [
+            r'delay[:\s]+([^.\n]+)',
+            r'waited?\s+(?:for\s+)?([^.\n]+)',
+            r'(?:delayed by|held up by)\s+([^.\n]+)',
+        ]
         
-        if work_items:
-            result['work_completed'] = '; '.join(work_items[:10])  # Limit to 10 items
-            logger.info(f"Found work items: {len(work_items)}")
+        for pattern in delay_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                result['delays'] = match.group(1).strip()
+                logger.info(f"Found delays: {result['delays']}")
+                break
         
         # RELEASE CODE - alphanumeric codes
         code_patterns = [
-            r'(?:code|ticket|number|reference)\s*#?\s*(?:is|was)?\s*([A-Z0-9]{4,})',
-            r'([A-Z0-9]{6,})\b',  # Any 6+ char alphanumeric
+            r'(?:release\s+)?code[:\s]+([A-Z0-9]{3,})',
+            r'(?:ticket|reference|confirmation)\s*#?\s*([A-Z0-9]{4,})',
         ]
+        
         for pattern in code_patterns:
-            match = re.search(pattern, transcription)
+            match = re.search(pattern, transcription, re.IGNORECASE)
             if match:
                 result['release_code'] = match.group(1)
-                logger.info(f"Found code: {result['release_code']}")
-                break
-        
-        # EXPENSES
-        expense_patterns = [
-            r'\$(\d+(?:\.\d{2})?)\s*(?:for\s+)?([a-z\s]+)',
-            r'(?:parking|gas|meals?|tolls?)\s*(?:was|cost)?\s*\$?(\d+(?:\.\d{2})?)',
-        ]
-        for pattern in expense_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                result['expenses'] = match.group(0).strip()
-                logger.info(f"Found expenses: {result['expenses']}")
+                logger.info(f"Found release code: {result['release_code']}")
                 break
         
         # PHOTOS
         photo_patterns = [
-            r'(\d+)\s*(?:photos?|pictures?|images?)',
-            r'took\s+(?:photos?|pictures?)',
-            r'uploaded\s+(\d+)\s*(?:photos?|pictures?)',
+            r'photos?\s+uploaded\s*\(?(\d+)\)?',
+            r'(\d+)\s+photos?\s+(?:taken|uploaded|captured)',
+            r'uploaded\s+\(?(\d+)\)?\s+photos?',
         ]
+        
         for pattern in photo_patterns:
             match = re.search(pattern, text_lower)
             if match:
-                if match.group(1) if match.groups() else "Yes":
-                    result['photos_uploaded'] = f"{match.group(1)} photos" if match.group(1) else "Yes"
+                num_photos = match.group(1)
+                result['photos_uploaded'] = f"{num_photos} photos"
                 logger.info(f"Found photos: {result['photos_uploaded']}")
                 break
         
+        # EXPENSES
+        expense_patterns = [
+            r'expenses?:\s*([^.\n]+)',
+            r'(?:parking|gas|meals?|tolls?)[\s:]+\$?(\d+(?:\.\d{2})?)',
+            r'no\s+(?:expenses?|parking|tolls)',
+        ]
+        
+        for pattern in expense_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                if 'no expense' in match.group(0).lower() or 'none' in match.group(0).lower():
+                    result['expenses'] = "None"
+                else:
+                    result['expenses'] = match.group(0).strip()
+                logger.info(f"Found expenses: {result['expenses']}")
+                break
+        
+        # MATERIALS USED
+        materials_patterns = [
+            r'materials?\s+used:\s*([^.\n]+)',
+            r'used:\s*(\d+x?\s+[^.\n,]+(?:,\s*\d+x?\s+[^.\n,]+)*)',
+            r'installed\s+(?:new\s+)?(\w+\s+\w+\s+(?:AP|switch|cable|router))',
+        ]
+        
+        for pattern in materials_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                result['materials_used'] = match.group(1).strip()
+                logger.info(f"Found materials: {result['materials_used']}")
+                break
+        
         # SCOPE COMPLETED
-        if 'complet' in text_lower:
-            if 'not complet' in text_lower or 'incomplete' in text_lower:
-                result['scope_completed'] = "No"
-            elif 'partially' in text_lower or 'partial' in text_lower:
-                result['scope_completed'] = "Partially"
-            elif 'completed' in text_lower or 'complete' in text_lower:
-                result['scope_completed'] = "Yes"
+        if 'job complete' in text_lower or 'work complete' in text_lower or 'network restored' in text_lower:
+            result['scope_completed'] = "Yes"
+        elif 'not complete' in text_lower or 'incomplete' in text_lower:
+            result['scope_completed'] = "No"
+        elif 'partial' in text_lower:
+            result['scope_completed'] = "Partially"
         
         return result
     
     def _enhanced_gpt_extraction(self, transcription: str, pattern_hints: Dict[str, Any]) -> Dict[str, Any]:
-        """Enhanced GPT extraction with better prompting and examples"""
+        """Enhanced GPT extraction with better prompting and field separation"""
         try:
-            # Count what we already found
-            found_fields = [k for k, v in pattern_hints.items() if v != "Not mentioned"]
-            
-            # Build a focused prompt
-            prompt = f"""Extract ALL field service information from this transcription. Be thorough and accurate.
+            prompt = f"""Extract field service information from this transcription. Be accurate and specific.
 
 TRANSCRIPTION:
 "{transcription}"
 
-ALREADY IDENTIFIED (verify these):
-{chr(10).join(f'- {field}: {value}' for field, value in pattern_hints.items() if value != "Not mentioned")}
+IMPORTANT RULES:
+1. work_completed: List ONLY the actual work performed (installed, configured, verified, etc.). Do NOT include troubleshooting or diagnostic steps.
+2. troubleshooting_steps: List ONLY diagnostic and troubleshooting actions (tested, checked, tried different ports, etc.)
+3. location: Extract the actual location/site name, NOT delays or other information
+4. Keep each field distinct - do not mix content between fields
 
-EXTRACT ALL THESE FIELDS:
+EXTRACT THESE FIELDS:
 
-1. onsite_contact: Person met at job site (e.g., "met with John" → "John")
-2. support_contact: Remote/phone support person (e.g., "Sarah from support" → "Sarah")  
-3. work_completed: ALL tasks performed (be comprehensive, list everything done)
-4. delays: Any delays mentioned and causes
-5. troubleshooting_steps: Diagnostic steps taken
+1. onsite_contact: Name of person met at site (just the name)
+2. support_contact: Name of support/IT person (just the name)
+3. work_completed: Tasks actually completed (e.g., "Installed new AP, configured settings, verified connectivity")
+4. delays: Any delays and their causes
+5. troubleshooting_steps: Diagnostic steps taken (e.g., "Tested cable, checked power, tried different port")
 6. scope_completed: Was work finished? (Yes/No/Partially)
-7. released_by: Who approved/signed off
-8. release_code: Any codes/ticket numbers
-9. return_tracking: Shipping/tracking numbers
-10. expenses: Money spent (parking, gas, etc)
-11. materials_used: Parts/materials used
-12. out_of_scope_work: Extra work performed
-13. location: Where work was done (building, address)
-14. datetime: When work was done (time, date)
-15. technician_name: Person speaking/technician name
-16. photos_uploaded: Photos taken/uploaded
-
-IMPORTANT:
-- Extract EVERYTHING mentioned summarize within reason making sure key points are covered
-- For location, include full details (e.g., "Westfield Manufacturing, building three")
-- For datetime, include all time references (e.g., "2:45 p.m.")
-- For work_completed, list ALL tasks mentioned
+7. released_by: Who signed off
+8. release_code: Any reference numbers
+9. return_tracking: Shipping/tracking info
+10. expenses: Money spent (parking, etc.)
+11. materials_used: Parts/equipment used
+12. out_of_scope_work: Extra work beyond original scope
+13. location: Site/building name and address
+14. datetime: Time and date information
+15. technician_name: Technician's name
+16. photos_uploaded: Number of photos taken
 
 Return ONLY this JSON (no markdown):
 {{
@@ -237,7 +253,7 @@ Return ONLY this JSON (no markdown):
   "work_completed": "value or Not mentioned",
   "delays": "value or Not mentioned",
   "troubleshooting_steps": "value or Not mentioned",
-  "scope_completed": "value or Not mentioned",
+  "scope_completed": "Yes/No/Partially or Not mentioned",
   "released_by": "value or Not mentioned",
   "release_code": "value or Not mentioned",
   "return_tracking": "value or Not mentioned",
@@ -250,20 +266,20 @@ Return ONLY this JSON (no markdown):
   "photos_uploaded": "value or Not mentioned"
 }}"""
 
-            logger.info("Calling GPT-5 for enhanced extraction...")
+            logger.info("Calling GPT for enhanced extraction...")
             response = self.client.chat.completions.create(
                 model=settings.gpt_model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a precise data extractor. Extract ALL information mentioned in the transcription. Be comprehensive and accurate. Never summarize or shorten the extracted data."
+                        "content": "You are a precise data extractor. Extract information exactly as requested. Keep work_completed separate from troubleshooting_steps."
                     },
                     {"role": "user", "content": prompt}
                 ]
             )
             
             response_text = response.choices[0].message.content.strip()
-            logger.info(f"GPT-5 response length: {len(response_text)}")
+            logger.info(f"GPT response length: {len(response_text)}")
             
             # Parse response
             return self._parse_gpt_response(response_text)
@@ -296,48 +312,32 @@ Return ONLY this JSON (no markdown):
             
         except Exception as e:
             logger.error(f"Failed to parse GPT response: {e}")
-            # Try manual extraction
-            result = self._get_empty_summary()
-            
-            for field in result.keys():
-                patterns = [
-                    rf'"{field}"\s*:\s*"([^"]*)"',
-                    rf'{field}:\s*"([^"]*)"',
-                    rf'{field}:\s*([^,\n}}]+)',
-                ]
-                
-                for pattern in patterns:
-                    match = re.search(pattern, text, re.IGNORECASE)
-                    if match:
-                        value = match.group(1).strip().strip('"').strip("'")
-                        if value and value.lower() != 'not mentioned':
-                            result[field] = value
-                            break
-            
-            return result
+            return self._get_empty_summary()
     
     def _merge_results(self, pattern_results: Dict[str, Any], gpt_results: Dict[str, Any]) -> Dict[str, Any]:
         """Merge pattern and GPT results intelligently"""
         final = self._get_empty_summary()
         
-        # For each field, prefer non-empty values
+        # For each field, prefer non-empty values with smart merging
         for field in final.keys():
             gpt_val = gpt_results.get(field, "Not mentioned")
             pattern_val = pattern_results.get(field, "Not mentioned")
             
-            # Prefer GPT for complex fields
-            if field in ['work_completed', 'troubleshooting_steps', 'delays', 'out_of_scope_work']:
-                if gpt_val != "Not mentioned":
-                    final[field] = gpt_val
-                elif pattern_val != "Not mentioned":
-                    final[field] = pattern_val
-            # Prefer patterns for structured data
-            elif field in ['datetime', 'location', 'release_code', 'expenses']:
+            # Prefer patterns for structured data (more accurate for these)
+            if field in ['datetime', 'location', 'release_code', 'photos_uploaded', 'expenses']:
                 if pattern_val != "Not mentioned":
                     final[field] = pattern_val
                 elif gpt_val != "Not mentioned":
                     final[field] = gpt_val
-            # For names, check both
+            
+            # Prefer GPT for complex narrative fields
+            elif field in ['work_completed', 'troubleshooting_steps', 'delays', 'out_of_scope_work']:
+                if gpt_val != "Not mentioned":
+                    final[field] = gpt_val
+                elif pattern_val != "Not mentioned":
+                    final[field] = pattern_val
+            
+            # For names and other fields, prefer GPT but check both
             else:
                 if gpt_val != "Not mentioned":
                     final[field] = gpt_val

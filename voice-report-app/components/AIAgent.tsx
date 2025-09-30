@@ -1,4 +1,3 @@
-// voice-report-app/components/AIAgent.tsx - CLEANED AND OPTIMIZED VERSION
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -83,7 +82,7 @@ export default function AIAgent({
   disabled = false,
   customStyle,
 }: AIAgentProps) {
-  
+
   // State Management
   const [agentState, setAgentState] = useState<AIAgentState>({
     isListening: false,
@@ -95,7 +94,7 @@ export default function AIAgent({
   const aiService = AIAgentService.getInstance();
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
-  
+
   const buttonSize = customStyle?.size || 80;
   const buttonColor = customStyle?.buttonColor;
 
@@ -148,22 +147,22 @@ export default function AIAgent({
       console.log('🎤 AI Agent starting to listen...');
       setAgentState({ isListening: true, isProcessing: false, isPlayingResponse: false });
       startListeningAnimations();
-      
+
       const recording = await aiService.startListening();
       console.log('✅ Recording started successfully');
-      
+
       // Auto-stop after 30 seconds
       setTimeout(() => {
         if (agentState.isListening) {
           stopListening();
         }
       }, 3000000);
-      
+
     } catch (error) {
       console.error('❌ Failed to start recording:', error);
       setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
       stopAllAnimations();
-      
+
       const errorMessage = error instanceof Error ? error.message : 'Failed to start recording';
       Alert.alert('Recording Error', errorMessage);
     }
@@ -175,18 +174,18 @@ export default function AIAgent({
       console.log('⏹️ Stopping recording...');
       stopAllAnimations();
       setAgentState({ isListening: false, isProcessing: true, isPlayingResponse: false });
-      
+
       const audioFile = await aiService.stopListening();
       if (!audioFile) {
         throw new Error('No audio recorded');
       }
-      
+
       console.log('📤 Sending voice command to backend...');
       const response = await aiService.processVoiceCommand(audioFile, screenContext);
       console.log('📥 Received response:', response);
-      
+
       await executeCommand(response);
-      
+
     } catch (error) {
       console.error('❌ Voice processing failed:', error);
       Alert.alert(
@@ -203,7 +202,7 @@ export default function AIAgent({
   const executeCommand = async (response: VoiceCommandResponse) => {
     try {
       console.log('🎯 Executing command:', response.action);
-      
+
       switch (response.action) {
         case 'update_field':
         case 'edit_field':
@@ -219,7 +218,7 @@ export default function AIAgent({
             console.log(`✏️ Field updated: ${response.target}`);
           }
           break;
-          
+
         case 'toggle_mode':
         case 'toggle_edit_mode':
           if (onModeToggle) {
@@ -227,14 +226,14 @@ export default function AIAgent({
             console.log('🔄 Mode toggled');
           }
           break;
-          
+
         case 'navigate':
           if (response.target && onNavigate) {
             onNavigate(response.target);
             console.log(`🧭 Navigating to: ${response.target}`);
           }
           break;
-          
+
         case 'execute_action':
         case 'generate_summary':
           if (response.target && onAction) {
@@ -242,14 +241,14 @@ export default function AIAgent({
             console.log(`⚡ Executing action: ${response.target}`);
           }
           break;
-          
+
         case 'clear_field':
           if (response.target && onFieldUpdate) {
             await onFieldUpdate(response.target, '');
             console.log(`🗑️ Field cleared: ${response.target}`);
           }
           break;
-          
+
         default:
           // Play TTS for acknowledgments/responses
           if (response.ttsText) {
@@ -257,7 +256,7 @@ export default function AIAgent({
           }
           console.log(`💬 Response: ${response.confirmation}`);
       }
-      
+
     } catch (error) {
       console.error('❌ Command execution failed:', error);
       Alert.alert('Error', 'Failed to execute command');
@@ -324,11 +323,11 @@ export default function AIAgent({
     if (agentState.isProcessing) {
       return <AnimatedDots color={COLORS.ORANGE} />;
     }
-    
+
     const iconProps = agentState.isListening
       ? { name: 'stop' as const, color: COLORS.BLACK }
       : { name: 'mic' as const, color: COLORS.WHITE };
-    
+
     return <Ionicons name={iconProps.name} size={32} color={iconProps.color} />;
   };
 
@@ -356,7 +355,7 @@ export default function AIAgent({
           ]}
         />
       )}
-      
+
       {/* Main button */}
       <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
         <TouchableOpacity
