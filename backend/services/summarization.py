@@ -56,45 +56,7 @@ class SummarizationService:
         text_lower = transcription.lower()
         
         # LOCATION extraction - FIXED to avoid "Site Delay"
-        location_patterns = [
-            # Look for "Site: [Location Name]" pattern first
-            r'(?:site|location|facility|building):\s*([^,\n-]+)',
-            # Company names with location context
-            r'at\s+([A-Z][A-Za-z\s]+(?:packaging|manufacturing|building|facility|office|center|plant|factory))',
-            # City/state patterns
-            r'([A-Z][A-Za-z\s]+,\s*[A-Z][A-Za-z\s]+)',
-            # Building/location references
-            r'(?:went to|arrived at|located at)\s+([A-Z][A-Za-z\s]+)',
-        ]
-        
-        for pattern in location_patterns:
-            match = re.search(pattern, transcription, re.IGNORECASE)
-            if match:
-                location = match.group(1).strip()
-                # Avoid extracting "Delay" or similar non-location words
-                if 'delay' not in location.lower() and len(location) > 3:
-                    result['location'] = location
-                    logger.info(f"Found location: {result['location']}")
-                    break
-        
-        # DATETIME extraction - multiple patterns
-        datetime_patterns = [
-            r'arrival:\s*(\d{1,2}:\d{2})',  # Arrival time
-            r'departure:\s*(\d{1,2}:\d{2})', # Departure time  
-            r'(?:at|on|completed at)\s+(\d{1,2}:\d{2}\s*[ap]\.?m\.?)',  # times
-            r'(?:at|on)\s+(\d{1,2}:\d{2})',  # 24hr times
-            r'(today|yesterday|this morning|this afternoon)',  # relative times
-            r'(\d{1,2}/\d{1,2}/\d{2,4})',  # dates
-        ]
-        
-        time_info = []
-        for pattern in datetime_patterns:
-            matches = re.findall(pattern, text_lower)
-            time_info.extend(matches)
-        
-        if time_info:
-            result['datetime'] = ', '.join(time_info[:3])  # Combine multiple time references
-            logger.info(f"Found datetime: {result['datetime']}")
+        # (Removed) location/datetime extraction — not required by current workflow
         
         # ONSITE CONTACT - specific patterns
         contact_patterns = [
@@ -241,9 +203,7 @@ EXTRACT THESE FIELDS:
 10. expenses: Money spent (parking, etc.)
 11. materials_used: Parts/equipment used
 12. out_of_scope_work: Extra work beyond original scope
-13. location: Site/building name and address
-14. datetime: Time and date information
-15. technician_name: Technician's name
+13. work_order: Work order number if mentioned
 16. photos_uploaded: Number of photos taken
 
 Return ONLY this JSON (no markdown):
@@ -260,9 +220,7 @@ Return ONLY this JSON (no markdown):
   "expenses": "value or Not mentioned",
   "materials_used": "value or Not mentioned",
   "out_of_scope_work": "value or Not mentioned",
-  "location": "value or Not mentioned",
-  "datetime": "value or Not mentioned",
-  "technician_name": "value or Not mentioned",
+    "work_order": "value or Not mentioned",
   "photos_uploaded": "value or Not mentioned"
 }}"""
 
@@ -324,7 +282,7 @@ Return ONLY this JSON (no markdown):
             pattern_val = pattern_results.get(field, "Not mentioned")
             
             # Prefer patterns for structured data (more accurate for these)
-            if field in ['datetime', 'location', 'release_code', 'photos_uploaded', 'expenses']:
+            if field in ['release_code', 'photos_uploaded', 'expenses']:
                 if pattern_val != "Not mentioned":
                     final[field] = pattern_val
                 elif gpt_val != "Not mentioned":
@@ -361,8 +319,6 @@ Return ONLY this JSON (no markdown):
             "expenses": "Not mentioned",
             "materials_used": "Not mentioned",
             "out_of_scope_work": "Not mentioned",
-            "location": "Not mentioned",
-            "datetime": "Not mentioned",
-            "technician_name": "Not mentioned",
+            "work_order": "Not mentioned",
             "photos_uploaded": "Not mentioned"
         }

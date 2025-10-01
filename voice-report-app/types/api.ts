@@ -40,9 +40,8 @@ export interface CloseoutSummary {
   photos_uploaded?: string;
   
   // Additional fields
-  location?: string;
-  datetime?: string;
-  technician_name?: string;
+  work_order?: string;
+  
 }
 
 export interface ApiError {

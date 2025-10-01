@@ -45,13 +45,14 @@ class EmailService:
         """Get current list of email recipients"""
         return self.recipients.copy()
     
-    def format_closeout_email(self, closeout_data: Union[Dict[str, Any], object], transcription: str) -> str:
+    def format_closeout_email(self, closeout_data: Union[Dict[str, Any], object], transcription: str, technician_name: str = None) -> str:
         """Format the closeout data into a professional email body - FIXED for objects"""
         
         # Generate timestamp
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # Use safe_get to handle both dictionaries and objects
+
         email_body = f"""Field Service Closeout Report
 Generated: {timestamp}
 
@@ -113,9 +114,9 @@ How many photos did you upload?
 ADDITIONAL INFORMATION:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Location: {self._safe_get(closeout_data, 'location')}
-Date/Time: {self._safe_get(closeout_data, 'datetime')}
-Technician: {self._safe_get(closeout_data, 'technician_name')}
+Work Order #: {self._safe_get(closeout_data, 'work_order')}
+
+Technician: {technician_name or 'Field Technician'}
 
 
 ORIGINAL TRANSCRIPTION:
@@ -158,14 +159,14 @@ This report was automatically generated from voice input using the Bear Technolo
             msg['To'] = ', '.join(self.recipients)
             
             # Generate subject line using safe_get
-            tech_name = technician_name or self._safe_get(closeout_data, 'technician_name', 'Field Technician')
-            location = self._safe_get(closeout_data, 'location', 'Unknown Location')
+            tech_name = technician_name or 'Field Technician'
+            work_order = self._safe_get(closeout_data, 'work_order', 'No Work Order')
             timestamp = datetime.now().strftime("%Y-%m-%d")
-            
-            msg['Subject'] = f"Field Service Closeout - {tech_name} - {location} - {timestamp}"
+
+            msg['Subject'] = f"Field Service Closeout - {tech_name} - WO:{work_order} - {timestamp}"
             
             # Format email body
-            email_body = self.format_closeout_email(closeout_data, transcription)
+            email_body = self.format_closeout_email(closeout_data, transcription, technician_name)
             
             # Attach body to email
             msg.attach(MIMEText(email_body, 'plain'))

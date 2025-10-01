@@ -97,7 +97,8 @@ class VoiceAgentService:
             'ttsText': '',
             'success': True,
             'needs_clarification': False,
-            'clarification_question': ''
+            'clarification_question': '',
+            'fieldUpdates': {}
         }
         
         for field, default in required_fields.items():
@@ -207,15 +208,6 @@ INSTRUCTIONS:
 Analyze the voice command and determine the appropriate action.
 
 Return a JSON response with these fields:
-- action: "update_field" | "execute_action" | "navigate" | "clarify" | "acknowledge"
-- target: field name or action name
-- value: new value
-- confidence: 0.0 to 1.0
-- confirmation: brief confirmation message
-- ttsText: text to speak (if any)
-- success: boolean
-- needs_clarification: boolean
-- clarification_question: question to ask if clarification needed
 
 RULES FOR SUMMARY SCREEN:
 
@@ -229,8 +221,6 @@ RULES FOR SUMMARY SCREEN:
    Examples:
    - "change 3 photos to 4" → target: "photos_uploaded", value: "4 photos"
    - "change the photos from 3 to 4" → target: "photos_uploaded", value: "4 photos"
-   - "update location to downtown" → target: "location", value: "downtown"
-   - "set technician name to John" → target: "technician_name", value: "John"
 
 2. TEXT REPLACEMENT IN TRANSCRIPTION FIELD ONLY:
    Only use text replacement if:
@@ -242,18 +232,10 @@ RULES FOR SUMMARY SCREEN:
    - target should be "send_email"
 
 DISAMBIGUATION RULES:
-- Numbers in commands usually refer to field values, NOT text replacement
-- "change [number] [field]" = field update, NOT text replacement
-- Check field synonyms to identify which field to update
-- The summary screen is for structured data, so prefer field updates over text replacement
 
 Common field update patterns:
-- "change 3 photos to 4" → photos_uploaded field
-- "update expenses to $50" → expenses field
-- "set location to downtown" → location field
-- "technician name is John" → technician_name field
 
-Respond ONLY with valid JSON, no markdown formatting."""
+Respond ONLY with valid JSON, no markdown formatting:"""
         
         return prompt
     
@@ -289,7 +271,62 @@ Respond ONLY with valid JSON, no markdown formatting."""
             for field, default in required_fields.items():
                 if field not in parsed:
                     parsed[field] = default
-            
+
+            # Normalize bulk field updates from various GPT shapes into 'fieldUpdates' dict
+            # Accepts:
+            # - 'fields': [ { field: 'name', value: 'x' }, ... ]
+            # - 'updates': [ { field/name/target: 'name', value: 'x' }, ... ]
+            # - 'field_updates': { name: value, ... }
+            if 'fieldUpdates' not in parsed:
+                # 1) 'fields' array
+                if 'fields' in parsed and isinstance(parsed['fields'], list):
+                    updates = {}
+                    for item in parsed['fields']:
+                        try:
+                            fname = item.get('field') or item.get('name') or item.get('target')
+                            fval = item.get('value')
+                            if fname:
+                                updates[fname] = fval
+                        except Exception:
+                            continue
+                    if updates:
+                        parsed['fieldUpdates'] = updates
+                        logger.info(f"Normalized 'fields' array into fieldUpdates: {list(updates.keys())}")
+                        if not parsed.get('action'):
+                            parsed['action'] = 'update_fields'
+
+                # 2) 'updates' array (alternate key used by some prompts/models)
+                elif 'updates' in parsed and isinstance(parsed['updates'], list):
+                    updates = {}
+                    for item in parsed['updates']:
+                        try:
+                            fname = None
+                            if isinstance(item, dict):
+                                fname = item.get('field') or item.get('name') or item.get('target')
+                                fval = item.get('value')
+                            else:
+                                # If item is a simple string like 'field:value' attempt a split
+                                parts = str(item).split(':', 1)
+                                if len(parts) == 2:
+                                    fname = parts[0].strip()
+                                    fval = parts[1].strip()
+                                else:
+                                    continue
+                            if fname:
+                                updates[fname] = fval
+                        except Exception:
+                            continue
+                    if updates:
+                        parsed['fieldUpdates'] = updates
+                        logger.info(f"Normalized 'updates' array into fieldUpdates: {list(updates.keys())}")
+                        if not parsed.get('action'):
+                            parsed['action'] = 'update_fields'
+
+                # 3) 'field_updates' dict
+                elif 'field_updates' in parsed and isinstance(parsed['field_updates'], dict):
+                    parsed['fieldUpdates'] = parsed['field_updates']
+                    logger.info("Mapped 'field_updates' dict to fieldUpdates")
+
             return parsed
             
         except (json.JSONDecodeError, ValueError) as e:

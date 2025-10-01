@@ -170,9 +170,8 @@ Determine the appropriate action and return a JSON response with these fields:
 - confirmation: user-friendly confirmation message
 
 Examples:
-- "Change location to downtown" -> {{"action": "update_field", "target": "location", "value": "downtown", "confidence": 0.9, "confirmation": "Location updated to downtown"}}
-- "Submit the form" -> {{"action": "submit", "target": "form", "value": null, "confidence": 0.95, "confirmation": "Submitting form"}}
-- "Clear all fields" -> {{"action": "clear", "target": "all", "value": null, "confidence": 0.85, "confirmation": "Clearing all fields"}}
+ - "Submit the form" -> {"action": "submit", "target": "form", "value": null, "confidence": 0.95, "confirmation": "Submitting form"}
+ - "Clear all fields" -> {"action": "clear", "target": "all", "value": null, "confidence": 0.85, "confirmation": "Clearing all fields"}
 
 Return ONLY the JSON object, no additional text or markdown."""
     

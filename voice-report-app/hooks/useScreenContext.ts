@@ -82,29 +82,14 @@ export const useSummaryScreenContext = (
       
       // ADDITIONAL CONTEXT
       {
-        name: 'location',
-        label: 'Location',
-        currentValue: editableSummary.location || '',
+        name: 'work_order',
+        label: 'Work Order #',
+        currentValue: editableSummary.work_order || '',
         type: 'text',
         isEditable: true, // Always editable
-        synonyms: ['location', 'place', 'where', 'site', 'address']
+        synonyms: ['work order', 'order number', 'wo', 'work order number']
       },
-      {
-        name: 'datetime',
-        label: 'Date/Time',
-        currentValue: editableSummary.datetime || '',
-        type: 'text',
-        isEditable: true, // Always editable
-        synonyms: ['time', 'date', 'when', 'datetime']
-      },
-      {
-        name: 'technician_name',
-        label: 'Technician Name',
-        currentValue: editableSummary.technician_name || '',
-        type: 'text',
-        isEditable: true, // Always editable
-        synonyms: ['technician', 'my name', 'tech name', 'who am I']
-      },
+      // (Removed) location, datetime, technician_name - not exposed in UI anymore
       
       // LEGACY FIELDS FOR COMPATIBILITY
       {

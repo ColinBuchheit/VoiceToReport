@@ -190,11 +190,9 @@ export async function generateSummary(transcription: string): Promise<CloseoutSu
 export async function sendCloseoutEmail({
   summary,
   transcription,
-  technician_name
 }: {
   summary: CloseoutSummary;
   transcription: string;
-  technician_name?: string;
 }): Promise<EmailResponse> {
   const workingBackendUrl = await getWorkingBackend();
 
@@ -206,7 +204,6 @@ export async function sendCloseoutEmail({
       {
         summary: summary,
         transcription: transcription,
-        technician_name: technician_name || 'Field Technician'
       },
       createRequestConfig(30000) // 30 seconds for email
     );
@@ -310,9 +307,5 @@ export async function sendEmailLegacy(
   transcription: string,
   technicianName: string
 ): Promise<EmailResponse> {
-  return sendCloseoutEmail({
-    summary,
-    transcription,
-    technician_name: technicianName
-  });
+  return sendCloseoutEmail({ summary, transcription });
 }

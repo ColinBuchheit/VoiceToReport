@@ -238,6 +238,21 @@ export default function AIAgent({
           }
           break;
 
+        case 'update_fields':
+          // Bulk field updates: response.fieldUpdates should be an object { fieldName: value }
+          if (response.fieldUpdates && onFieldUpdate) {
+            const updates = response.fieldUpdates as Record<string, any>;
+            for (const [fieldName, val] of Object.entries(updates)) {
+              try {
+                await onFieldUpdate(fieldName, String(val ?? ''));
+                console.log(`✏️ Field updated: ${fieldName}`);
+              } catch (e) {
+                console.error(`Failed to update field ${fieldName}:`, e);
+              }
+            }
+          }
+          break;
+
         case 'toggle_mode':
         case 'toggle_edit_mode':
           if (onModeToggle) {

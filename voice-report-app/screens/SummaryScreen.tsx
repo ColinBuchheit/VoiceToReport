@@ -94,10 +94,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
       // Photos
       photos_uploaded: summary?.photos_uploaded || '',
       
-      // Additional context
-      location: summary?.location || '',
-      datetime: summary?.datetime || '',
-      technician_name: summary?.technician_name || '',
+    // Additional context
+    work_order: summary?.work_order || '',
       
       // Legacy fields for backward compatibility
       taskDescription: summary?.taskDescription || summary?.work_completed || '',
@@ -106,12 +104,10 @@ export default function SummaryScreen({ navigation, route }: Props) {
     };
     
     // DEBUGGING: Log what we extracted
-    console.log('✅ Initialized CloseoutSummary:');
-    console.log('  - onsite_contact:', result.onsite_contact);
-    console.log('  - support_contact:', result.support_contact);
-    console.log('  - work_completed:', result.work_completed);
-    console.log('  - location:', result.location);
-    console.log('  - technician_name:', result.technician_name);
+  console.log('✅ Initialized CloseoutSummary:');
+  console.log('  - onsite_contact:', result.onsite_contact);
+  console.log('  - support_contact:', result.support_contact);
+  console.log('  - work_completed:', result.work_completed);
     
     return result;
   };
@@ -142,8 +138,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
       
       const emailResponse = await sendCloseoutEmail({
         summary: editableSummary,
-        transcription: editableTranscription,
-        technician_name: editableSummary.technician_name
+        transcription: editableTranscription
       });
       
       Alert.alert(
@@ -182,6 +177,14 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('onsite_contact', text)}
             isEditing={true} // Always editable
             placeholder="Name and role of on-site contact person..."
+          />
+
+          <EditableField
+            label="Work Order #"
+            value={editableSummary.work_order || ''}
+            onChangeText={(text) => updateSummaryField('work_order', text)}
+            isEditing={true}
+            placeholder="Enter the work order number..."
           />
 
           <EditableField
@@ -303,33 +306,9 @@ export default function SummaryScreen({ navigation, route }: Props) {
           />
         </View>
 
-        {/* ADDITIONAL CONTEXT SECTION */}
+        {/* ADDITIONAL CONTEXT SECTION - only Additional Notes now */}
         <View style={styles.sectionContainer}>
           <Text style={styles.sectionTitle}>ADDITIONAL CONTEXT</Text>
-          
-          <EditableField
-            label="Location"
-            value={editableSummary.location || ''}
-            onChangeText={(text) => updateSummaryField('location', text)}
-            isEditing={true} // Always editable
-            placeholder="Work location, address, or site..."
-          />
-
-          <EditableField
-            label="Date/Time"
-            value={editableSummary.datetime || ''}
-            onChangeText={(text) => updateSummaryField('datetime', text)}
-            isEditing={true} // Always editable
-            placeholder="When the work was completed..."
-          />
-
-          <EditableField
-            label="Technician Name"
-            value={editableSummary.technician_name || ''}
-            onChangeText={(text) => updateSummaryField('technician_name', text)}
-            isEditing={true} // Always editable
-            placeholder="Your name as the technician..."
-          />
 
           <EditableField
             label="Additional Notes"

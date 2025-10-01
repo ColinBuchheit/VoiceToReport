@@ -116,7 +116,7 @@ class APITester:
                     summary = data.get('summary', {})
                     print(f"✅ Summarization successful")
                     print(f"   Task: {summary.get('taskDescription', 'N/A')[:80]}...")
-                    print(f"   Location: {summary.get('location', 'N/A')}")
+                    # Location field removed from summary structure
                     print(f"   Outcome: {summary.get('outcome', 'N/A')[:60]}...")
                     return summary
                 else:

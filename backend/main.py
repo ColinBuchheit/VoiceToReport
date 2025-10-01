@@ -356,7 +356,7 @@ async def send_email_endpoint(request: SendEmailRequest):
         result = email_service.send_closeout_email(
             request.summary, 
             request.transcription,
-            request.technician_name
+            None
         )
         
         if result.get("success", False):
