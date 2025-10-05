@@ -36,6 +36,7 @@ class CloseoutSummary(BaseModel):
     photos_uploaded: Optional[str] = "Not mentioned"
     
     # Additional fields for context
+    work_order: Optional[str] = "Not mentioned"
     # (Removed) location, datetime, technician_name - handled elsewhere if needed
 
 class SummaryResponse(BaseModel):

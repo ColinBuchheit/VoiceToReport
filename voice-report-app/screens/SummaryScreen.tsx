@@ -132,6 +132,9 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const handleSendEmail = async () => {
     try {
       setIsSendingEmail(true);
+  // Debug: log work_order and summary before sending
+  console.log('📤 Sending email with work_order:', editableSummary.work_order);
+  console.log('📤 Full summary payload:', editableSummary);
       
       const emailResponse = await sendCloseoutEmail({
         summary: editableSummary,

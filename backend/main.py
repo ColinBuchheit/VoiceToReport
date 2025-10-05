@@ -351,12 +351,21 @@ async def send_email_endpoint(request: SendEmailRequest):
     
     try:
         logger.info("Sending closeout report email")
-        
+        # Log received summary for debugging
+        try:
+            # request.summary is a Pydantic model; convert to dict for clearer logs
+            summary_dict = request.summary.dict() if hasattr(request.summary, 'dict') else dict(request.summary)
+        except Exception:
+            summary_dict = getattr(request.summary, '__dict__', str(request.summary))
+
+        logger.info(f"📥 Received summary.work_order (raw): {summary_dict.get('work_order') if isinstance(summary_dict, dict) else getattr(request.summary, 'work_order', None)}")
+        logger.info(f"📥 Received summary payload: {summary_dict}")
+
         # Send email with summary and transcription
         result = email_service.send_closeout_email(
-            request.summary, 
+            request.summary,
             request.transcription,
-            None
+            None,
         )
         
         if result.get("success", False):
