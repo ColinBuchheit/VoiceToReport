@@ -83,7 +83,7 @@ class EmailService:
         tech_name = technician_name or self._safe_get(closeout_data, 'technician_name', None)
         logo_src = logo_src_override or self._get_logo_base64()
 
-        # Define field groups with clean organization
+    # Define field groups with clean organization
         field_groups = [
             {
                 "title": "Service Summary",
@@ -126,50 +126,51 @@ class EmailService:
             },
         ]
         
-        # Build field sections
+        # Build field sections with modern card style (accent left border, subtle shadow)
         sections_html = ""
         for group in field_groups:
             group_html = ""
             has_content = False
-            
+
             # Check if this group has content
             for field_name, _ in group["fields"]:
                 value = self._safe_get(closeout_data, field_name)
                 if value and value != 'Not specified':
                     has_content = True
                     break
-            
+
             if not has_content:
                 continue
-            
-            # Add section title
+
+            # Section title
             group_html += f"""
             <tr>
-                <td style="padding: 32px 0 16px 0;">
-                    <h2 style="margin: 0; font-size: 13px; font-weight: 600; color: #6B7280; text-transform: uppercase; letter-spacing: 0.05em;">{group["title"]}</h2>
+                <td style="padding: 28px 0 12px 0;">
+                    <h2 class="section-title" style="margin:0; font-size:12px; font-weight:700; color:#9CA3AF; text-transform:uppercase; letter-spacing:0.08em;">{group['title']}</h2>
                 </td>
             </tr>
             """
-            
-            # Add fields
+
+            # Fields as cards
             for field_name, label in group["fields"]:
                 value = self._safe_get(closeout_data, field_name)
                 if value and value != 'Not specified':
                     group_html += f"""
             <tr>
-                <td style="padding: 0 0 16px 0;">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 8px;">
+                <td style="padding: 8px 0 12px 0;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" class="field-card" style="width:100%; background-color:#FFFFFF; border-radius:10px; border:1px solid #ECEFF1; box-shadow:0 2px 8px rgba(12,12,12,0.04);">
                         <tr>
-                            <td style="padding: 16px 20px;">
-                                <div style="font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 6px; letter-spacing: 0.01em;">{label}</div>
-                                <div style="font-size: 14px; line-height: 1.6; color: #111827;">{value}</div>
+                            <td style="padding:14px 16px;">
+                                <div class="field-label" style="font-size:12px; font-weight:700; color:#374151; margin-bottom:6px;">{label}</div>
+                                <div class="field-value" style="font-size:14px; line-height:1.6; color:#0B0B0B;">{value}</div>
                             </td>
+                            <td width="8" style="width:8px;"></td>
                         </tr>
                     </table>
                 </td>
             </tr>
                     """
-            
+
             sections_html += group_html
         
         # Build transcription section
@@ -177,16 +178,16 @@ class EmailService:
         if transcription and transcription.strip() and transcription != 'Not specified':
             transcription_html = f"""
             <tr>
-                <td style="padding: 32px 0 16px 0;">
-                    <h2 style="margin: 0; font-size: 13px; font-weight: 600; color: #6B7280; text-transform: uppercase; letter-spacing: 0.05em;">Voice Transcription</h2>
+                <td style="padding: 20px 0 12px 0;">
+                    <h2 class="section-title" style="margin:0; font-size:12px; font-weight:700; color:#9CA3AF; text-transform:uppercase; letter-spacing:0.08em;">Voice Transcription</h2>
                 </td>
             </tr>
             <tr>
-                <td style="padding: 0 0 16px 0;">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 8px;">
+                <td style="padding: 8px 0 16px 0;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#FFF9F6; border:1px solid #FFE9DA; border-radius:10px;">
                         <tr>
-                            <td style="padding: 16px 20px;">
-                                <div style="font-size: 14px; line-height: 1.7; color: #4B5563; font-style: italic;">{transcription}</div>
+                            <td style="padding:14px 16px;">
+                                <div style="font-size:14px; line-height:1.7; color:#374151; font-style:normal;">{transcription}</div>
                             </td>
                         </tr>
                     </table>
@@ -206,55 +207,34 @@ class EmailService:
             <meta name="supported-color-schemes" content="light dark">
             <title>Field Service Closeout Report</title>
             <style>
+                /* Core color scheme: Black / White / Orange */
                 :root {{
                     color-scheme: light dark;
                     supported-color-schemes: light dark;
                 }}
-                
+
+                /* Desktop / client-friendly adjustments */
+                .section-title {{ color: #9CA3AF; }}
+                .field-card {{ background-color: #FFFFFF; border:1px solid #ECEFF1; }}
+                .field-label {{ color: #374151; }}
+                .field-value {{ color: #0B0B0B; }}
+                .timestamp-text {{ color: #9CA3AF; }}
+                .footer-text {{ color: #9CA3AF; }}
+                .wo-badge {{ background-color: #FF6B35; color:#FFFFFF; }}
+                .tech-badge {{ background-color:#F7F7F8; color:#374151; border:1px solid #ECEFF1; }}
+
                 @media (prefers-color-scheme: dark) {{
-                    .email-bg {{
-                        background-color: #0A0A0A !important;
-                    }}
-                    .card-bg {{
-                        background-color: #1A1A1A !important;
-                        border-color: #2A2A2A !important;
-                    }}
-                    .header-bg {{
-                        background-color: #1A1A1A !important;
-                        border-bottom-color: #2A2A2A !important;
-                    }}
-                    .section-title {{
-                        color: #A1A1AA !important;
-                    }}
-                    .field-card {{
-                        background-color: #262626 !important;
-                        border-color: #3A3A3A !important;
-                    }}
-                    .field-label {{
-                        color: #D4D4D8 !important;
-                    }}
-                    .field-value {{
-                        color: #FAFAFA !important;
-                    }}
-                    .timestamp-text {{
-                        color: #71717A !important;
-                    }}
-                    .footer-bg {{
-                        background-color: #1A1A1A !important;
-                        border-top-color: #2A2A2A !important;
-                    }}
-                    .footer-text {{
-                        color: #71717A !important;
-                    }}
-                    .wo-badge {{
-                        background-color: #FF6B35 !important;
-                        color: #FFFFFF !important;
-                    }}
-                    .tech-badge {{
-                        background-color: #2A2A2A !important;
-                        color: #D4D4D8 !important;
-                        border-color: #3A3A3A !important;
-                    }}
+                    .email-bg {{ background-color:#080808 !important; }}
+                    .card-bg {{ background-color:#0B0B0B !important; border-color:#1A1A1A !important; color:#E6E6E6 !important; }}
+                    .header-bg {{ background-color:#0B0B0B !important; border-bottom-color:#1A1A1A !important; }}
+                    .section-title {{ color:#9CA3AF !important; }}
+                    .field-card {{ background-color:#111111 !important; border-color:#222222 !important; box-shadow:none !important; }}
+                    .field-label {{ color:#E6E6E6 !important; }}
+                    .field-value {{ color:#FFFFFF !important; }}
+                    .timestamp-text {{ color:#8B8B8B !important; }}
+                    .footer-text {{ color:#8B8B8B !important; }}
+                    .wo-badge {{ background-color:#FF6B35 !important; }}
+                    .tech-badge {{ background-color:#121212 !important; border-color:#222 !important; color:#D1D1D1 !important; }}
                 }}
             </style>
         </head>
@@ -266,11 +246,11 @@ class EmailService:
                             
                             <!-- Header -->
                             <tr>
-                                <td class="header-bg" style="padding: 32px 32px 24px 32px; background-color: #FFFFFF; border-bottom: 1px solid #E5E7EB;">
+                                    <td class="header-bg" style="padding: 28px 28px 22px 28px; background-color: #0B0B0B; border-bottom: 1px solid rgba(255,255,255,0.06);">
                                     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                                         <tr>
                                             <td align="center" style="padding-bottom: 20px;">
-                                                <img src="{logo_src}" alt="Bear Techs" width="140" style="height: auto; display: block; border: 0;">
+                                                <img src="{logo_src}" alt="Bear Techs" width="150" style="height: auto; display: block; border: 0;">
                                             </td>
                                         </tr>
                                         <tr>
@@ -278,11 +258,11 @@ class EmailService:
                                                 <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin: 0 auto;">
                                                     <tr>
                                                         <td>
-                                                            <div class="wo-badge" style="display: inline-block; background-color: #FF6B35; color: #FFFFFF; padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; letter-spacing: 0.01em;">
-                                                                Work Order: {work_order}
+                                                            <div class="wo-badge" style="display: inline-block; background-color: #FF6B35; color: #FFFFFF; padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight:700; letter-spacing:0.01em;">
+                                                                WO {work_order}
                                                             </div>
                                                         </td>
-                                                        {"<td style='padding-left: 8px;'><div class='tech-badge' style='display: inline-block; background-color: #F3F4F6; color: #374151; padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; border: 1px solid #E5E7EB;'>" + tech_name + "</div></td>" if tech_name and tech_name != 'Not specified' else ""}
+                                                        {"<td style='padding-left: 10px;'><div class='tech-badge' style='display: inline-block; background-color: #F7F7F8; color: #374151; padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight:600; border: 1px solid #ECEFF1;'>" + tech_name + "</div></td>" if tech_name and tech_name != 'Not specified' else ""}
                                                     </tr>
                                                 </table>
                                             </td>
@@ -293,14 +273,14 @@ class EmailService:
 
                             <!-- Timestamp Bar -->
                             <tr>
-                                <td style="padding: 16px 32px; background-color: #F9FAFB; border-bottom: 1px solid #E5E7EB;">
-                                    <span class="timestamp-text" style="font-size: 13px; color: #6B7280;">Report Generated: {timestamp}</span>
+                                <td style="padding: 14px 28px; background-color: #F7F7F8; border-bottom: 1px solid #ECEFF1;">
+                                    <span class="timestamp-text" style="font-size:13px; color:#9CA3AF;">Report Generated: {timestamp}</span>
                                 </td>
                             </tr>
 
                             <!-- Main Content -->
                             <tr>
-                                <td style="padding: 8px 32px 32px 32px;">
+                                <td style="padding: 18px 28px 28px 28px;">
                                     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                                         {sections_html}
                                         {transcription_html}
@@ -310,10 +290,9 @@ class EmailService:
 
                             <!-- Footer -->
                             <tr>
-                                <td class="footer-bg" style="padding: 24px 32px; background-color: #F9FAFB; border-top: 1px solid #E5E7EB; text-align: center;">
-                                    <div class="footer-text" style="font-size: 12px; color: #9CA3AF; line-height: 1.5;">
-                                        Bear Techs Field Service<br>
-                                        Automated Voice-to-Report System
+                                <td class="footer-bg" style="padding: 20px 28px; background-color: #F7F7F8; border-top: 1px solid #ECEFF1; text-align: center;">
+                                    <div class="footer-text" style="font-size:12px; color:#9CA3AF; line-height:1.5;">
+                                        Bear Techs Field Service · Automated Voice-to-Report System
                                     </div>
                                 </td>
                             </tr>
