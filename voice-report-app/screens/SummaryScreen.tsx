@@ -1,4 +1,4 @@
-// voice-report-app/screens/SummaryScreen.tsx - UPDATED: Always editable fields, no Edit/Preview toggle, no title
+// voice-report-app/screens/SummaryScreen.tsx - UPDATED with Email Success Popup
 import React, { useState } from 'react';
 import {
   View,
@@ -7,7 +7,6 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -15,6 +14,7 @@ import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
 import { sendCloseoutEmail } from '../services/api';
 import AIAgent from '../components/AIAgent';
+import EmailSuccessPopup from '../components/EmailSuccessPopup';
 import { useSummaryScreenContext } from '../hooks/useScreenContext';
 import { CloseoutSummary } from '../types/aiAgent';
 
@@ -69,8 +69,6 @@ export default function SummaryScreen({ navigation, route }: Props) {
   // Initialize CloseoutSummary with proper field mapping
   const initializeCloseoutSummary = (summary: CloseoutSummary): CloseoutSummary => {
     console.log('🔧 Initializing CloseoutSummary from:', summary);
-    console.log('🔧 Summary type:', typeof summary);
-    console.log('🔧 Summary keys:', Object.keys(summary || {}));
     
     const result: CloseoutSummary = {
       // Primary closeout fields
@@ -80,6 +78,9 @@ export default function SummaryScreen({ navigation, route }: Props) {
       delays: summary?.delays || '',
       troubleshooting_steps: summary?.troubleshooting_steps || '',
       scope_completed: summary?.scope_completed || summary?.outcome || '',
+      
+      
+      // Sign-off and tracking
       released_by: summary?.released_by || '',
       release_code: summary?.release_code || '',
       return_tracking: summary?.return_tracking || '',
@@ -94,20 +95,14 @@ export default function SummaryScreen({ navigation, route }: Props) {
       // Photos
       photos_uploaded: summary?.photos_uploaded || '',
       
-    // Additional context
-    work_order: summary?.work_order || '',
+      // Additional context
+      work_order: summary?.work_order || '',
       
       // Legacy fields for backward compatibility
       taskDescription: summary?.taskDescription || summary?.work_completed || '',
       outcome: summary?.outcome || summary?.scope_completed || '',
       notes: summary?.notes || '',
     };
-    
-    // DEBUGGING: Log what we extracted
-  console.log('✅ Initialized CloseoutSummary:');
-  console.log('  - onsite_contact:', result.onsite_contact);
-  console.log('  - support_contact:', result.support_contact);
-  console.log('  - work_completed:', result.work_completed);
     
     return result;
   };
@@ -117,6 +112,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
   );
   const [editableTranscription, setEditableTranscription] = useState(route.params.transcription);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
 
   // Enhanced screen context for AI - always in edit mode
   const screenContext = useSummaryScreenContext(
@@ -141,17 +138,23 @@ export default function SummaryScreen({ navigation, route }: Props) {
         transcription: editableTranscription
       });
       
-      Alert.alert(
-        'Email Sent Successfully!',
-        `Report has been sent to ${emailResponse.recipients.join(', ')}`,
-        [{ text: 'OK', onPress: () => navigation.navigate('Home') }]
-      );
+      // Show success popup instead of Alert
+      setEmailRecipients(emailResponse.recipients);
+      setShowSuccessPopup(true);
+      
     } catch (error) {
       console.error('Email sending failed:', error);
-      Alert.alert('Error', 'Failed to send email. Please try again.');
+      // Keep the error as an Alert for now
+      alert('Failed to send email. Please try again.');
     } finally {
       setIsSendingEmail(false);
     }
+  };
+
+  const handleSuccessComplete = () => {
+    setShowSuccessPopup(false);
+    // Navigate to Home after popup closes
+    navigation.navigate('Home');
   };
 
   const handleFieldUpdate = (fieldName: string, value: string) => {
@@ -165,8 +168,6 @@ export default function SummaryScreen({ navigation, route }: Props) {
   return (
     <View style={styles.container}>
       <ScrollView style={styles.scrollContainer}>
-        {/* REMOVED: Header with title and mode toggle button */}
-
         {/* CLOSEOUT NOTES SECTION */}
         <View style={styles.sectionContainer}>
           <Text style={styles.sectionTitle}>CLOSEOUT NOTES</Text>
@@ -175,7 +176,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="Who did you meet with on-site?"
             value={editableSummary.onsite_contact || ''}
             onChangeText={(text) => updateSummaryField('onsite_contact', text)}
-            isEditing={true} // Always editable
+            isEditing={true}
             placeholder="Name and role of on-site contact person..."
           />
 
@@ -191,7 +192,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="Who did you work with for support?"
             value={editableSummary.support_contact || ''}
             onChangeText={(text) => updateSummaryField('support_contact', text)}
-            isEditing={true} // Always editable
+            isEditing={true}
             placeholder="Support team members or remote assistance..."
           />
 
@@ -199,7 +200,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             label="What work was completed?"
             value={editableSummary.work_completed || ''}
             onChangeText={(text) => updateSummaryField('work_completed', text)}
-            isEditing={true} // Always editable
+            isEditing={true}
             multiline
             placeholder="Describe all tasks and work that was completed..."
           />
@@ -219,7 +220,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('troubleshooting_steps', text)}
             isEditing={true}
             multiline
-            placeholder="Describe troubleshooting or diagnostic steps..."
+            placeholder="Describe debugging or problem-solving steps..."
           />
 
           <EditableField
@@ -228,114 +229,103 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('scope_completed', text)}
             isEditing={true}
             multiline
-            placeholder="Yes/No and details about scope completion..."
+            placeholder="Describe the outcome and completion status..."
           />
+        </View>
 
+        
+
+        {/* SIGN-OFF & TRACKING SECTION */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>SIGN-OFF & TRACKING</Text>
+          
           <EditableField
             label="Who released you?"
             value={editableSummary.released_by || ''}
             onChangeText={(text) => updateSummaryField('released_by', text)}
             isEditing={true}
-            placeholder="Name or title of person who released you..."
+            placeholder="Name of person who signed off..."
           />
 
           <EditableField
-            label="Is there a release code? If so, what is it?"
+            label="Release Code"
             value={editableSummary.release_code || ''}
             onChangeText={(text) => updateSummaryField('release_code', text)}
             isEditing={true}
-            placeholder="Release code or completion code..."
+            placeholder="Enter release code if applicable..."
           />
 
           <EditableField
-            label="Is there a return tracking number? If so, what is it?"
+            label="Return Tracking #"
             value={editableSummary.return_tracking || ''}
             onChangeText={(text) => updateSummaryField('return_tracking', text)}
             isEditing={true}
-            placeholder="Return tracking number for parts/equipment..."
+            placeholder="Enter return tracking number..."
           />
         </View>
 
-        {/* EXPENSES SECTION */}
+        {/* EXPENSES & MATERIALS SECTION */}
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>EXPENSES</Text>
+          <Text style={styles.sectionTitle}>EXPENSES & MATERIALS</Text>
           
           <EditableField
-            label="Did you have any expenses (parking fees, etc)?"
+            label="Expenses"
             value={editableSummary.expenses || ''}
             onChangeText={(text) => updateSummaryField('expenses', text)}
             isEditing={true}
             multiline
-            placeholder="Parking fees, tolls, meals, or other expenses..."
+            placeholder="List any expenses incurred..."
           />
 
           <EditableField
-            label="What materials did you use?"
+            label="Materials Used"
             value={editableSummary.materials_used || ''}
             onChangeText={(text) => updateSummaryField('materials_used', text)}
             isEditing={true}
             multiline
-            placeholder="Parts, supplies, equipment used during service..."
+            placeholder="List materials and parts used..."
           />
         </View>
 
-        {/* OUT OF SCOPE SECTION */}
+        {/* ADDITIONAL INFORMATION SECTION */}
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>OUT OF SCOPE</Text>
+          <Text style={styles.sectionTitle}>ADDITIONAL INFORMATION</Text>
           
           <EditableField
-            label="Was there any out of scope work? If so, what is it and who approved the work?"
+            label="Out of Scope Work"
             value={editableSummary.out_of_scope_work || ''}
             onChangeText={(text) => updateSummaryField('out_of_scope_work', text)}
             isEditing={true}
             multiline
-            placeholder="Any additional work performed and who approved it..."
+            placeholder="Describe any work outside the original scope..."
           />
-        </View>
 
-        {/* PHOTOS SECTION */}
-        <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>PHOTOS</Text>
-          
           <EditableField
-            label="How many photos did you upload?"
+            label="Photos Uploaded"
             value={editableSummary.photos_uploaded || ''}
             onChangeText={(text) => updateSummaryField('photos_uploaded', text)}
             isEditing={true}
-            placeholder="Number of photos taken and uploaded..."
-          />
-        </View>
-
-        {/* ADDITIONAL CONTEXT SECTION - only Additional Notes now */}
-        <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>ADDITIONAL CONTEXT</Text>
-
-          <EditableField
-            label="Additional Notes"
-            value={editableSummary.notes || ''}
-            onChangeText={(text) => updateSummaryField('notes', text)}
-            isEditing={true} // Always editable
             multiline
-            placeholder="Any additional notes or comments..."
+            placeholder="List photos taken and uploaded..."
           />
         </View>
 
-        {/* TRANSCRIPTION SECTION */}
+        {/* ORIGINAL TRANSCRIPTION SECTION */}
         <View style={styles.transcriptionSection}>
           <View style={styles.transcriptionCard}>
             <Text style={styles.sectionTitle}>ORIGINAL TRANSCRIPTION</Text>
             <EditableField
-              label="Voice Recording Transcription"
+              label=""
               value={editableTranscription}
               onChangeText={setEditableTranscription}
-              isEditing={true} // Always editable
+              isEditing={true}
               multiline
-              placeholder="Original voice recording transcription..."
+              placeholder="Original voice transcription..."
             />
           </View>
         </View>
 
-        {/* SIMPLIFIED ACTION BUTTONS - Only Email */}
+        {/* SEND EMAIL BUTTON */}
         <View style={styles.actionButtons}>
           <TouchableOpacity
             style={[styles.emailButton, isSendingEmail && styles.emailButtonDisabled]}
@@ -350,6 +340,13 @@ export default function SummaryScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* Email Success Popup */}
+      <EmailSuccessPopup
+        visible={showSuccessPopup}
+        emailList={emailRecipients}
+        onComplete={handleSuccessComplete}
+      />
 
       {/* AI Agent - Floating button always visible */}
       <AIAgent
@@ -375,9 +372,8 @@ const styles = StyleSheet.create({
   },
   scrollContainer: {
     flex: 1,
-    paddingTop: 20, // Add some top padding since we removed the header
+    paddingTop: 20,
   },
-  // REMOVED: header, title, modeButton, previewModeButton, modeButtonText, previewModeText styles
   sectionContainer: {
     backgroundColor: 'white',
     borderRadius: 12,
