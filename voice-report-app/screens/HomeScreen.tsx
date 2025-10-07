@@ -501,10 +501,17 @@ function HomeScreenInner({ navigation }: Props) {
               accessibilityRole="button"
               accessibilityLabel="Open email history"
             >
-              <View style={styles.navIconContainer}>
-                <Ionicons name="mail-outline" size={24} color="#374151" />
+              <View style={[
+                styles.navIconContainer,
+                showHistorySidebar && styles.navIconContainerActive
+              ]}>
+                <Ionicons
+                  name="mail-outline"
+                  size={24}
+                  color={showHistorySidebar ? '#FFFFFF' : '#FF6B35'}
+                />
               </View>
-              <Text style={styles.navLabel}>History</Text>
+              <Text style={[styles.navLabel, showHistorySidebar && styles.navLabelActive]}>History</Text>
             </TouchableOpacity>
           </View>
 
@@ -533,10 +540,17 @@ function HomeScreenInner({ navigation }: Props) {
               accessibilityRole="button"
               accessibilityLabel="Open settings"
             >
-              <View style={styles.navIconContainer}>
-                <Ionicons name="settings-outline" size={24} color="#374151" />
+              <View style={[
+                styles.navIconContainer,
+                showSettings && styles.navIconContainerActive
+              ]}>
+                <Ionicons
+                  name="settings-outline"
+                  size={24}
+                  color={showSettings ? '#FFFFFF' : '#FF6B35'}
+                />
               </View>
-              <Text style={styles.navLabel}>Settings</Text>
+              <Text style={[styles.navLabel, showSettings && styles.navLabelActive]}>Settings</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -777,26 +791,38 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   navIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: '#EEF2F5',
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    backgroundColor: '#FFE4D7', // light brand tint
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 6,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    shadowColor: '#0F172A',
-    shadowOpacity: 0.08,
+    borderColor: '#FFC8B0',
+    shadowColor: '#FF6B35',
+    shadowOpacity: 0.15,
     shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 4,
-    elevation: 2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  navIconContainerActive: {
+    backgroundColor: '#FF6B35',
+    borderColor: '#FF6B35',
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 5,
+    transform: [{ scale: 1.05 }],
   },
   navIcon: { fontSize: 24 },
   navLabel: {
     fontSize: 12,
     color: '#6B7280',
     fontWeight: '500',
+  },
+  navLabelActive: {
+    color: '#FF6B35',
+    fontWeight: '600',
   },
   recorderWrapper: {
     alignItems: 'center',
