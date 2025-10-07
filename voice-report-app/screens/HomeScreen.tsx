@@ -9,7 +9,9 @@ import {
   ScrollView,
   TouchableOpacity,
   Platform,
+  Modal,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -56,6 +58,7 @@ function HomeScreenInner({ navigation }: Props) {
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>(persistedState.checkedItems);
   const [showChecklist, setShowChecklist] = useState(persistedState.showChecklist);
   const [showHistorySidebar, setShowHistorySidebar] = useState(false);
+  const [showSettings, setShowSettings] = useState(false); // Settings modal visibility
   
   // Shared recording state - always reset to clean state
   const [isRecording, setIsRecording] = useState(false);
@@ -321,21 +324,70 @@ function HomeScreenInner({ navigation }: Props) {
   };
 
   const insets = useSafeAreaInsets();
+
+  // Settings Modal component
+  const SettingsModal = ({ visible, onClose }: { visible: boolean; onClose: () => void }) => (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={styles.settingsOverlay}>
+        <TouchableOpacity
+          style={styles.settingsBackdrop}
+          activeOpacity={1}
+          onPress={onClose}
+        />
+        <View style={styles.settingsPanel}>
+          <View style={styles.settingsHeader}>
+            <Text style={styles.settingsTitle}>Settings</Text>
+            <TouchableOpacity onPress={onClose} style={styles.settingsCloseButton}>
+              <Text style={styles.settingsCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.settingsContent} showsVerticalScrollIndicator={false}>
+            <View style={styles.settingsSection}>
+              <Text style={styles.settingsSectionTitle}>App Settings</Text>
+              <TouchableOpacity style={styles.settingsItem}>
+                <Text style={styles.settingsItemLabel}>Account</Text>
+                <Text style={styles.settingsItemArrow}>›</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.settingsItem}>
+                <Text style={styles.settingsItemLabel}>Notifications</Text>
+                <Text style={styles.settingsItemArrow}>›</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.settingsItem}>
+                <Text style={styles.settingsItemLabel}>Email Preferences</Text>
+                <Text style={styles.settingsItemArrow}>›</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.settingsSection}>
+              <Text style={styles.settingsSectionTitle}>About</Text>
+              <View style={styles.settingsItem}>
+                <Text style={styles.settingsItemLabel}>Version</Text>
+                <Text style={styles.settingsItemValue}>1.0.0</Text>
+              </View>
+              <TouchableOpacity style={styles.settingsItem}>
+                <Text style={styles.settingsItemLabel}>Help & Support</Text>
+                <Text style={styles.settingsItemArrow}>›</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+
   return (
     <View style={[styles.container, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 8) }]}>    
-      {/* Fixed Header */}
-  <View style={[styles.header, { paddingTop: (Platform.OS === 'ios' ? 10 : 20) + insets.top * 0.2 }]}> 
-        <Image 
-          source={require('../assets/bears&t.png')} 
+      {/* Fixed Header - centered logo */}
+      <View style={[styles.header, { paddingTop: (Platform.OS === 'ios' ? 10 : 20) + insets.top * 0.2 }]}> 
+        <Image
+          source={require('../assets/bears&t.png')}
           style={styles.logo}
           resizeMode="contain"
         />
-        <TouchableOpacity 
-          style={styles.emailHistoryButton}
-          onPress={() => setShowHistorySidebar(true)}
-        >
-          <Text style={styles.emailIcon}>📧</Text>
-        </TouchableOpacity>
       </View>
 
       {/* Progress Summary */}
@@ -436,20 +488,57 @@ function HomeScreenInner({ navigation }: Props) {
         )}
       </View>
 
-      {/* Fixed Bottom Recorder */}
+      {/* Bottom Navigation with Recorder */}
       {showChecklist && (
-        <View style={styles.recorderContainer}>
-          <Recorder
-            onRecordingComplete={handleRecordingComplete}
-            isProcessing={isProcessing}
-            size="small"
-            isRecording={isRecording}
-            setIsRecording={setIsRecording}
-            recording={recording}
-            setRecording={setRecording}
-            recordingDuration={recordingDuration}
-            setRecordingDuration={setRecordingDuration}
-          />
+        <View style={styles.bottomNavContainer}>
+          {/* Left (History) */}
+          <View style={styles.navSide}>
+            <TouchableOpacity
+              style={styles.bottomNavButton}
+              onPress={() => setShowHistorySidebar(true)}
+              activeOpacity={0.75}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="Open email history"
+            >
+              <View style={styles.navIconContainer}>
+                <Ionicons name="mail-outline" size={24} color="#374151" />
+              </View>
+              <Text style={styles.navLabel}>History</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Center Recorder (kept visually centered) */}
+          <View style={styles.recorderWrapper} pointerEvents="box-none">
+            <Recorder
+              onRecordingComplete={handleRecordingComplete}
+              isProcessing={isProcessing}
+              size="small"
+              isRecording={isRecording}
+              setIsRecording={setIsRecording}
+              recording={recording}
+              setRecording={setRecording}
+              recordingDuration={recordingDuration}
+              setRecordingDuration={setRecordingDuration}
+            />
+          </View>
+
+          {/* Right (Settings) */}
+          <View style={styles.navSide}>
+            <TouchableOpacity
+              style={styles.bottomNavButton}
+              onPress={() => setShowSettings(true)}
+              activeOpacity={0.75}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="Open settings"
+            >
+              <View style={styles.navIconContainer}>
+                <Ionicons name="settings-outline" size={24} color="#374151" />
+              </View>
+              <Text style={styles.navLabel}>Settings</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -459,6 +548,9 @@ function HomeScreenInner({ navigation }: Props) {
         onClose={() => setShowHistorySidebar(false)}
         onEmailSelect={handleEmailSelect}
       />
+
+      {/* Settings Modal */}
+      <SettingsModal visible={showSettings} onClose={() => setShowSettings(false)} />
     </View>
   );
 }
@@ -485,32 +577,15 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
     backgroundColor: '#FFFFFF',
-    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   logo: {
     width: 180,
     height: 50,
     alignSelf: 'center',
   },
-  emailHistoryButton: {
-    position: 'absolute',
-    right: 20,
-    top: Platform.OS === 'ios' ? 20 : 30,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#FF6B35',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-    elevation: 4,
-  },
-  emailIcon: {
-    fontSize: 20,
-  },
+  // Removed old emailHistoryButton & emailIcon in favor of bottom navigation
   
   // Progress Summary
   progressSummary: {
@@ -522,19 +597,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
-  progressInfo: {
-    flex: 1,
-  },
+  progressInfo: { flex: 1 },
   progressTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#1F2937',
     marginBottom: 2,
   },
-  progressDetails: {
-    fontSize: 13,
-    color: '#6B7280',
-  },
+  progressDetails: { fontSize: 13, color: '#6B7280' },
   progressCircle: {
     width: 50,
     height: 50,
@@ -679,12 +749,149 @@ const styles = StyleSheet.create({
     height: 20,
   },
   
-  // Fixed Bottom Recorder
-  recorderContainer: {
+  // Bottom Navigation Container
+  bottomNavContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    paddingBottom: Platform.OS === 'ios' ? 30 : 16,
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  navSide: { flex: 1, alignItems: 'center', justifyContent: 'flex-end' },
+  bottomNavButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  navIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: '#EEF2F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  navIcon: { fontSize: 24 },
+  navLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  recorderWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    paddingHorizontal: 8,
+  },
+
+  // Settings modal styles
+  settingsOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  settingsBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  settingsPanel: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 20,
+  },
+  settingsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  settingsTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1F2937',
+  },
+  settingsCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  settingsCloseText: {
+    fontSize: 20,
+    color: '#6B7280',
+    fontWeight: '600',
+  },
+  settingsContent: {
+    flex: 1,
+  },
+  settingsSection: {
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+  },
+  settingsSectionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#6B7280',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 12,
+  },
+  settingsItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  settingsItemLabel: {
+    fontSize: 16,
+    color: '#1F2937',
+    fontWeight: '500',
+  },
+  settingsItemValue: {
+    fontSize: 16,
+    color: '#6B7280',
+  },
+  settingsItemArrow: {
+    fontSize: 20,
+    color: '#9CA3AF',
+    fontWeight: '400',
   },
 });
