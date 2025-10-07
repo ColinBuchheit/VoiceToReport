@@ -19,6 +19,7 @@ import {
 import { EmailHistoryItem } from '../services/emailHistoryService';
 // import emailHistoryService if it is the default export
 import emailHistoryService from '../services/emailHistoryService';
+import { useTheme } from '../context/ThemeContext';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -38,6 +39,7 @@ export default function EmailHistorySidebar({
   onEmailSelect,
   onSelectEmail,
 }: EmailHistorySidebarProps) {
+  const { colors, isDark } = useTheme();
   const [history, setHistory] = useState<EmailHistoryItem[]>([]);
   const [recentlyDeleted, setRecentlyDeleted] = useState<{ item: EmailHistoryItem; index: number } | null>(null);
   const slideAnim = useRef(new Animated.Value(SCREEN_WIDTH)).current;
@@ -259,7 +261,7 @@ export default function EmailHistorySidebar({
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
         <Animated.View
-          style={[styles.backdrop, { opacity: backdropOpacity }]}
+          style={[styles.backdrop, { opacity: backdropOpacity, backgroundColor: colors.overlay }]}
         >
           <TouchableOpacity style={styles.backdropTouchable} activeOpacity={1} onPress={onClose} />
         </Animated.View>
@@ -267,6 +269,7 @@ export default function EmailHistorySidebar({
         <Animated.View
           style={[
             styles.fullscreenPanel,
+            { backgroundColor: colors.background },
             {
               transform: [
                 { translateX: slideAnim },
@@ -276,10 +279,10 @@ export default function EmailHistorySidebar({
           ]}
         >
           {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.headerTitle}>Email History</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <Text style={styles.closeButtonText}>✕</Text>
+          <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+            <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Email History</Text>
+            <TouchableOpacity onPress={onClose} style={[styles.closeButton, { backgroundColor: colors.surfaceAlt }]}>
+              <Text style={[styles.closeButtonText, { color: colors.textSecondary }]}>✕</Text>
             </TouchableOpacity>
           </View>
 
@@ -294,8 +297,8 @@ export default function EmailHistorySidebar({
                 <View style={styles.emptyIconCircle}>
                   <Text style={styles.emptyIcon}>📭</Text>
                 </View>
-                <Text style={styles.emptyText}>No Emails Sent Yet</Text>
-                <Text style={styles.emptySubtext}>
+                <Text style={[styles.emptyText, { color: colors.textPrimary }]}>No Emails Sent Yet</Text>
+                <Text style={[styles.emptySubtext, { color: colors.textSecondary }] }>
                   Your sent closeout reports will appear here for easy access
                 </Text>
               </View>
@@ -422,6 +425,7 @@ export default function EmailHistorySidebar({
                         style={[
                           styles.emailCardCompact,
                           index === 0 && styles.emailCardFirst,
+                          { backgroundColor: colors.surface, borderColor: colors.border },
                           {
                             transform: [
                               { translateX: swipeX },
@@ -432,14 +436,14 @@ export default function EmailHistorySidebar({
                         ]}
                       >
                         <View style={styles.cardHeaderCompact}>
-                          <View style={styles.avatarSmall}>
-                            <Text style={styles.avatarText}>{initials}</Text>
+                          <View style={[styles.avatarSmall, { backgroundColor: colors.accent }]}>
+                            <Text style={[styles.avatarText, { color: colors.accentContrast }]}>{initials}</Text>
                           </View>
                           <View style={styles.headerTextCompact}>
-                            <Text style={styles.inlineTitle} numberOfLines={1}>
+                            <Text style={[styles.inlineTitle, { color: colors.textPrimary }]} numberOfLines={1}>
                               {location} • WO {email.workOrder || 'N/A'}
                             </Text>
-                            <Text style={styles.timestamp}>{timestamp}</Text>
+                            <Text style={[styles.timestamp, { color: colors.textSecondary }]}>{timestamp}</Text>
                           </View>
                         </View>
                         <TouchableOpacity
@@ -449,18 +453,18 @@ export default function EmailHistorySidebar({
                           activeOpacity={0.8}
                         >
                           <View style={styles.recipientsRowCompact}>
-                            <Text style={styles.recipientsLabel}>To:</Text>
-                            <Text style={styles.recipientsText} numberOfLines={1}>
+                            <Text style={[styles.recipientsLabel, { color: colors.textSecondary }]}>To:</Text>
+                            <Text style={[styles.recipientsText, { color: colors.textPrimary }]} numberOfLines={1}>
                               {email.recipients.join(', ')}
                             </Text>
                           </View>
                           {email.summary.work_completed && (
-                            <Text style={styles.previewTextCompact} numberOfLines={2}>
+                            <Text style={[styles.previewTextCompact, { color: colors.textSecondary }]} numberOfLines={2}>
                               {email.summary.work_completed}
                             </Text>
                           )}
                           <View style={styles.actionRowCompact}>
-                            <Text style={styles.actionTextCompact}>Swipe right to delete • Tap to open</Text>
+                            <Text style={[styles.actionTextCompact, { color: colors.textSecondary }]}>Swipe right to delete • Tap to open</Text>
                           </View>
                         </TouchableOpacity>
                       </Animated.View>
@@ -473,13 +477,13 @@ export default function EmailHistorySidebar({
 
           {/* Undo Bar - Now more prominent and always on top */}
           {recentlyDeleted && (
-            <View style={styles.undoBar}>
+            <View style={[styles.undoBar, { backgroundColor: colors.surfaceAlt, borderColor: colors.accent }]}>
               <TouchableOpacity onPress={handleUndo} style={styles.undoButton}>
-                <Text style={styles.undoArrow}>↩</Text>
-                <Text style={styles.undoText}>Restore deleted email</Text>
+                <Text style={[styles.undoArrow, { color: colors.accent }]}>↩</Text>
+                <Text style={[styles.undoText, { color: colors.textPrimary }]}>Restore deleted email</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setRecentlyDeleted(null)} style={styles.undoDismiss}>
-                <Text style={styles.undoDismissText}>Dismiss</Text>
+              <TouchableOpacity onPress={() => setRecentlyDeleted(null)} style={[styles.undoDismiss, { backgroundColor: colors.surface }] }>
+                <Text style={[styles.undoDismissText, { color: colors.textSecondary }]}>Dismiss</Text>
               </TouchableOpacity>
             </View>
           )}

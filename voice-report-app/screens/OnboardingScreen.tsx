@@ -2,6 +2,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Image } from 'react-native';
 import userProfileService, { UserProfile } from '../services/userProfileService';
+import { useTheme } from '../context/ThemeContext';
+const LIGHT_LOGO = require('../assets/bears&t.png');
+const DARK_LOGO = require('../assets/DarkModeLogo.png');
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../App';
 
@@ -10,6 +13,7 @@ type OnboardingNav = NativeStackNavigationProp<RootStackParamList, 'Onboarding'>
 interface Props { navigation: OnboardingNav; }
 
 export default function OnboardingScreen({ navigation }: Props) {
+  const { colors, isDark } = useTheme();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [workEmail, setWorkEmail] = useState('');
@@ -77,89 +81,99 @@ export default function OnboardingScreen({ navigation }: Props) {
   };
 
   if (loading) {
-    return <View style={styles.loadingContainer}><ActivityIndicator size="large" color="#FF6B35" /><Text style={styles.loadingText}>Loading...</Text></View>;
+    return <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.accent} /><Text style={[styles.loadingText, { color: colors.textPrimary }]}>Loading...</Text></View>;
   }
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background }]} keyboardShouldPersistTaps="handled">
         <View style={styles.header}> 
-          <Image source={require('../assets/bears&t.png')} style={styles.logo} resizeMode="contain" />
-          <Text style={styles.appName}>Voice Report</Text>
-          <Text style={styles.tagline}>Turn field notes into professional reports</Text>
+          <View style={styles.logoWrapper}> 
+            <Image
+              key={isDark ? 'dark-logo' : 'light-logo'}
+              source={isDark ? DARK_LOGO : LIGHT_LOGO}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+          </View>
+          <Text style={[styles.appName, { color: colors.accent }]}>Voice Report</Text>
+          <Text style={[styles.tagline, { color: colors.textSecondary }]}>Turn field notes into professional reports</Text>
         </View>
-        <View style={styles.introCard}>
-          <Text style={styles.introTitle}>Welcome</Text>
-          <Text style={styles.introText}>We store these details locally so:
+        <View style={[styles.introCard, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+          <Text style={[styles.introTitle, { color: colors.textPrimary }]}>Welcome</Text>
+          <Text style={[styles.introText, { color: colors.textPrimary }]}>We store these details locally so:
           </Text>
           <View style={styles.benefitsList}>
-            <Text style={styles.benefitItem}>• Your name auto-fills the summary</Text>
-            <Text style={styles.benefitItem}>• Your email address is CC'd on every report</Text>
-            <Text style={styles.benefitItem}>• You keep a consistent professional signature</Text>
+            <Text style={[styles.benefitItem, { color: colors.textPrimary }]}>• Your name auto-fills the summary</Text>
+            <Text style={[styles.benefitItem, { color: colors.textPrimary }]}>• Your email address is CC'd on every report</Text>
+            <Text style={[styles.benefitItem, { color: colors.textPrimary }]}>• You keep a consistent professional signature</Text>
           </View>
-          <Text style={styles.privacyNote}>Data is stored securely on this device only and can be cleared anytime in Settings.</Text>
+          <Text style={[styles.privacyNote, { color: colors.textSecondary }]}>Data is stored securely on this device only and can be cleared anytime in Settings.</Text>
         </View>
 
         {/* FIRST NAME */}
         <View style={styles.formGroup}>
-          <View style={styles.labelRow}><Text style={styles.label}>First Name</Text>{fieldErrors.firstName ? <Text style={styles.inlineError}>{fieldErrors.firstName}</Text> : null}</View>
+          <View style={styles.labelRow}><Text style={[styles.label, { color: colors.textPrimary }]}>First Name</Text>{fieldErrors.firstName ? <Text style={styles.inlineError}>{fieldErrors.firstName}</Text> : null}</View>
           <TextInput
             value={firstName}
             onChangeText={(v)=>{ setFirstName(v); if(fieldErrors.firstName) setFieldErrors(p=>({ ...p, firstName: undefined })); }}
             onBlur={()=>{ const err = validators.firstName(firstName); if(err) setFieldErrors(p=>({...p, firstName: err})); }}
-            style={[styles.input, fieldErrors.firstName && styles.inputError]}
+            style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.textPrimary }, fieldErrors.firstName && styles.inputError]}
             placeholder="Jane"
             autoCapitalize="words"
             returnKeyType="next"
             onSubmitEditing={()=> lastNameRef.current?.focus()}
+            placeholderTextColor={colors.textSecondary}
           />
         </View>
         {/* LAST NAME */}
         <View style={styles.formGroup}>
-          <View style={styles.labelRow}><Text style={styles.label}>Last Name</Text>{fieldErrors.lastName ? <Text style={styles.inlineError}>{fieldErrors.lastName}</Text> : null}</View>
+          <View style={styles.labelRow}><Text style={[styles.label, { color: colors.textPrimary }]}>Last Name</Text>{fieldErrors.lastName ? <Text style={styles.inlineError}>{fieldErrors.lastName}</Text> : null}</View>
           <TextInput
             ref={lastNameRef}
             value={lastName}
             onChangeText={(v)=>{ setLastName(v); if(fieldErrors.lastName) setFieldErrors(p=>({ ...p, lastName: undefined })); }}
             onBlur={()=>{ const err = validators.lastName(lastName); if(err) setFieldErrors(p=>({...p, lastName: err})); }}
-            style={[styles.input, fieldErrors.lastName && styles.inputError]}
+            style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.textPrimary }, fieldErrors.lastName && styles.inputError]}
             placeholder="Doe"
             autoCapitalize="words"
             returnKeyType="next"
             onSubmitEditing={()=> emailRef.current?.focus()}
+            placeholderTextColor={colors.textSecondary}
           />
         </View>
         {/* EMAIL */}
         <View style={styles.formGroup}>
-          <View style={styles.labelRow}><Text style={styles.label}>Work Email</Text>{fieldErrors.workEmail ? <Text style={styles.inlineError}>{fieldErrors.workEmail}</Text> : null}</View>
+          <View style={styles.labelRow}><Text style={[styles.label, { color: colors.textPrimary }]}>Work Email</Text>{fieldErrors.workEmail ? <Text style={styles.inlineError}>{fieldErrors.workEmail}</Text> : null}</View>
           <TextInput
             ref={emailRef}
             value={workEmail}
             onChangeText={(v)=>{ const nv=v.trimStart(); setWorkEmail(nv); if(fieldErrors.workEmail) setFieldErrors(p=>({ ...p, workEmail: undefined })); }}
             onBlur={()=>{ const err = validators.workEmail(workEmail.toLowerCase()); if(err) setFieldErrors(p=>({...p, workEmail: err})); else setWorkEmail(workEmail.toLowerCase()); }}
-            style={[styles.input, fieldErrors.workEmail && styles.inputError]}
+            style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.textPrimary }, fieldErrors.workEmail && styles.inputError]}
             placeholder="name@company.com"
             autoCapitalize="none"
             keyboardType="email-address"
             returnKeyType="done"
             onSubmitEditing={handleSave}
             autoCorrect={false}
+            placeholderTextColor={colors.textSecondary}
           />
         </View>
 
-        {formError ? <Text style={styles.formError}>{formError}</Text> : null}
+  {formError ? <Text style={styles.formError}>{formError}</Text> : null}
 
         <TouchableOpacity
-          style={[styles.saveButton, (saving || !isFormValid()) && styles.saveButtonDisabled]}
+          style={[styles.saveButton, { backgroundColor: colors.accent }, (saving || !isFormValid()) && styles.saveButtonDisabled]}
           onPress={handleSave}
           disabled={saving || !isFormValid()}
           accessibilityLabel="Save profile and continue"
         >
-          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Save & Continue</Text>}
+          {saving ? <ActivityIndicator color={colors.accentContrast} /> : <Text style={[styles.saveButtonText, { color: colors.accentContrast }]}>Save & Continue</Text>}
         </TouchableOpacity>
 
         <View style={styles.footerNoteWrapper}>
-          <Text style={styles.footerNote}>You can update or clear this information later in Settings.</Text>
+          <Text style={[styles.footerNote, { color: colors.textSecondary }]}>You can update or clear this information later in Settings.</Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -171,7 +185,9 @@ const styles = StyleSheet.create({
   loadingContainer: { flex:1, justifyContent:'center', alignItems:'center', backgroundColor:'#fff' },
   loadingText: { marginTop:12, color:'#374151' },
   header: { marginTop: 30, marginBottom: 10, alignItems:'center' },
-  logo: { width: 140, height: 60, marginBottom: 8 },
+  logo: { width: 200, height: 75, marginBottom: 8 },
+  logoWrapper: { paddingHorizontal:16, paddingVertical:8, borderRadius:20, marginBottom:8, backgroundColor:'transparent' },
+  // Removed dark-mode size/padding differences; unified sizing
   appName: { fontSize: 28, fontWeight: '700', color: '#FF6B35' },
   tagline: { fontSize: 14, color: '#6B7280', marginTop: 4 },
   introCard: { backgroundColor:'#FFF5F0', borderWidth:1, borderColor:'#FFE0D2', padding:18, borderRadius:14, marginVertical:22 },

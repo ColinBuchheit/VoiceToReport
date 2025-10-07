@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, Modal, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, TextInput, Alert } from 'react-native';
 import { useFontScale } from '../context/FontScaleContext';
 import userProfileService from '../services/userProfileService';
+import { useTheme, ThemeMode } from '../context/ThemeContext';
 
 interface SettingsModalProps {
   visible: boolean;
@@ -16,6 +17,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const { fontScale, setFontScale, scaled } = useFontScale();
+  const { mode, setMode, colors, isDark } = useTheme();
   // Dynamic slider resolution with graceful fallback if dependency missing
   let SliderComp: any = null;
   try {
@@ -103,23 +105,23 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
       animationType="slide"
       onRequestClose={onClose}
     >
-      <View style={styles.settingsOverlay}>
+      <View style={[styles.settingsOverlay, { backgroundColor: colors.overlay }]}>
         <TouchableOpacity
           style={styles.settingsBackdrop}
           activeOpacity={1}
           onPress={onClose}
         />
-        <View style={styles.settingsPanel}>
+        <View style={[styles.settingsPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={styles.settingsHeader}>
-            <Text style={[styles.settingsTitle, { fontSize: scaled(24) }]}>Settings</Text>
+            <Text style={[styles.settingsTitle, { fontSize: scaled(24), color: colors.textPrimary }]}>Settings</Text>
             <TouchableOpacity onPress={onClose} style={styles.settingsCloseButton}>
-              <Text style={styles.settingsCloseText}>✕</Text>
+              <Text style={[styles.settingsCloseText, { color: colors.textSecondary }]}>✕</Text>
             </TouchableOpacity>
           </View>
           {!loaded ? (
             <View style={styles.settingsLoadingContainer}>
-              <ActivityIndicator size="large" color="#FF6B35" />
-              <Text style={styles.settingsLoadingText}>Loading profile...</Text>
+              <ActivityIndicator size="large" color={colors.accent} />
+              <Text style={[styles.settingsLoadingText, { color: colors.textSecondary }]}>Loading profile...</Text>
             </View>
           ) : (
             <ScrollView
@@ -128,38 +130,69 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
               showsVerticalScrollIndicator={false}
             >
               <View style={styles.settingsSection}>
-                <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13) }]}>Technician Profile</Text>
+                <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13), color: colors.textSecondary }]}>Technician Profile</Text>
                 <View style={styles.settingsItemNoBorder}>
-                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16) }]}>First Name</Text>
+                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), color: colors.textPrimary }]}>First Name</Text>
                 </View>
                 <View style={styles.inlineInputWrapper}>
-                  <TextInput value={firstName} onChangeText={setFirstName} style={[styles.inlineInput, { fontSize: scaled(16) }]} placeholder="First name" />
+                  <TextInput value={firstName} onChangeText={setFirstName} style={[styles.inlineInput, { fontSize: scaled(16), color: colors.textPrimary, backgroundColor: colors.surfaceAlt, borderColor: colors.border }]} placeholder="First name" placeholderTextColor={colors.textSecondary} />
                 </View>
                 <View style={styles.settingsItemNoBorder}>
-                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16) }]}>Last Name</Text>
+                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), color: colors.textPrimary }]}>Last Name</Text>
                 </View>
                 <View style={styles.inlineInputWrapper}>
-                  <TextInput value={lastName} onChangeText={setLastName} style={[styles.inlineInput, { fontSize: scaled(16) }]} placeholder="Last name" />
+                  <TextInput value={lastName} onChangeText={setLastName} style={[styles.inlineInput, { fontSize: scaled(16), color: colors.textPrimary, backgroundColor: colors.surfaceAlt, borderColor: colors.border }]} placeholder="Last name" placeholderTextColor={colors.textSecondary} />
                 </View>
                 <View style={styles.settingsItemNoBorder}>
-                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16) }]}>Work Email</Text>
+                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), color: colors.textPrimary }]}>Work Email</Text>
                 </View>
                 <View style={styles.inlineInputWrapper}>
-                  <TextInput value={workEmail} onChangeText={setWorkEmail} style={[styles.inlineInput, { fontSize: scaled(16) }]} placeholder="name@company.com" autoCapitalize="none" keyboardType="email-address" />
+                  <TextInput value={workEmail} onChangeText={setWorkEmail} style={[styles.inlineInput, { fontSize: scaled(16), color: colors.textPrimary, backgroundColor: colors.surfaceAlt, borderColor: colors.border }]} placeholder="name@company.com" autoCapitalize="none" keyboardType="email-address" placeholderTextColor={colors.textSecondary} />
                 </View>
                 {error ? <Text style={[styles.settingsError, { fontSize: scaled(13) }]}>{error}</Text> : null}
-                <TouchableOpacity style={[styles.profileSaveButton, saving && { opacity:0.6 }]} onPress={handleSave} disabled={saving}>
-                  <Text style={[styles.profileSaveButtonText, { fontSize: scaled(15) }]}>{saving ? 'Saving...' : 'Save Profile'}</Text>
+                <TouchableOpacity style={[styles.profileSaveButton, { backgroundColor: colors.accent }, saving && { opacity:0.6 }]} onPress={handleSave} disabled={saving}>
+                  <Text style={[styles.profileSaveButtonText, { fontSize: scaled(15), color: colors.accentContrast }]}>{saving ? 'Saving...' : 'Save Profile'}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.clearProfileButton} onPress={handleClear}>
-                  <Text style={[styles.clearProfileButtonText, { fontSize: scaled(14) }]}>Clear Profile</Text>
+                <TouchableOpacity style={[styles.clearProfileButton, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]} onPress={handleClear}>
+                  <Text style={[styles.clearProfileButtonText, { fontSize: scaled(14), color: '#DC2626' }]}>Clear Profile</Text>
                 </TouchableOpacity>
               </View>
               <View style={styles.settingsSection}>
-                <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13) }]}>Accessibility</Text>
+                <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13), color: colors.textSecondary }]}>Appearance</Text>
                 <View style={styles.settingsItemNoBorder}>
-                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), flex: 1 }]}>Font Size</Text>
-                  <Text style={{ fontSize: scaled(14), color: '#6B7280', width: 50, textAlign: 'right' }}>{(fontScale).toFixed(2)}x</Text>
+                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), flex:1, color: colors.textPrimary }]}>Theme Mode</Text>
+                </View>
+                <View style={styles.themeModeRow}>
+                  {(['light','dark','system'] as ThemeMode[]).map(opt => {
+                    const active = mode === opt;
+                    return (
+                      <TouchableOpacity
+                        key={opt}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
+                        onPress={() => setMode(opt)}
+                        style={[styles.themeModeButton, {
+                          backgroundColor: active ? colors.accent : colors.surfaceAlt,
+                          borderColor: active ? colors.accent : colors.border,
+                        }]}
+                      >
+                        <Text style={{
+                          color: active ? colors.accentContrast : colors.textPrimary,
+                          fontWeight: active ? '700' : '500',
+                          fontSize: scaled(14),
+                          textTransform: 'capitalize'
+                        }}>{opt}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                <Text style={{ fontSize: scaled(12), color: colors.textSecondary, marginTop: 6 }}>Use system to follow your device setting automatically.</Text>
+              </View>
+              <View style={styles.settingsSection}>
+                <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13), color: colors.textSecondary }]}>Accessibility</Text>
+                <View style={styles.settingsItemNoBorder}>
+                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), flex: 1, color: colors.textPrimary }]}>Font Size</Text>
+                  <Text style={{ fontSize: scaled(14), color: colors.textSecondary, width: 50, textAlign: 'right' }}>{(fontScale).toFixed(2)}x</Text>
                 </View>
                 {SliderComp ? (
                   <SliderComp
@@ -167,9 +200,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
                     minimumValue={0.8}
                     maximumValue={1.6}
                     step={0.05}
-                    minimumTrackTintColor="#FF6B35"
-                    maximumTrackTintColor="#D1D5DB"
-                    thumbTintColor="#FF6B35"
+                    minimumTrackTintColor={colors.accent}
+                    maximumTrackTintColor={colors.border}
+                    thumbTintColor={colors.accent}
                     value={fontScale}
                     onValueChange={setFontScale}
                   />
@@ -179,20 +212,20 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
                       <Text style={styles.stepperButtonText}>−</Text>
                     </TouchableOpacity>
                     <View style={styles.stepperValueBox}>
-                      <Text style={[styles.stepperValueText, { fontSize: scaled(14) }]}>{fontScale.toFixed(2)}x</Text>
+                      <Text style={[styles.stepperValueText, { fontSize: scaled(14), color: colors.textPrimary }]}>{fontScale.toFixed(2)}x</Text>
                     </View>
                     <TouchableOpacity accessibilityLabel="Increase font size" style={styles.stepperButton} onPress={() => setFontScale(fontScale + 0.05)}>
                       <Text style={styles.stepperButtonText}>+</Text>
                     </TouchableOpacity>
                   </View>
                 )}
-                <Text style={{ fontSize: scaled(12), color: '#6B7280', marginTop: 4 }}>Adjust overall text size across the app.</Text>
+                <Text style={{ fontSize: scaled(12), color: colors.textSecondary, marginTop: 4 }}>Adjust overall text size across the app.</Text>
               </View>
               <View style={styles.settingsSection}>
-                <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13) }]}>About</Text>
-                <View style={styles.settingsItem}>
-                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16) }]}>Version</Text>
-                  <Text style={[styles.settingsItemValue, { fontSize: scaled(16) }]}>1.0.0</Text>
+                <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13), color: colors.textSecondary }]}>About</Text>
+                <View style={[styles.settingsItem, { borderBottomColor: colors.border }]}>
+                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), color: colors.textPrimary }]}>Version</Text>
+                  <Text style={[styles.settingsItemValue, { fontSize: scaled(16), color: colors.textSecondary }]}>1.0.0</Text>
                 </View>
               </View>
             </ScrollView>
@@ -219,7 +252,7 @@ const styles = StyleSheet.create({
     bottom: 0,
   },
   settingsPanel: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FFFFFF', // overridden by theme
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: '85%',
@@ -239,7 +272,7 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: '#E5E7EB', // themed inline
   },
   settingsTitle: {
     fontSize: 24,
@@ -306,4 +339,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   stepperValueText: { fontWeight: '600', color: '#374151' },
+  themeModeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  themeModeButton: {
+    flex: 1,
+    paddingVertical: 10,
+    marginHorizontal: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

@@ -20,6 +20,7 @@ import { useSummaryScreenContext } from '../hooks/useScreenContext';
 import { CloseoutSummary } from '../types/aiAgent';
 import { useFontScale } from '../context/FontScaleContext';
 import userProfileService from '../services/userProfileService';
+import { useTheme } from '../context/ThemeContext';
 
 type SummaryScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -49,28 +50,42 @@ const EditableField: React.FC<EditableFieldProps & { scaled:(n:number)=>number }
   multiline = false,
   placeholder = '',
   scaled,
-}) => (
-  <View style={styles.fieldContainer}>
-    {!!label && <Text style={[styles.fieldLabel, { fontSize: scaled(14) }]}>{label}</Text>}
-    {isEditing ? (
-      <TextInput
-        style={[styles.fieldInput, { fontSize: scaled(16) }, multiline && styles.multilineInput]}
-        value={value}
-        onChangeText={onChangeText}
-        multiline={multiline}
-        textAlignVertical={multiline ? 'top' : 'center'}
-        placeholder={placeholder}
-      />
-    ) : (
-      <Text style={[styles.fieldValue, { fontSize: scaled(16) }]}>
-        {value || 'Not specified'}
-      </Text>
-    )}
-  </View>
-);
+}) => {
+  const { colors, isDark } = useTheme();
+  return (
+    <View style={styles.fieldContainer}>
+      {!!label && <Text style={[styles.fieldLabel, { fontSize: scaled(14), color: colors.textSecondary }]}>{label}</Text>}
+      {isEditing ? (
+        <TextInput
+          style={[styles.fieldInput, {
+            fontSize: scaled(16),
+            backgroundColor: isDark ? colors.surfaceAlt : '#fff',
+            borderColor: colors.border,
+            color: colors.textPrimary,
+          }, multiline && styles.multilineInput]}
+          value={value}
+          onChangeText={onChangeText}
+          multiline={multiline}
+          textAlignVertical={multiline ? 'top' : 'center'}
+          placeholder={placeholder}
+          placeholderTextColor={colors.textSecondary}
+        />
+      ) : (
+        <Text style={[styles.fieldValue, {
+          fontSize: scaled(16),
+          color: colors.textPrimary,
+          backgroundColor: isDark ? colors.surfaceAlt : '#ecf0f1',
+        }]}>
+          {value || 'Not specified'}
+        </Text>
+      )}
+    </View>
+  );
+};
 
 export default function SummaryScreen({ navigation, route }: Props) {
   const { scaled } = useFontScale();
+  const { colors } = useTheme();
   // Initialize CloseoutSummary with proper field mapping
   const initializeCloseoutSummary = (summary: CloseoutSummary): CloseoutSummary => {
     console.log('🔧 Initializing CloseoutSummary from:', summary);
@@ -227,11 +242,11 @@ export default function SummaryScreen({ navigation, route }: Props) {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }] }>
       <ScrollView style={styles.scrollContainer}>
         {/* CLOSEOUT NOTES SECTION */}
-        <View style={styles.sectionContainer}>
-          <Text style={[styles.sectionTitle, { fontSize: scaled(18) }]}>CLOSEOUT NOTES</Text>
+        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]} accessibilityRole="header">CLOSEOUT NOTES</Text>
           
           <EditableField
             label="Who did you meet with on-site?"
@@ -322,8 +337,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
         
 
         {/* SIGN-OFF & TRACKING SECTION */}
-        <View style={styles.sectionContainer}>
-          <Text style={[styles.sectionTitle, { fontSize: scaled(18) }]}>SIGN-OFF & TRACKING</Text>
+        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>SIGN-OFF & TRACKING</Text>
           
           <EditableField
             label="Who released you?"
@@ -354,8 +369,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
         </View>
 
         {/* EXPENSES & MATERIALS SECTION */}
-        <View style={styles.sectionContainer}>
-          <Text style={[styles.sectionTitle, { fontSize: scaled(18) }]}>EXPENSES & MATERIALS</Text>
+        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>EXPENSES & MATERIALS</Text>
           
           <EditableField
             label="Expenses"
@@ -379,8 +394,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
         </View>
 
         {/* ADDITIONAL INFORMATION SECTION */}
-        <View style={styles.sectionContainer}>
-          <Text style={[styles.sectionTitle, { fontSize: scaled(18) }]}>ADDITIONAL INFORMATION</Text>
+        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>ADDITIONAL INFORMATION</Text>
           
           <EditableField
             label="Out of Scope Work"
@@ -405,8 +420,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
         {/* ORIGINAL TRANSCRIPTION SECTION */}
         <View style={styles.transcriptionSection}>
-          <View style={styles.transcriptionCard}>
-            <Text style={[styles.sectionTitle, { fontSize: scaled(18) }]}>ORIGINAL TRANSCRIPTION</Text>
+          <View style={[styles.transcriptionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>ORIGINAL TRANSCRIPTION</Text>
             <EditableField
               label=""
               value={editableTranscription}
@@ -422,14 +437,14 @@ export default function SummaryScreen({ navigation, route }: Props) {
         {/* SEND EMAIL BUTTON */}
         <View style={styles.actionButtons}>
           <TouchableOpacity
-            style={[styles.emailButton, isSendingEmail && styles.emailButtonDisabled]}
+            style={[styles.emailButton, { backgroundColor: colors.accent }, isSendingEmail && styles.emailButtonDisabled]}
             onPress={handleSendEmail}
             disabled={isSendingEmail}
           >
             {isSendingEmail ? (
               <ActivityIndicator color="white" size="small" />
             ) : (
-              <Text style={[styles.emailButtonText, { fontSize: scaled(16) }]}>Send Email Report</Text>
+              <Text style={[styles.emailButtonText, { fontSize: scaled(16), color: colors.accentContrast }]}>Send Email Report</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -483,6 +498,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
+    borderWidth: 1,
+    borderColor: '#ecf0f1'
   },
   sectionTitle: {
     fontSize: 18,
@@ -540,6 +557,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
+    borderWidth: 1,
+    borderColor: '#ecf0f1'
   },
   actionButtons: {
     flexDirection: 'row',

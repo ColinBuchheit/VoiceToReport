@@ -1,6 +1,7 @@
 // voice-report-app/components/EmailSuccessPopup.tsx
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Modal, Animated } from 'react-native';
+import { useTheme } from '../context/ThemeContext';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 interface EmailSuccessPopupProps {
@@ -13,6 +14,7 @@ const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
 export default function EmailSuccessPopup({ visible, emailList, onComplete }: EmailSuccessPopupProps) {
+  const { colors, isDark } = useTheme();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const circleProgress = useRef(new Animated.Value(0)).current;
@@ -75,44 +77,49 @@ export default function EmailSuccessPopup({ visible, emailList, onComplete }: Em
     outputRange: [70, 0],
   });
 
+  const successColor = '#10b981';
+  // Light tinted background vs darker translucent variant for dark mode
+  const listBg = isDark ? 'rgba(16,185,129,0.12)' : '#f0fdf4';
+  const listBorder = isDark ? 'rgba(16,185,129,0.35)' : '#bbf7d0';
+  const titleColor = colors.textPrimary;
+  const accentText = isDark ? '#34d399' : '#166534';
+  const emailTextColor = isDark ? '#a7f3d0' : '#15803d';
+
   return (
     <Modal transparent visible={visible} animationType="none">
-      <Animated.View 
+      <Animated.View
         style={[
           styles.overlay,
-          {
-            opacity: fadeAnim,
-          }
+          { opacity: fadeAnim, backgroundColor: colors.overlay }
         ]}
       >
         <Animated.View
           style={[
             styles.card,
             {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
               transform: [{ scale: scaleAnim }],
               opacity: fadeAnim,
             }
           ]}
         >
-          {/* Animated Checkmark */}
           <View style={styles.checkmarkContainer}>
             <Svg width={96} height={96} viewBox="0 0 100 100">
-              {/* Circle */}
               <AnimatedCircle
                 cx="50"
                 cy="50"
                 r="45"
                 fill="none"
-                stroke="#10b981"
+                stroke={successColor}
                 strokeWidth="4"
                 strokeDasharray="283"
                 strokeDashoffset={circleStrokeDashoffset}
               />
-              {/* Checkmark */}
               <AnimatedPath
                 d="M25 50 L40 65 L75 30"
                 fill="none"
-                stroke="#10b981"
+                stroke={successColor}
                 strokeWidth="6"
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -121,17 +128,13 @@ export default function EmailSuccessPopup({ visible, emailList, onComplete }: Em
               />
             </Svg>
           </View>
-
-          {/* Success Message */}
-          <Text style={styles.title}>Successfully Sent!</Text>
-
-          {/* Email List */}
-          <View style={styles.emailListContainer}>
-            <Text style={styles.emailListTitle}>Sent to:</Text>
+          <Text style={[styles.title, { color: titleColor }]}>Successfully Sent!</Text>
+          <View style={[styles.emailListContainer, { backgroundColor: listBg, borderColor: listBorder }]}> 
+            <Text style={[styles.emailListTitle, { color: accentText }]}>Sent to:</Text>
             {emailList.map((email, index) => (
               <View key={index} style={styles.emailItem}>
-                <View style={styles.bullet} />
-                <Text style={styles.emailText}>{email}</Text>
+                <View style={[styles.bullet, { backgroundColor: successColor }]} />
+                <Text style={[styles.emailText, { color: emailTextColor }]}>{email}</Text>
               </View>
             ))}
           </View>
@@ -149,19 +152,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   card: {
-    backgroundColor: 'white',
     borderRadius: 16,
     padding: 32,
     maxWidth: 400,
     width: '85%',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
+    borderWidth: 1,
   },
   checkmarkContainer: {
     alignItems: 'center',
@@ -170,21 +170,17 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#1f2937',
     textAlign: 'center',
     marginBottom: 16,
   },
   emailListContainer: {
-    backgroundColor: '#f0fdf4',
     borderRadius: 8,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#bbf7d0',
   },
   emailListTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#166534',
     marginBottom: 8,
   },
   emailItem: {
@@ -196,11 +192,9 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#16a34a',
     marginRight: 8,
   },
   emailText: {
     fontSize: 14,
-    color: '#15803d',
   },
 });

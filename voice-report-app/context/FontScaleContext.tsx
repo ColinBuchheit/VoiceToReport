@@ -39,11 +39,8 @@ export const FontScaleProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const value: FontScaleContextValue = { fontScale, setFontScale, scaled };
 
-  if (!loaded) return <>{children}</>; // Avoid flash; could also show nothing until loaded
-
-  return (
-    <FontScaleContext.Provider value={value}>{children}</FontScaleContext.Provider>
-  );
+  // Always provide context so consumers never mount outside provider (prevents hook errors)
+  return <FontScaleContext.Provider value={value}>{children}</FontScaleContext.Provider>;
 };
 
 export function useFontScale() {

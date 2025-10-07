@@ -13,6 +13,10 @@ import EmailHistorySidebar from '../components/EmailHistorySidebar';
 import { transcribeAudio } from '../services/api';
 import SettingsModal from '../components/SettingsModal'; // explicit import; TS should resolve .tsx
 import { EmailHistoryItem } from '../services/emailHistoryService';
+import { useTheme } from '../context/ThemeContext';
+// Pre-require both logos so Metro bundles them and switching is instant
+const LIGHT_LOGO = require('../assets/bears&t.png');
+const DARK_LOGO = require('../assets/DarkModeLogo.png');
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
@@ -317,43 +321,47 @@ function HomeScreenInner({ navigation }: Props) {
 
   const insets = useSafeAreaInsets();
   const { scaled } = useFontScale();
+  const { colors, isDark } = useTheme();
   // Space to ensure last checklist items (e.g., Photos) are not hidden behind bottom nav
   const bottomNavOverlaySpace = 160 + (Platform.OS === 'ios' ? insets.bottom : 0);
 
   // SettingsModal extracted to separate component to prevent remounts on each render (which caused flicker during recording updates)
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 8) }]}>    
+  <View style={[styles.container, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 8), backgroundColor: colors.background }]}>    
       {/* Fixed Header - centered logo */}
-      <View style={[styles.header, { paddingTop: (Platform.OS === 'ios' ? 10 : 20) + insets.top * 0.2 }]}> 
-        <Image
-          source={require('../assets/bears&t.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
+      <View style={[styles.header, { paddingTop: (Platform.OS === 'ios' ? 10 : 20) + insets.top * 0.2, backgroundColor: colors.surface, borderBottomColor: colors.border }]}> 
+        <View style={styles.logoWrapper}> 
+          <Image
+            key={isDark ? 'dark-logo' : 'light-logo'}
+            source={isDark ? DARK_LOGO : LIGHT_LOGO}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        </View>
       </View>
 
       {/* Progress Summary */}
-      <View style={styles.progressSummary}>
+      <View style={[styles.progressSummary, { backgroundColor: colors.surfaceAlt, borderBottomColor: colors.border }]}>
         <View style={styles.progressInfo}>
-          <Text style={[styles.progressTitle, { fontSize: scaled(16) }]}>Report Progress</Text>
-          <Text style={[styles.progressDetails, { fontSize: scaled(13) }]}>
+          <Text style={[styles.progressTitle, { fontSize: scaled(16), color: colors.textPrimary }]}>Report Progress</Text>
+          <Text style={[styles.progressDetails, { fontSize: scaled(13), color: colors.textSecondary }]}>
             {checkedRequiredCount}/{requiredItems.length} required • {checkedCount}/{totalItems} total
           </Text>
         </View>
-        <View style={styles.progressCircle}>
-          <Text style={styles.progressPercent}>{progressPercent}%</Text>
+        <View style={[styles.progressCircle, { backgroundColor: colors.accent }]}>
+          <Text style={[styles.progressPercent, { color: colors.accentContrast }]}>{progressPercent}%</Text>
         </View>
       </View>
 
       {/* Content Area */}
-      <View style={styles.contentContainer}>
+      <View style={[styles.contentContainer, { backgroundColor: colors.background }]}>
         <View style={styles.contentHeader}>
           <TouchableOpacity 
-            style={styles.toggleButton}
+            style={[styles.toggleButton, { backgroundColor: isDark ? colors.surfaceAlt : '#F3F4F6' }]}
             onPress={() => setShowChecklist(!showChecklist)}
           >
-            <Text style={[styles.toggleText, { fontSize: scaled(14) }]}>
+            <Text style={[styles.toggleText, { fontSize: scaled(14), color: colors.textPrimary }]}>
               {showChecklist ? 'Hide Checklist' : 'Show Checklist'}
             </Text>
           </TouchableOpacity>
@@ -362,7 +370,7 @@ function HomeScreenInner({ navigation }: Props) {
         {showChecklist ? (
           /* Checklist View */
           <ScrollView 
-            style={styles.checklistContainer}
+            style={[styles.checklistContainer, { backgroundColor: colors.background }]}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[styles.checklistContent, { paddingBottom: bottomNavOverlaySpace }]}
           >
@@ -371,9 +379,9 @@ function HomeScreenInner({ navigation }: Props) {
               
               return (
                 <View key={category.title} style={styles.categorySection}>
-                  <View style={styles.categoryHeader}>
-                    <Text style={[styles.categoryTitle, { fontSize: scaled(16) }]}>{category.title}</Text>
-                    <Text style={styles.categoryProgress}>
+                  <View style={[styles.categoryHeader, { borderBottomColor: colors.border }]}>
+                    <Text style={[styles.categoryTitle, { fontSize: scaled(16), color: colors.textPrimary }]}>{category.title}</Text>
+                    <Text style={[styles.categoryProgress, { backgroundColor: colors.surfaceAlt, color: colors.textSecondary }] }>
                       {categoryChecked}/{category.items.length}
                     </Text>
                   </View>
@@ -387,24 +395,24 @@ function HomeScreenInner({ navigation }: Props) {
                       ]}
                       onPress={() => toggleItem(item.id)}
                     >
-                      <View style={styles.itemCheckbox}>
-                        {checkedItems[item.id] && <View style={styles.checkmark} />}
+                      <View style={[styles.itemCheckbox, { borderColor: colors.border }] }>
+                        {checkedItems[item.id] && <View style={[styles.checkmark, { backgroundColor: '#10B981' }]} />}
                       </View>
                       
                       <View style={styles.itemContent}>
                         <View style={styles.itemLabelRow}>
                           <Text style={[
                             styles.itemLabel,
-                            { fontSize: scaled(15) },
-                            checkedItems[item.id] && styles.itemLabelChecked
+                            { fontSize: scaled(15), color: colors.textPrimary },
+                            checkedItems[item.id] && { textDecorationLine: 'line-through', color: colors.textSecondary }
                           ]}>
                             {item.label}
                           </Text>
                           {item.required && (
-                            <View style={styles.requiredDot} />
+                            <View style={[styles.requiredDot, { backgroundColor: '#EF4444' }]} />
                           )}
                         </View>
-                        <Text style={[styles.itemHint, { fontSize: scaled(13), lineHeight: scaled(16) }]}>{item.hint}</Text>
+                        <Text style={[styles.itemHint, { fontSize: scaled(13), lineHeight: scaled(16), color: colors.textSecondary }]}>{item.hint}</Text>
                       </View>
                     </TouchableOpacity>
                   ))}
@@ -432,7 +440,7 @@ function HomeScreenInner({ navigation }: Props) {
 
       {/* Bottom Navigation: variant changes depending on checklist visibility */}
       {showChecklist ? (
-        <View style={styles.bottomNavContainer}>
+        <View style={[styles.bottomNavContainer, { backgroundColor: colors.surface, borderTopColor: colors.border }] }>
           {/* History */}
           <View style={styles.navSide}>
             <TouchableOpacity
@@ -445,15 +453,16 @@ function HomeScreenInner({ navigation }: Props) {
             >
               <View style={[
                 styles.navIconContainer,
-                showHistorySidebar && styles.navIconContainerActive
+                { backgroundColor: isDark ? colors.surfaceAlt : '#FFE4D7', borderColor: isDark ? colors.border : '#FFC8B0' },
+                showHistorySidebar && { backgroundColor: colors.accent, borderColor: colors.accent }
               ]}>
                 <Ionicons
                   name="mail-outline"
                   size={24}
-                  color={showHistorySidebar ? '#FFFFFF' : '#FF6B35'}
+                  color={showHistorySidebar ? colors.accentContrast : colors.accent}
                 />
               </View>
-              <Text style={[styles.navLabel, { fontSize: scaled(12) }, showHistorySidebar && styles.navLabelActive]}>History</Text>
+              <Text style={[styles.navLabel, { fontSize: scaled(12), color: showHistorySidebar ? colors.accent : colors.textSecondary } ]}>History</Text>
             </TouchableOpacity>
           </View>
 
@@ -484,20 +493,21 @@ function HomeScreenInner({ navigation }: Props) {
             >
               <View style={[
                 styles.navIconContainer,
-                showSettings && styles.navIconContainerActive
+                { backgroundColor: isDark ? colors.surfaceAlt : '#FFE4D7', borderColor: isDark ? colors.border : '#FFC8B0' },
+                showSettings && { backgroundColor: colors.accent, borderColor: colors.accent }
               ]}>
                 <Ionicons
                   name="settings-outline"
                   size={24}
-                  color={showSettings ? '#FFFFFF' : '#FF6B35'}
+                  color={showSettings ? colors.accentContrast : colors.accent}
                 />
               </View>
-              <Text style={[styles.navLabel, { fontSize: scaled(12) }, showSettings && styles.navLabelActive]}>Settings</Text>
+              <Text style={[styles.navLabel, { fontSize: scaled(12), color: showSettings ? colors.accent : colors.textSecondary }]}>Settings</Text>
             </TouchableOpacity>
           </View>
         </View>
       ) : (
-        <View style={[styles.bottomNavContainer, styles.bottomNavContainerSimple]}>
+        <View style={[styles.bottomNavContainer, styles.bottomNavContainerSimple, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
           <View style={styles.simpleButtonsRow}>
             <TouchableOpacity
               style={styles.simpleNavButton}
@@ -508,15 +518,16 @@ function HomeScreenInner({ navigation }: Props) {
             >
               <View style={[
                 styles.navIconContainerLarge,
-                showHistorySidebar && styles.navIconContainerActive
+                { backgroundColor: isDark ? colors.surfaceAlt : '#FFE4D7', borderColor: isDark ? colors.border : '#FFC8B0' },
+                showHistorySidebar && { backgroundColor: colors.accent, borderColor: colors.accent }
               ]}>
                 <Ionicons
                   name="mail-outline"
                   size={30}
-                  color={showHistorySidebar ? '#FFFFFF' : '#FF6B35'}
+                  color={showHistorySidebar ? colors.accentContrast : colors.accent}
                 />
               </View>
-              <Text style={[styles.navLabelLarge, { fontSize: scaled(14) }, showHistorySidebar && styles.navLabelActive]}>History</Text>
+              <Text style={[styles.navLabelLarge, { fontSize: scaled(14), color: showHistorySidebar ? colors.accent : colors.textSecondary }]}>History</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.simpleNavButton}
@@ -527,15 +538,16 @@ function HomeScreenInner({ navigation }: Props) {
             >
               <View style={[
                 styles.navIconContainerLarge,
-                showSettings && styles.navIconContainerActive
+                { backgroundColor: isDark ? colors.surfaceAlt : '#FFE4D7', borderColor: isDark ? colors.border : '#FFC8B0' },
+                showSettings && { backgroundColor: colors.accent, borderColor: colors.accent }
               ]}>
                 <Ionicons
                   name="settings-outline"
                   size={30}
-                  color={showSettings ? '#FFFFFF' : '#FF6B35'}
+                  color={showSettings ? colors.accentContrast : colors.accent}
                 />
               </View>
-              <Text style={[styles.navLabelLarge, { fontSize: scaled(14) }, showSettings && styles.navLabelActive]}>Settings</Text>
+              <Text style={[styles.navLabelLarge, { fontSize: scaled(14), color: showSettings ? colors.accent : colors.textSecondary }]}>Settings</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -580,10 +592,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   logo: {
-    width: 180,
-    height: 50,
+    width: 220,
+    height: 65,
     alignSelf: 'center',
   },
+  logoWrapper: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 18,
+    // Background removed per request; wrapper kept for spacing consistency
+    backgroundColor: 'transparent',
+  },
+  // Removed dark-mode size/padding differences; unified sizing
   // Removed old emailHistoryButton & emailIcon in favor of bottom navigation
   
   // Progress Summary
