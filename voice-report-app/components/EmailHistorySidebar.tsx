@@ -41,6 +41,11 @@ export default function EmailHistorySidebar({
   const [history, setHistory] = useState<EmailHistoryItem[]>([]);
   const [recentlyDeleted, setRecentlyDeleted] = useState<{ item: EmailHistoryItem; index: number } | null>(null);
   const slideAnim = useRef(new Animated.Value(SCREEN_WIDTH)).current;
+  // New animation values for smoother open/close UX
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+  const panelScale = useRef(new Animated.Value(0.96)).current;
+  const contentTranslate = useRef(new Animated.Value(24)).current;
+  const contentOpacity = useRef(new Animated.Value(0)).current;
   const animationMapRef = useRef<Record<string, { scale: Animated.Value; opacity: Animated.Value; swipeX: Animated.Value }>>({});
   // Per-email haptic trigger tracking & undo timeout ref
   const hapticTriggeredMapRef = useRef<Record<string, boolean>>({});
@@ -49,18 +54,78 @@ export default function EmailHistorySidebar({
   useEffect(() => {
     if (visible) {
       loadHistory();
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 65,
-        friction: 10,
-      }).start();
+      // Reset entrance values before animating in
+      backdropOpacity.setValue(0);
+      panelScale.setValue(0.96);
+      contentTranslate.setValue(24);
+      contentOpacity.setValue(0);
+      Animated.parallel([
+        Animated.timing(backdropOpacity, {
+          toValue: 1,
+          duration: 220,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.spring(slideAnim, {
+          toValue: 0,
+          useNativeDriver: true,
+          tension: 70,
+          friction: 11,
+        }),
+        Animated.spring(panelScale, {
+          toValue: 1,
+          useNativeDriver: true,
+          tension: 90,
+          friction: 12,
+        }),
+        Animated.sequence([
+          Animated.delay(80),
+          Animated.parallel([
+            Animated.timing(contentOpacity, {
+              toValue: 1,
+              duration: 240,
+              easing: Easing.out(Easing.cubic),
+              useNativeDriver: true,
+            }),
+            Animated.spring(contentTranslate, {
+              toValue: 0,
+              useNativeDriver: true,
+              tension: 110,
+              friction: 14,
+            }),
+          ]),
+        ]),
+      ]).start();
     } else {
-      Animated.timing(slideAnim, {
-        toValue: SCREEN_WIDTH,
-        duration: 250,
-        useNativeDriver: true,
-      }).start();
+      // Animate out (reverse) with slight scale down and fade
+      Animated.parallel([
+        Animated.timing(backdropOpacity, {
+          toValue: 0,
+          duration: 180,
+          easing: Easing.in(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: SCREEN_WIDTH,
+          duration: 260,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(panelScale, {
+          toValue: 0.97,
+          duration: 220,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(contentOpacity, {
+          toValue: 0,
+          duration: 160,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        // Reset content translation after it finishes closing for next open
+        contentTranslate.setValue(24);
+      });
     }
   }, [visible]);
 
@@ -193,10 +258,22 @@ export default function EmailHistorySidebar({
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
-        <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
+        <Animated.View
+          style={[styles.backdrop, { opacity: backdropOpacity }]}
+        >
+          <TouchableOpacity style={styles.backdropTouchable} activeOpacity={1} onPress={onClose} />
+        </Animated.View>
 
         <Animated.View
-          style={[styles.fullscreenPanel, { transform: [{ translateX: slideAnim }] }]}
+          style={[
+            styles.fullscreenPanel,
+            {
+              transform: [
+                { translateX: slideAnim },
+                { scale: panelScale },
+              ],
+            },
+          ]}
         >
           {/* Header */}
           <View style={styles.header}>
@@ -207,8 +284,8 @@ export default function EmailHistorySidebar({
           </View>
 
           {/* Content */}
-          <ScrollView
-            style={styles.content}
+          <Animated.ScrollView
+            style={[styles.content, { opacity: contentOpacity, transform: [{ translateY: contentTranslate }] }]}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
@@ -392,7 +469,7 @@ export default function EmailHistorySidebar({
                 })}
               </View>
             )}
-          </ScrollView>
+          </Animated.ScrollView>
 
           {/* Undo Bar - Now more prominent and always on top */}
           {recentlyDeleted && (
@@ -423,7 +500,10 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  backdropTouchable: {
+    flex: 1,
   },
   fullscreenPanel: {
     position: 'absolute',
@@ -432,6 +512,11 @@ const styles = StyleSheet.create({
     width: SCREEN_WIDTH,
     height: SCREEN_HEIGHT,
     backgroundColor: '#F8F9FA',
+    shadowColor: '#000',
+    shadowOffset: { width: -4, height: 0 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 16,
   },
 
   // Header
