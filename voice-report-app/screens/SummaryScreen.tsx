@@ -13,6 +13,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
 import { sendCloseoutEmail } from '../services/api';
+import emailHistoryService from '../services/emailHistoryService';
 import AIAgent from '../components/AIAgent';
 import EmailSuccessPopup from '../components/EmailSuccessPopup';
 import { useSummaryScreenContext } from '../hooks/useScreenContext';
@@ -144,6 +145,27 @@ export default function SummaryScreen({ navigation, route }: Props) {
       // Show success popup instead of Alert
       setEmailRecipients(emailResponse.recipients);
       setShowSuccessPopup(true);
+
+      // Persist to local email history (non-blocking)
+      (async () => {
+        try {
+          await emailHistoryService.addEmail({
+            recipients: emailResponse.recipients || [],
+            workOrder: editableSummary.work_order,
+            technicianName: editableSummary.released_by || '', // reuse released_by as a proxy for technician name if not separately captured
+            transcription: editableTranscription,
+            summary: {
+              // Ensure at least work_completed present plus spread all editable fields for later display
+              work_completed: editableSummary.work_completed,
+              ...editableSummary,
+            },
+            rawBody: JSON.stringify({ summary: editableSummary, transcription: editableTranscription }),
+          });
+          console.log('🗂️ Email added to local history');
+        } catch (historyErr) {
+          console.warn('Failed to add email to history:', historyErr);
+        }
+      })();
       
     } catch (error) {
       console.error('Email sending failed:', error);

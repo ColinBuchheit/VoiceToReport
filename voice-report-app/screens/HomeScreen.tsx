@@ -16,7 +16,9 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
 import Recorder from '../components/Recorder';
+import EmailHistorySidebar from '../components/EmailHistorySidebar';
 import { transcribeAudio } from '../services/api';
+import { EmailHistoryItem } from '../services/emailHistoryService';
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
@@ -53,6 +55,7 @@ export default function HomeScreen({ navigation }: Props) {
   // Initialize from persisted state
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>(persistedState.checkedItems);
   const [showChecklist, setShowChecklist] = useState(persistedState.showChecklist);
+  const [showHistorySidebar, setShowHistorySidebar] = useState(false);
   
   // Shared recording state - always reset to clean state
   const [isRecording, setIsRecording] = useState(false);
@@ -299,6 +302,13 @@ export default function HomeScreen({ navigation }: Props) {
     }
   };
 
+  const handleEmailSelect = (email: EmailHistoryItem) => {
+    navigation.navigate('Summary', {
+      transcription: email.transcription || '',
+      summary: email.summary,
+    });
+  };
+
   const toggleItem = (id: string) => {
     setCheckedItems(prev => ({
       ...prev,
@@ -315,6 +325,12 @@ export default function HomeScreen({ navigation }: Props) {
           style={styles.logo}
           resizeMode="contain"
         />
+        <TouchableOpacity 
+          style={styles.emailHistoryButton}
+          onPress={() => setShowHistorySidebar(true)}
+        >
+          <Text style={styles.emailIcon}>📧</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Progress Summary */}
@@ -431,6 +447,13 @@ export default function HomeScreen({ navigation }: Props) {
           />
         </View>
       )}
+
+      {/* Email History Sidebar */}
+      <EmailHistorySidebar
+        visible={showHistorySidebar}
+        onClose={() => setShowHistorySidebar(false)}
+        onEmailSelect={handleEmailSelect}
+      />
     </SafeAreaView>
   );
 }
@@ -449,11 +472,31 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
     backgroundColor: '#FFFFFF',
+    position: 'relative',
   },
   logo: {
     width: 180,
     height: 50,
     alignSelf: 'center',
+  },
+  emailHistoryButton: {
+    position: 'absolute',
+    right: 20,
+    top: Platform.OS === 'ios' ? 20 : 30,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FF6B35',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 4,
+  },
+  emailIcon: {
+    fontSize: 20,
   },
   
   // Progress Summary
