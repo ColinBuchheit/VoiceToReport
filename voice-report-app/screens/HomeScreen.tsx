@@ -303,10 +303,14 @@ function HomeScreenInner({ navigation }: Props) {
   };
 
   const handleEmailSelect = (email: EmailHistoryItem) => {
+    console.log('📧 Selected email transcription length:', email.transcription?.length || 0);
+    console.log('📧 Transcription preview:', email.transcription ? email.transcription.slice(0, 100) : 'EMPTY');
     navigation.navigate('Summary', {
       transcription: email.transcription || '',
       summary: email.summary,
     });
+    // Close sidebar after initiating navigation so Summary shows without being covered
+    setShowHistorySidebar(false);
   };
 
   const toggleItem = (id: string) => {

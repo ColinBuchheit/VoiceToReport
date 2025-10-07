@@ -151,6 +151,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
       // Persist to local email history (non-blocking)
       (async () => {
         try {
+          console.log('💾 Saving email with transcription length:', editableTranscription?.length || 0);
+          console.log('💾 Transcription preview:', editableTranscription ? editableTranscription.slice(0, 100) : 'EMPTY');
           await emailHistoryService.addEmail({
             recipients: emailResponse.recipients || [],
             workOrder: editableSummary.work_order,

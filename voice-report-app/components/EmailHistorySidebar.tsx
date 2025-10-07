@@ -12,6 +12,7 @@ import {
   Animated,
   Dimensions,
   StatusBar,
+  PanResponder,
 } from 'react-native';
 import { EmailHistoryItem } from '../services/emailHistoryService';
 // import emailHistoryService if it is the default export
@@ -38,7 +39,7 @@ export default function EmailHistorySidebar({
   const [history, setHistory] = useState<EmailHistoryItem[]>([]);
   const [recentlyDeleted, setRecentlyDeleted] = useState<{ item: EmailHistoryItem; index: number } | null>(null);
   const slideAnim = useRef(new Animated.Value(SCREEN_WIDTH)).current;
-  const animationMapRef = useRef<Record<string, { scale: Animated.Value; opacity: Animated.Value }>>({});
+  const animationMapRef = useRef<Record<string, { scale: Animated.Value; opacity: Animated.Value; swipeX: Animated.Value }>>({});
 
   useEffect(() => {
     if (visible) {
@@ -73,7 +74,8 @@ export default function EmailHistorySidebar({
       if (deduped.length !== emails.length) {
         console.log(`[EmailHistory] Deduplicated ${emails.length - deduped.length} duplicate entries`);
       }
-      setHistory(deduped);
+      // Force a new array reference so React always re-renders even if contents are identical
+      setHistory([...deduped]);
     } catch (error) {
       console.error('Failed to load email history:', error);
     }
@@ -84,6 +86,7 @@ export default function EmailHistorySidebar({
     const { scale: scaleAnim, opacity: opacityAnim } = animationMapRef.current[email.id] || {
       scale: new Animated.Value(1),
       opacity: new Animated.Value(1),
+      swipeX: new Animated.Value(0),
     };
 
     Animated.parallel([
@@ -107,22 +110,43 @@ export default function EmailHistorySidebar({
     });
   };
 
+  // Direct deletion helper (for swipe)
+  const deleteDirect = async (email: EmailHistoryItem) => {
+    const index = history.findIndex(h => h.id === email.id);
+    delete animationMapRef.current[email.id];
+    await emailHistoryService.deleteEmail(email.id);
+    setRecentlyDeleted({ item: email, index: index === -1 ? 0 : index });
+    await loadHistory();
+    setTimeout(() => setRecentlyDeleted(null), 6000);
+  };
+
   const handleUndo = async () => {
     if (!recentlyDeleted) return;
     const restoredId = recentlyDeleted.item.id;
-    await emailHistoryService.restoreEmail(recentlyDeleted.item, recentlyDeleted.index);
+
+    // Clear the deleted item snackbar state first so UI updates immediately
     setRecentlyDeleted(null);
+
+    // Restore at original index
+    await emailHistoryService.restoreEmail(recentlyDeleted.item, recentlyDeleted.index);
+
+    // Reload full history (fresh reference + potential reordering)
     await loadHistory();
-    // Ensure restored item is visible (fresh animation values)
-    if (!animationMapRef.current[restoredId]) {
-      animationMapRef.current[restoredId] = {
-        scale: new Animated.Value(1),
-        opacity: new Animated.Value(1),
-      };
-    } else {
-      animationMapRef.current[restoredId].scale.setValue(1);
-      animationMapRef.current[restoredId].opacity.setValue(1);
-    }
+
+    // After the list has updated on the next frame, ensure animation values exist & are reset
+    setTimeout(() => {
+      if (!animationMapRef.current[restoredId]) {
+        animationMapRef.current[restoredId] = {
+          scale: new Animated.Value(1),
+          opacity: new Animated.Value(1),
+          swipeX: new Animated.Value(0),
+        };
+      } else {
+        animationMapRef.current[restoredId].scale.setValue(1);
+        animationMapRef.current[restoredId].opacity.setValue(1);
+        animationMapRef.current[restoredId].swipeX.setValue(0);
+      }
+    }, 50);
   };
 
   const formatDateTime = (isoString: string) => {
@@ -193,84 +217,103 @@ export default function EmailHistorySidebar({
                   const location = (email.summary && (email.summary.location || email.summary.work_order)) || 'Unknown Location';
                   const initials = getInitials(location);
 
-                  // Get or create animation values for this item
                   if (!animationMapRef.current[email.id]) {
                     animationMapRef.current[email.id] = {
                       scale: new Animated.Value(1),
                       opacity: new Animated.Value(1),
+                      swipeX: new Animated.Value(0),
                     };
                   }
-                  const { scale: scaleAnim, opacity: opacityAnim } = animationMapRef.current[email.id];
+                  const { scale: scaleAnim, opacity: opacityAnim, swipeX } = animationMapRef.current[email.id];
+
+                  const SWIPE_THRESHOLD = 120;
+                  const panResponder = PanResponder.create({
+                    onMoveShouldSetPanResponder: (_evt, gesture) => {
+                      const { dx, dy } = gesture;
+                      return Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy);
+                    },
+                    onPanResponderMove: (_evt, gesture) => {
+                      if (gesture.dx > 0) {
+                        swipeX.setValue(Math.min(gesture.dx, SCREEN_WIDTH * 0.6));
+                      }
+                    },
+                    onPanResponderRelease: (_evt, gesture) => {
+                      if (gesture.dx > SWIPE_THRESHOLD) {
+                        Animated.timing(swipeX, {
+                          toValue: SCREEN_WIDTH + 40,
+                          duration: 200,
+                          useNativeDriver: true,
+                        }).start(() => deleteDirect(email));
+                      } else {
+                        Animated.spring(swipeX, {
+                          toValue: 0,
+                          useNativeDriver: true,
+                          bounciness: 8,
+                        }).start();
+                      }
+                    },
+                    onPanResponderTerminate: () => {
+                      Animated.spring(swipeX, {
+                        toValue: 0,
+                        useNativeDriver: true,
+                        bounciness: 8,
+                      }).start();
+                    },
+                  });
 
                   return (
-                    <Animated.View
-                      key={email.id}
-                      style={[
-                        styles.emailCard,
-                        index === 0 && styles.emailCardFirst,
-                        { transform: [{ scale: scaleAnim }], opacity: opacityAnim }
-                      ]}
-                    >
-                      {/* Avatar and Header Row */}
-                      <View style={styles.cardHeader}>
-                        <View style={styles.avatarContainer}>
-                          <View style={styles.avatar}>
+                    <View key={email.id} style={styles.swipeContainer}>
+                      <View style={styles.swipeUnderlay}>
+                        <Text style={styles.swipeUnderlayText}>Deleting…</Text>
+                      </View>
+                      <Animated.View
+                        {...panResponder.panHandlers}
+                        style={[
+                          styles.emailCardCompact,
+                          index === 0 && styles.emailCardFirst,
+                          {
+                            transform: [
+                              { translateX: swipeX },
+                              { scale: scaleAnim },
+                            ],
+                            opacity: opacityAnim,
+                          },
+                        ]}
+                      >
+                        <View style={styles.cardHeaderCompact}>
+                          <View style={styles.avatarSmall}>
                             <Text style={styles.avatarText}>{initials}</Text>
                           </View>
-                          <View style={styles.cardHeaderText}>
-                            <Text style={styles.techName} numberOfLines={2}>
-                              {location}
+                          <View style={styles.headerTextCompact}>
+                            <Text style={styles.inlineTitle} numberOfLines={1}>
+                              {location} • WO {email.workOrder || 'N/A'}
                             </Text>
                             <Text style={styles.timestamp}>{timestamp}</Text>
                           </View>
                         </View>
-                        <View style={styles.cardRightActions}>
-                          <View style={styles.workOrderBadge}>
-                            <Text style={styles.workOrderText}>
-                              {`WO ${email.workOrder || 'N/A'}`}
+                        <TouchableOpacity
+                          onPress={() => {
+                            try { (onEmailSelect || onSelectEmail)?.(email); } catch (e) { console.warn('Email select failed', e); }
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <View style={styles.recipientsRowCompact}>
+                            <Text style={styles.recipientsLabel}>To:</Text>
+                            <Text style={styles.recipientsText} numberOfLines={1}>
+                              {email.recipients.join(', ')}
                             </Text>
                           </View>
-                          <TouchableOpacity
-                            onPress={() => handleDelete(email)}
-                            style={styles.deleteButton}
-                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                          >
-                            <Text style={styles.deleteButtonText}>✕</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-
-                      {/* Main Content - Touchable */}
-                      <TouchableOpacity
-                        onPress={() => {
-                          // Fire selection callback then close sidebar so Summary shows in foreground
-                          try { (onEmailSelect || onSelectEmail)?.(email); } catch (e) { console.warn('Email select failed', e); }
-                          onClose();
-                        }}
-                        activeOpacity={0.7}
-                      >
-                        {/* Recipients */}
-                        <View style={styles.recipientsRow}>
-                          <Text style={styles.recipientsLabel}>To: </Text>
-                          <Text style={styles.recipientsText} numberOfLines={2}>
-                            {email.recipients.join(', ')}
-                          </Text>
-                        </View>
-
-                        {/* Work Preview */}
-                        {email.summary.work_completed && (
-                          <Text style={styles.previewText} numberOfLines={3}>
-                            {email.summary.work_completed}
-                          </Text>
-                        )}
-
-                        {/* Action Indicator */}
-                        <View style={styles.actionRow}>
-                          <Text style={styles.actionText}>Tap to view details</Text>
-                          <Text style={styles.actionArrow}>→</Text>
-                        </View>
-                      </TouchableOpacity>
-                    </Animated.View>
+                          {email.summary.work_completed && (
+                            <Text style={styles.previewTextCompact} numberOfLines={2}>
+                              {email.summary.work_completed}
+                            </Text>
+                          )}
+                          <View style={styles.actionRowCompact}>
+                            <Text style={styles.actionTextCompact}>Swipe right to delete • Tap to open</Text>
+                          </View>
+                        </TouchableOpacity>
+                      </Animated.View>
+                    </View>
                   );
                 })}
               </View>
@@ -411,6 +454,33 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#FF6B35',
   },
+  emailCardCompact: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+    marginBottom: 14,
+  },
+  swipeContainer: { position: 'relative' },
+  swipeUnderlay: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#DC2626',
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingLeft: 24,
+  },
+  swipeUnderlayText: { color: '#FFF', fontSize: 16, fontWeight: '700', letterSpacing: 0.5 },
 
   // Card Header
   cardHeader: {
@@ -419,6 +489,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 16,
   },
+  cardHeaderCompact: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   avatarContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -434,6 +505,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
     flexShrink: 0,
+  },
+  avatarSmall: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FF6B35',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
   avatarText: {
     fontSize: 18,
@@ -451,16 +531,19 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     lineHeight: 22,
   },
+  headerTextCompact: { flex: 1 },
+  inlineTitle: { fontSize: 15, fontWeight: '600', color: '#1F2937', marginBottom: 2 },
   timestamp: {
     fontSize: 13,
     color: '#6B7280',
     fontWeight: '500',
   },
   cardRightActions: {
-    flexDirection: 'column',
-    alignItems: 'flex-end',
-    gap: 8,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     marginLeft: 8,
+    // Allow the delete button to sit inline with the badge without wrapping underneath
+    flexShrink: 0,
   },
   workOrderBadge: {
     backgroundColor: '#FEF3F2',
@@ -469,26 +552,41 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#FEE2E2',
-    maxWidth: 100,
+    maxWidth: 120,
+    marginRight: 8,
+    flexShrink: 1,
   },
   workOrderText: {
     fontSize: 13,
     fontWeight: '700',
     color: '#DC2626',
+    // Prevent excessive vertical padding on Android
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   deleteButton: {
     backgroundColor: '#FEE2E2',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#FECACA',
+    // Add slight elevation / shadow on supported platforms for clarity
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 2,
+    elevation: 2,
   },
   deleteButtonText: {
-    fontSize: 18,
+    fontSize: 16,
   },
+  recipientsRowCompact: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  previewTextCompact: { fontSize: 13, color: '#4B5563', lineHeight: 19, marginBottom: 10 },
+  actionRowCompact: { paddingTop: 4, borderTopWidth: 1, borderTopColor: '#F1F2F4' },
+  actionTextCompact: { fontSize: 11, color: '#6B7280', fontWeight: '500' },
 
   // Recipients Row
   recipientsRow: {

@@ -70,6 +70,7 @@ class EmailHistoryService {
       recipients: entry.recipients || [],
       workOrder: entry.workOrder,
       technicianName: entry.technicianName,
+      transcription: entry.transcription, // persist original transcription if provided
       summary: entry.summary || {},
       rawBody: entry.rawBody,
     };
