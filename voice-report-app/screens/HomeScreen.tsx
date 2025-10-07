@@ -10,6 +10,8 @@ import {
   TouchableOpacity,
   Platform,
   Modal,
+  TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +22,7 @@ import { RootStackParamList } from '../App';
 import Recorder from '../components/Recorder';
 import EmailHistorySidebar from '../components/EmailHistorySidebar';
 import { transcribeAudio } from '../services/api';
+import userProfileService from '../services/userProfileService';
 import { EmailHistoryItem } from '../services/emailHistoryService';
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
@@ -326,58 +329,161 @@ function HomeScreenInner({ navigation }: Props) {
   const insets = useSafeAreaInsets();
 
   // Settings Modal component
-  const SettingsModal = ({ visible, onClose }: { visible: boolean; onClose: () => void }) => (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View style={styles.settingsOverlay}>
-        <TouchableOpacity
-          style={styles.settingsBackdrop}
-          activeOpacity={1}
-          onPress={onClose}
-        />
-        <View style={styles.settingsPanel}>
-          <View style={styles.settingsHeader}>
-            <Text style={styles.settingsTitle}>Settings</Text>
-            <TouchableOpacity onPress={onClose} style={styles.settingsCloseButton}>
-              <Text style={styles.settingsCloseText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView style={styles.settingsContent} showsVerticalScrollIndicator={false}>
-            <View style={styles.settingsSection}>
-              <Text style={styles.settingsSectionTitle}>App Settings</Text>
-              <TouchableOpacity style={styles.settingsItem}>
-                <Text style={styles.settingsItemLabel}>Account</Text>
-                <Text style={styles.settingsItemArrow}>›</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.settingsItem}>
-                <Text style={styles.settingsItemLabel}>Notifications</Text>
-                <Text style={styles.settingsItemArrow}>›</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.settingsItem}>
-                <Text style={styles.settingsItemLabel}>Email Preferences</Text>
-                <Text style={styles.settingsItemArrow}>›</Text>
+  const SettingsModal = ({ visible, onClose }: { visible: boolean; onClose: () => void }) => {
+    const [firstName, setFirstName] = useState('');
+    const [lastName, setLastName] = useState('');
+    const [workEmail, setWorkEmail] = useState('');
+    const [loaded, setLoaded] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+    
+    useEffect(() => {
+      if (visible) {
+        setLoaded(false);
+        (async () => {
+          try {
+            const profile = await userProfileService.getProfile();
+            if (profile) {
+              setFirstName(profile.firstName);
+              setLastName(profile.lastName);
+              setWorkEmail(profile.workEmail);
+            } else {
+              setFirstName('');
+              setLastName('');
+              setWorkEmail('');
+            }
+          } catch (e) {
+            console.warn('Failed to load profile', e);
+          } finally {
+            setLoaded(true);
+          }
+        })();
+      }
+    }, [visible]);
+
+    const validate = () => {
+      if (!firstName.trim()) return 'First name required';
+      if (!lastName.trim()) return 'Last name required';
+      if (!workEmail.trim()) return 'Work email required';
+      const emailRegex = /.+@.+\..+/;
+      if (!emailRegex.test(workEmail.trim())) return 'Enter valid email';
+      return '';
+    };
+
+    const handleSave = async () => {
+      const v = validate();
+      if (v) { setError(v); return; }
+      setSaving(true);
+      setError('');
+      try {
+        await userProfileService.saveProfile({ firstName: firstName.trim(), lastName: lastName.trim(), workEmail: workEmail.trim() });
+        onClose();
+      } catch (e) {
+        setError('Failed to save');
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    const handleClear = async () => {
+      Alert.alert(
+        'Clear Profile',
+        'This will remove your saved technician name and work email. You can re-enter them later. Continue?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Clear', style: 'destructive', onPress: async () => {
+              try {
+                await userProfileService.clearProfile();
+                setFirstName('');
+                setLastName('');
+                setWorkEmail('');
+                setError('');
+                // Navigate to onboarding so user can re-create profile
+                // Access navigation via closure? Not directly available here; expose through global nav ref alternative.
+                // Simpler approach: set a temporary flag on global persistedState to force onboarding after app restart.
+                // For now we just close modal; user can continue without profile.
+                onClose();
+              } catch (e) {
+                Alert.alert('Error', 'Failed to clear profile');
+              }
+            } }
+        ]
+      );
+    };
+
+    return (
+      <Modal
+        visible={visible}
+        transparent
+        animationType="slide"
+        onRequestClose={onClose}
+      >
+        <View style={styles.settingsOverlay}>
+          <TouchableOpacity
+            style={styles.settingsBackdrop}
+            activeOpacity={1}
+            onPress={onClose}
+          />
+          <View style={styles.settingsPanel}>
+            <View style={styles.settingsHeader}>
+              <Text style={styles.settingsTitle}>Settings</Text>
+              <TouchableOpacity onPress={onClose} style={styles.settingsCloseButton}>
+                <Text style={styles.settingsCloseText}>✕</Text>
               </TouchableOpacity>
             </View>
-            <View style={styles.settingsSection}>
-              <Text style={styles.settingsSectionTitle}>About</Text>
-              <View style={styles.settingsItem}>
-                <Text style={styles.settingsItemLabel}>Version</Text>
-                <Text style={styles.settingsItemValue}>1.0.0</Text>
+            { !loaded ? (
+              <View style={styles.settingsLoadingContainer}>
+                <ActivityIndicator size="large" color="#FF6B35" />
+                <Text style={styles.settingsLoadingText}>Loading profile...</Text>
               </View>
-              <TouchableOpacity style={styles.settingsItem}>
-                <Text style={styles.settingsItemLabel}>Help & Support</Text>
-                <Text style={styles.settingsItemArrow}>›</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
+            ) : (
+              <ScrollView
+                style={styles.settingsScroll}
+                contentContainerStyle={styles.settingsScrollContent}
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={styles.settingsSection}>
+                  <Text style={styles.settingsSectionTitle}>Technician Profile</Text>
+                  <View style={styles.settingsItemNoBorder}>
+                    <Text style={styles.settingsItemLabel}>First Name</Text>
+                  </View>
+                  <View style={styles.inlineInputWrapper}>
+                    <TextInput value={firstName} onChangeText={setFirstName} style={styles.inlineInput} placeholder="First name" />
+                  </View>
+                  <View style={styles.settingsItemNoBorder}>
+                    <Text style={styles.settingsItemLabel}>Last Name</Text>
+                  </View>
+                  <View style={styles.inlineInputWrapper}>
+                    <TextInput value={lastName} onChangeText={setLastName} style={styles.inlineInput} placeholder="Last name" />
+                  </View>
+                  <View style={styles.settingsItemNoBorder}>
+                    <Text style={styles.settingsItemLabel}>Work Email</Text>
+                  </View>
+                  <View style={styles.inlineInputWrapper}>
+                    <TextInput value={workEmail} onChangeText={setWorkEmail} style={styles.inlineInput} placeholder="name@company.com" autoCapitalize="none" keyboardType="email-address" />
+                  </View>
+                  {error ? <Text style={styles.settingsError}>{error}</Text> : null}
+                  <TouchableOpacity style={[styles.profileSaveButton, saving && { opacity:0.6 }]} onPress={handleSave} disabled={saving}>
+                    <Text style={styles.profileSaveButtonText}>{saving ? 'Saving...' : 'Save Profile'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.clearProfileButton} onPress={handleClear}>
+                    <Text style={styles.clearProfileButtonText}>Clear Profile</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.settingsSection}>
+                  <Text style={styles.settingsSectionTitle}>About</Text>
+                  <View style={styles.settingsItem}>
+                    <Text style={styles.settingsItemLabel}>Version</Text>
+                    <Text style={styles.settingsItemValue}>1.0.0</Text>
+                  </View>
+                </View>
+              </ScrollView>
+            )}
+          </View>
         </View>
-      </View>
-    </Modal>
-  );
+      </Modal>
+    );
+  };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 8) }]}>    
@@ -488,9 +594,8 @@ function HomeScreenInner({ navigation }: Props) {
         )}
       </View>
 
-      {/* Bottom Navigation with Recorder */}
-      {showChecklist && (
-        <View style={styles.bottomNavContainer}>
+      {/* Bottom Navigation with Recorder (always visible) */}
+      <View style={styles.bottomNavContainer}>
           {/* Left (History) */}
           <View style={styles.navSide}>
             <TouchableOpacity
@@ -534,7 +639,7 @@ function HomeScreenInner({ navigation }: Props) {
           <View style={styles.navSide}>
             <TouchableOpacity
               style={styles.bottomNavButton}
-              onPress={() => setShowSettings(true)}
+              onPress={() => { console.log('⚙️ Settings button pressed'); setShowSettings(true); }}
               activeOpacity={0.75}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               accessibilityRole="button"
@@ -554,7 +659,6 @@ function HomeScreenInner({ navigation }: Props) {
             </TouchableOpacity>
           </View>
         </View>
-      )}
 
       {/* Email History Sidebar */}
       <EmailHistorySidebar
@@ -848,7 +952,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '80%',
+    maxHeight: '85%',
+    width: '100%',
+    paddingBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.15,
@@ -886,6 +992,23 @@ const styles = StyleSheet.create({
   settingsContent: {
     flex: 1,
   },
+  settingsScroll: {
+    flexGrow: 0,
+  },
+  settingsScrollContent: {
+    paddingBottom: 40,
+  },
+  settingsLoadingContainer: {
+    padding: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingsLoadingText: {
+    marginTop: 12,
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '500',
+  },
   settingsSection: {
     paddingHorizontal: 24,
     paddingVertical: 16,
@@ -919,5 +1042,56 @@ const styles = StyleSheet.create({
     fontSize: 20,
     color: '#9CA3AF',
     fontWeight: '400',
+  },
+  // Added profile editing styles
+  settingsItemNoBorder: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+  },
+  inlineInputWrapper: {
+    marginBottom: 12,
+  },
+  inlineInput: {
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 16,
+    backgroundColor: '#FFFFFF',
+  },
+  settingsError: {
+    color: '#DC2626',
+    fontSize: 13,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  profileSaveButton: {
+    backgroundColor: '#FF6B35',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  profileSaveButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  clearProfileButton: {
+    backgroundColor: '#F3F4F6',
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  clearProfileButtonText: {
+    color: '#DC2626',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

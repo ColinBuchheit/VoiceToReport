@@ -366,6 +366,7 @@ async def send_email_endpoint(request: SendEmailRequest):
             request.summary,
             request.transcription,
             None,
+            request.technician_email,
         )
         
         if result.get("success", False):

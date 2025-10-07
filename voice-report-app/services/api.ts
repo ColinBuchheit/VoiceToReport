@@ -190,9 +190,11 @@ export async function generateSummary(transcription: string): Promise<CloseoutSu
 export async function sendCloseoutEmail({
   summary,
   transcription,
+  technicianEmail,
 }: {
   summary: CloseoutSummary;
   transcription: string;
+  technicianEmail?: string;
 }): Promise<EmailResponse> {
   const workingBackendUrl = await getWorkingBackend();
 
@@ -204,6 +206,7 @@ export async function sendCloseoutEmail({
       {
         summary: summary,
         transcription: transcription,
+        technician_email: technicianEmail,
       },
       createRequestConfig(30000) // 30 seconds for email
     );

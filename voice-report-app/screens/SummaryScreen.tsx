@@ -1,5 +1,5 @@
 // voice-report-app/screens/SummaryScreen.tsx - UPDATED with Email Success Popup
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import AIAgent from '../components/AIAgent';
 import EmailSuccessPopup from '../components/EmailSuccessPopup';
 import { useSummaryScreenContext } from '../hooks/useScreenContext';
 import { CloseoutSummary } from '../types/aiAgent';
+import userProfileService from '../services/userProfileService';
 
 type SummaryScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -117,6 +118,28 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
+  const [profileLoaded, setProfileLoaded] = useState(false);
+
+  // Load technician profile for pre-fill
+  useEffect(() => {
+    (async () => {
+      try {
+        const profile = await userProfileService.getProfile();
+        if (profile) {
+          const current = editableSummary.technician_name || '';
+          const lower = current.trim().toLowerCase();
+          const isPlaceholder = !current.trim() || ['not mentioned', 'not specified', 'n/a', 'none'].includes(lower);
+          if (isPlaceholder) {
+            setEditableSummary(prev => ({ ...prev, technician_name: userProfileService.fullName(profile) }));
+          }
+        }        
+      } catch (e) {
+        console.warn('Failed to load profile for summary', e);
+      } finally {
+        setProfileLoaded(true);
+      }
+    })();
+  }, []);
 
   // Enhanced screen context for AI - always in edit mode
   const screenContext = useSummaryScreenContext(
@@ -139,9 +162,16 @@ export default function SummaryScreen({ navigation, route }: Props) {
   console.log('📤 Sending email with work_order:', editableSummary.work_order);
   console.log('📤 Full summary payload:', editableSummary);
       
+      let techEmail: string | undefined = undefined;
+      try {
+        const profile = await userProfileService.getProfile();
+        techEmail = profile?.workEmail;
+      } catch {}
+
       const emailResponse = await sendCloseoutEmail({
         summary: editableSummary,
-        transcription: editableTranscription
+        transcription: editableTranscription,
+        technicianEmail: techEmail,
       });
       
       // Show success popup instead of Alert

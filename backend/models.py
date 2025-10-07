@@ -48,6 +48,7 @@ class SendEmailRequest(BaseModel):
     summary: CloseoutSummary
     transcription: str
     # technician_name removed - not required by backend
+    technician_email: Optional[str] = None
 
 class EmailResponse(BaseModel):
     success: bool

@@ -305,7 +305,7 @@ class EmailService:
         """
         return html_body
     
-    def send_closeout_email(self, closeout_data: Union[Dict[str, Any], object], transcription: str, technician_name: str = None) -> Dict[str, Any]:
+    def send_closeout_email(self, closeout_data: Union[Dict[str, Any], object], transcription: str, technician_name: str = None, technician_email: str = None) -> Dict[str, Any]:
         """Send the closeout email to the specified recipients"""
         
         try:
@@ -345,7 +345,12 @@ class EmailService:
             # Create multipart message
             msg = MIMEMultipart('related')
             msg['From'] = self.email_user
-            msg['To'] = ', '.join(self.recipients)
+            final_recipients = self.recipients.copy()
+            if technician_email:
+                # avoid duplicate
+                if technician_email not in final_recipients:
+                    final_recipients.append(technician_email)
+            msg['To'] = ', '.join(final_recipients)
             try:
                 msg['Date'] = format_datetime(datetime.now())
             except Exception:
@@ -381,12 +386,12 @@ class EmailService:
                 server.ehlo()
                 server.login(self.email_user, self.email_password)
                 server.send_message(msg)
-                logger.info(f"✅ Email sent successfully to {len(self.recipients)} recipients")
+                logger.info(f"✅ Email sent successfully to {len(final_recipients)} recipients (including technician CC if provided)")
             
             return {
                 "success": True,
                 "message": "Email sent successfully",
-                "recipients": self.recipients
+                "recipients": final_recipients
             }
             
         except Exception as e:
