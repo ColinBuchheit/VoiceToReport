@@ -114,7 +114,7 @@ export const API_CONFIG = {{
   
   // Connection settings
   CONNECTION: {{
-    TIMEOUT: 30000,
+    TIMEOUT: 3000000,
     RETRY_ATTEMPTS: 3,
     HEALTH_CHECK_INTERVAL: 60000,
   }},

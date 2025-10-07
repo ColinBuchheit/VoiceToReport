@@ -1,6 +1,6 @@
 // Auto-generated API configuration
 // This file is automatically updated by ngrok_manager.py
-// Last updated: 2025-09-16 18:51:51
+// Last updated: 2025-10-07 17:00:47
 
 import { Platform } from 'react-native';
 
@@ -8,22 +8,22 @@ import { Platform } from 'react-native';
 export const API_CONFIG = {
   // Backend URLs in order of preference
   BACKEND_URLS: [
-    'https://515f3b933faf.ngrok-free.app',
-    'http://192.168.1.171:8000',
+    'https://9e4722b23de0.ngrok-free.app',
+    'http://100.69.2.137:8000',
     'http://localhost:8000',
     'http://10.0.2.2:8000'
   ],
   
   // Current ngrok URL (null if not available)
-  NGROK_URL: 'https://515f3b933faf.ngrok-free.app',
+  NGROK_URL: 'https://9e4722b23de0.ngrok-free.app',
   
   // Local network IP
-  LOCAL_IP: '192.168.1.171',
+  LOCAL_IP: '100.69.2.137',
   LOCAL_PORT: 8000,
   
   // Connection settings
   CONNECTION: {
-    TIMEOUT: 30000,
+    TIMEOUT: 3000000,
     RETRY_ATTEMPTS: 3,
     HEALTH_CHECK_INTERVAL: 60000,
   },

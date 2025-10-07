@@ -174,10 +174,11 @@ export default function Recorder({
   
   const isLarge = size === 'large';
   const buttonSize = isLarge ? largeButtonSize : smallButtonSize;
-  const iconScale = buttonSize / 140;
-  
-  // Icon size - responsive to button size
-  const iconSize = isLarge ? Math.round(64 * iconScale) : Math.round(32 * iconScale);
+  // Icon sizing: large keeps roughly same visual size, small made larger for clarity
+  // Previous approach produced a very small mic in compact mode; adjust ratios.
+  const iconSize = isLarge 
+    ? Math.round(buttonSize * 0.36)   // ~65px for 180 button
+    : Math.round(buttonSize * 0.60);  // Bigger mic (~48px for 80 button)
   
   // Enhanced Animation Values (removed rotateAnim since we don't need it anymore)
   const scaleAnim = useRef(new Animated.Value(1)).current;

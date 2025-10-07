@@ -1,22 +1,22 @@
 // voice-report-app/screens/HomeScreen.tsx - COMPLETE VERSION WITH ALL FIXES
 import React, { useState, useRef, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  SafeAreaView,
-  Alert,
-  Image,
-  ScrollView,
-  TouchableOpacity,
-  Platform,
-} from 'react-native';
+import { View, Text, StyleSheet, Alert, Image, ScrollView, TouchableOpacity, Platform } from 'react-native';
+import { useFontScale } from '../context/FontScaleContext';
+import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
 import Recorder from '../components/Recorder';
+import EmailHistorySidebar from '../components/EmailHistorySidebar';
 import { transcribeAudio } from '../services/api';
+import SettingsModal from '../components/SettingsModal'; // explicit import; TS should resolve .tsx
+import { EmailHistoryItem } from '../services/emailHistoryService';
+import { useTheme } from '../context/ThemeContext';
+// Pre-require both logos so Metro bundles them and switching is instant
+const LIGHT_LOGO = require('../assets/bears&t.png');
+const DARK_LOGO = require('../assets/DarkModeLogo.png');
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
@@ -48,11 +48,13 @@ let persistedState: {
   shouldReset: false, // Flag to trigger complete reset
 };
 
-export default function HomeScreen({ navigation }: Props) {
+function HomeScreenInner({ navigation }: Props) {
   const [isProcessing, setIsProcessing] = useState(false);
   // Initialize from persisted state
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>(persistedState.checkedItems);
   const [showChecklist, setShowChecklist] = useState(persistedState.showChecklist);
+  const [showHistorySidebar, setShowHistorySidebar] = useState(false);
+  const [showSettings, setShowSettings] = useState(false); // Settings modal visibility
   
   // Shared recording state - always reset to clean state
   const [isRecording, setIsRecording] = useState(false);
@@ -299,6 +301,17 @@ export default function HomeScreen({ navigation }: Props) {
     }
   };
 
+  const handleEmailSelect = (email: EmailHistoryItem) => {
+    console.log('📧 Selected email transcription length:', email.transcription?.length || 0);
+    console.log('📧 Transcription preview:', email.transcription ? email.transcription.slice(0, 100) : 'EMPTY');
+    navigation.navigate('Summary', {
+      transcription: email.transcription || '',
+      summary: email.summary,
+    });
+    // Close sidebar after initiating navigation so Summary shows without being covered
+    setShowHistorySidebar(false);
+  };
+
   const toggleItem = (id: string) => {
     setCheckedItems(prev => ({
       ...prev,
@@ -306,38 +319,49 @@ export default function HomeScreen({ navigation }: Props) {
     }));
   };
 
+  const insets = useSafeAreaInsets();
+  const { scaled } = useFontScale();
+  const { colors, isDark } = useTheme();
+  // Space to ensure last checklist items (e.g., Photos) are not hidden behind bottom nav
+  const bottomNavOverlaySpace = 160 + (Platform.OS === 'ios' ? insets.bottom : 0);
+
+  // SettingsModal extracted to separate component to prevent remounts on each render (which caused flicker during recording updates)
+
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Fixed Header */}
-      <View style={styles.header}>
-        <Image 
-          source={require('../assets/bears&t.png')} 
-          style={styles.logo}
-          resizeMode="contain"
-        />
+  <View style={[styles.container, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 8), backgroundColor: colors.background }]}>    
+      {/* Fixed Header - centered logo */}
+      <View style={[styles.header, { paddingTop: (Platform.OS === 'ios' ? 10 : 20) + insets.top * 0.2, backgroundColor: colors.surface, borderBottomColor: colors.border }]}> 
+        <View style={styles.logoWrapper}> 
+          <Image
+            key={isDark ? 'dark-logo' : 'light-logo'}
+            source={isDark ? DARK_LOGO : LIGHT_LOGO}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        </View>
       </View>
 
       {/* Progress Summary */}
-      <View style={styles.progressSummary}>
+      <View style={[styles.progressSummary, { backgroundColor: colors.surfaceAlt, borderBottomColor: colors.border }]}>
         <View style={styles.progressInfo}>
-          <Text style={styles.progressTitle}>Report Progress</Text>
-          <Text style={styles.progressDetails}>
+          <Text style={[styles.progressTitle, { fontSize: scaled(16), color: colors.textPrimary }]}>Report Progress</Text>
+          <Text style={[styles.progressDetails, { fontSize: scaled(13), color: colors.textSecondary }]}>
             {checkedRequiredCount}/{requiredItems.length} required • {checkedCount}/{totalItems} total
           </Text>
         </View>
-        <View style={styles.progressCircle}>
-          <Text style={styles.progressPercent}>{progressPercent}%</Text>
+        <View style={[styles.progressCircle, { backgroundColor: colors.accent }]}>
+          <Text style={[styles.progressPercent, { color: colors.accentContrast }]}>{progressPercent}%</Text>
         </View>
       </View>
 
       {/* Content Area */}
-      <View style={styles.contentContainer}>
+      <View style={[styles.contentContainer, { backgroundColor: colors.background }]}>
         <View style={styles.contentHeader}>
           <TouchableOpacity 
-            style={styles.toggleButton}
+            style={[styles.toggleButton, { backgroundColor: isDark ? colors.surfaceAlt : '#F3F4F6' }]}
             onPress={() => setShowChecklist(!showChecklist)}
           >
-            <Text style={styles.toggleText}>
+            <Text style={[styles.toggleText, { fontSize: scaled(14), color: colors.textPrimary }]}>
               {showChecklist ? 'Hide Checklist' : 'Show Checklist'}
             </Text>
           </TouchableOpacity>
@@ -346,18 +370,18 @@ export default function HomeScreen({ navigation }: Props) {
         {showChecklist ? (
           /* Checklist View */
           <ScrollView 
-            style={styles.checklistContainer}
+            style={[styles.checklistContainer, { backgroundColor: colors.background }]}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.checklistContent}
+            contentContainerStyle={[styles.checklistContent, { paddingBottom: bottomNavOverlaySpace }]}
           >
             {criteriaCategories.map((category) => {
               const categoryChecked = category.items.filter(item => checkedItems[item.id]).length;
               
               return (
                 <View key={category.title} style={styles.categorySection}>
-                  <View style={styles.categoryHeader}>
-                    <Text style={styles.categoryTitle}>{category.title}</Text>
-                    <Text style={styles.categoryProgress}>
+                  <View style={[styles.categoryHeader, { borderBottomColor: colors.border }]}>
+                    <Text style={[styles.categoryTitle, { fontSize: scaled(16), color: colors.textPrimary }]}>{category.title}</Text>
+                    <Text style={[styles.categoryProgress, { backgroundColor: colors.surfaceAlt, color: colors.textSecondary }] }>
                       {categoryChecked}/{category.items.length}
                     </Text>
                   </View>
@@ -371,31 +395,30 @@ export default function HomeScreen({ navigation }: Props) {
                       ]}
                       onPress={() => toggleItem(item.id)}
                     >
-                      <View style={styles.itemCheckbox}>
-                        {checkedItems[item.id] && <View style={styles.checkmark} />}
+                      <View style={[styles.itemCheckbox, { borderColor: colors.border }] }>
+                        {checkedItems[item.id] && <View style={[styles.checkmark, { backgroundColor: '#10B981' }]} />}
                       </View>
                       
                       <View style={styles.itemContent}>
                         <View style={styles.itemLabelRow}>
                           <Text style={[
                             styles.itemLabel,
-                            checkedItems[item.id] && styles.itemLabelChecked
+                            { fontSize: scaled(15), color: colors.textPrimary },
+                            checkedItems[item.id] && { textDecorationLine: 'line-through', color: colors.textSecondary }
                           ]}>
                             {item.label}
                           </Text>
                           {item.required && (
-                            <View style={styles.requiredDot} />
+                            <View style={[styles.requiredDot, { backgroundColor: '#EF4444' }]} />
                           )}
                         </View>
-                        <Text style={styles.itemHint}>{item.hint}</Text>
+                        <Text style={[styles.itemHint, { fontSize: scaled(13), lineHeight: scaled(16), color: colors.textSecondary }]}>{item.hint}</Text>
                       </View>
                     </TouchableOpacity>
                   ))}
                 </View>
               );
             })}
-
-            <View style={styles.bottomPadding} />
           </ScrollView>
         ) : (
           /* Large Centered Record Button */
@@ -415,23 +438,139 @@ export default function HomeScreen({ navigation }: Props) {
         )}
       </View>
 
-      {/* Fixed Bottom Recorder */}
-      {showChecklist && (
-        <View style={styles.recorderContainer}>
-          <Recorder
-            onRecordingComplete={handleRecordingComplete}
-            isProcessing={isProcessing}
-            size="small"
-            isRecording={isRecording}
-            setIsRecording={setIsRecording}
-            recording={recording}
-            setRecording={setRecording}
-            recordingDuration={recordingDuration}
-            setRecordingDuration={setRecordingDuration}
-          />
+      {/* Bottom Navigation: variant changes depending on checklist visibility */}
+      {showChecklist ? (
+        <View style={[styles.bottomNavContainer, { backgroundColor: colors.surface, borderTopColor: colors.border }] }>
+          {/* History */}
+          <View style={styles.navSide}>
+            <TouchableOpacity
+              style={styles.bottomNavButton}
+              onPress={() => setShowHistorySidebar(true)}
+              activeOpacity={0.75}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="Open email history"
+            >
+              <View style={[
+                styles.navIconContainer,
+                { backgroundColor: isDark ? colors.surfaceAlt : '#FFE4D7', borderColor: isDark ? colors.border : '#FFC8B0' },
+                showHistorySidebar && { backgroundColor: colors.accent, borderColor: colors.accent }
+              ]}>
+                <Ionicons
+                  name="mail-outline"
+                  size={24}
+                  color={showHistorySidebar ? colors.accentContrast : colors.accent}
+                />
+              </View>
+              <Text style={[styles.navLabel, { fontSize: scaled(12), color: showHistorySidebar ? colors.accent : colors.textSecondary } ]}>History</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Small inline recorder */}
+            <View style={styles.recorderWrapper} pointerEvents="box-none">
+              <Recorder
+                onRecordingComplete={handleRecordingComplete}
+                isProcessing={isProcessing}
+                size="small"
+                isRecording={isRecording}
+                setIsRecording={setIsRecording}
+                recording={recording}
+                setRecording={setRecording}
+                recordingDuration={recordingDuration}
+                setRecordingDuration={setRecordingDuration}
+              />
+            </View>
+
+          {/* Settings */}
+          <View style={styles.navSide}>
+            <TouchableOpacity
+              style={styles.bottomNavButton}
+              onPress={() => { console.log('⚙️ Settings button pressed'); setShowSettings(true); }}
+              activeOpacity={0.75}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="Open settings"
+            >
+              <View style={[
+                styles.navIconContainer,
+                { backgroundColor: isDark ? colors.surfaceAlt : '#FFE4D7', borderColor: isDark ? colors.border : '#FFC8B0' },
+                showSettings && { backgroundColor: colors.accent, borderColor: colors.accent }
+              ]}>
+                <Ionicons
+                  name="settings-outline"
+                  size={24}
+                  color={showSettings ? colors.accentContrast : colors.accent}
+                />
+              </View>
+              <Text style={[styles.navLabel, { fontSize: scaled(12), color: showSettings ? colors.accent : colors.textSecondary }]}>Settings</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
+        <View style={[styles.bottomNavContainer, styles.bottomNavContainerSimple, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+          <View style={styles.simpleButtonsRow}>
+            <TouchableOpacity
+              style={styles.simpleNavButton}
+              onPress={() => setShowHistorySidebar(true)}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Open email history"
+            >
+              <View style={[
+                styles.navIconContainerLarge,
+                { backgroundColor: isDark ? colors.surfaceAlt : '#FFE4D7', borderColor: isDark ? colors.border : '#FFC8B0' },
+                showHistorySidebar && { backgroundColor: colors.accent, borderColor: colors.accent }
+              ]}>
+                <Ionicons
+                  name="mail-outline"
+                  size={30}
+                  color={showHistorySidebar ? colors.accentContrast : colors.accent}
+                />
+              </View>
+              <Text style={[styles.navLabelLarge, { fontSize: scaled(14), color: showHistorySidebar ? colors.accent : colors.textSecondary }]}>History</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.simpleNavButton}
+              onPress={() => { console.log('⚙️ Settings button pressed'); setShowSettings(true); }}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Open settings"
+            >
+              <View style={[
+                styles.navIconContainerLarge,
+                { backgroundColor: isDark ? colors.surfaceAlt : '#FFE4D7', borderColor: isDark ? colors.border : '#FFC8B0' },
+                showSettings && { backgroundColor: colors.accent, borderColor: colors.accent }
+              ]}>
+                <Ionicons
+                  name="settings-outline"
+                  size={30}
+                  color={showSettings ? colors.accentContrast : colors.accent}
+                />
+              </View>
+              <Text style={[styles.navLabelLarge, { fontSize: scaled(14), color: showSettings ? colors.accent : colors.textSecondary }]}>Settings</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
-    </SafeAreaView>
+
+      {/* Email History Sidebar */}
+      <EmailHistorySidebar
+        visible={showHistorySidebar}
+        onClose={() => setShowHistorySidebar(false)}
+        onEmailSelect={handleEmailSelect}
+      />
+
+      {/* Settings Modal */}
+      <SettingsModal visible={showSettings} onClose={() => setShowSettings(false)} />
+    </View>
+  );
+}
+
+export default function HomeScreen(props: Props) {
+  return (
+    <SafeAreaProvider>
+      <HomeScreenInner {...props} />
+    </SafeAreaProvider>
   );
 }
 
@@ -449,12 +588,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
     backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   logo: {
-    width: 180,
-    height: 50,
+    width: 220,
+    height: 65,
     alignSelf: 'center',
   },
+  logoWrapper: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 18,
+    // Background removed per request; wrapper kept for spacing consistency
+    backgroundColor: 'transparent',
+  },
+  // Removed dark-mode size/padding differences; unified sizing
+  // Removed old emailHistoryButton & emailIcon in favor of bottom navigation
   
   // Progress Summary
   progressSummary: {
@@ -466,19 +616,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
-  progressInfo: {
-    flex: 1,
-  },
+  progressInfo: { flex: 1 },
   progressTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#1F2937',
     marginBottom: 2,
   },
-  progressDetails: {
-    fontSize: 13,
-    color: '#6B7280',
-  },
+  progressDetails: { fontSize: 13, color: '#6B7280' },
   progressCircle: {
     width: 50,
     height: 50,
@@ -529,20 +674,24 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 60,
     paddingHorizontal: 40,
+    // Reserve space so large recorder doesn't look low due to bottom nav overlay
+    paddingBottom: 120,
+    // Slight top padding to visually balance status bubble offset
+    paddingTop: 10,
   },
   
   // Category Sections
   categorySection: {
-    marginBottom: 24,
+    // Reduced to tighten vertical density
+    marginBottom: 16,
   },
   categoryHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
-    paddingBottom: 8,
+    marginBottom: 8,
+    paddingBottom: 6,
     borderBottomWidth: 2,
     borderBottomColor: '#E5E7EB',
   },
@@ -565,7 +714,8 @@ const styles = StyleSheet.create({
   checklistItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingVertical: 12,
+    // Reduced vertical padding for denser list
+    paddingVertical: 8,
     paddingHorizontal: 4,
   },
   checklistItemChecked: {
@@ -594,7 +744,7 @@ const styles = StyleSheet.create({
   itemLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   itemLabel: {
     fontSize: 15,
@@ -616,19 +766,116 @@ const styles = StyleSheet.create({
   itemHint: {
     fontSize: 13,
     color: '#6B7280',
-    lineHeight: 18,
+    // Slightly tighter line height to conserve space while staying readable
+    lineHeight: 16,
   },
   
-  bottomPadding: {
-    height: 20,
-  },
   
-  // Fixed Bottom Recorder
-  recorderContainer: {
+  // Bottom Navigation Container
+  bottomNavContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    paddingBottom: Platform.OS === 'ios' ? 30 : 16,
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 10,
+    zIndex: 20,
   },
+  // Simplified variant when checklist hidden (no recorder in bar)
+  bottomNavContainerSimple: {
+    justifyContent: 'center',
+    paddingHorizontal: 0,
+  },
+  simpleButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-evenly',
+    width: '100%',
+    paddingHorizontal: 24,
+  },
+  simpleNavButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  navSide: { width: 90, alignItems: 'center', justifyContent: 'center' },
+  bottomNavButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  navIconContainer: {
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    backgroundColor: '#FFE4D7', // light brand tint
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#FFC8B0',
+    shadowColor: '#FF6B35',
+    shadowOpacity: 0.15,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  navIconContainerLarge: {
+    width: 70,
+    height: 70,
+    borderRadius: 24,
+    backgroundColor: '#FFE4D7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#FFC8B0',
+    shadowColor: '#FF6B35',
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 3 },
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  navIconContainerActive: {
+    backgroundColor: '#FF6B35',
+    borderColor: '#FF6B35',
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 5,
+    transform: [{ scale: 1.05 }],
+  },
+  navIcon: { fontSize: 24 },
+  navLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  navLabelLarge: {
+    fontSize: 14,
+    color: '#6B7280',
+    fontWeight: '600',
+  },
+  navLabelActive: {
+    color: '#FF6B35',
+    fontWeight: '600',
+  },
+  recorderWrapper: {
+    width: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+
 });

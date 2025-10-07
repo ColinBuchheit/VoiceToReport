@@ -36,8 +36,9 @@ class CloseoutSummary(BaseModel):
     photos_uploaded: Optional[str] = "Not mentioned"
     
     # Additional fields for context
+    work_order: Optional[str] = "Not mentioned"
+    # Newly reintroduced fields for richer context
     location: Optional[str] = "Not mentioned"
-    datetime: Optional[str] = "Not mentioned"
     technician_name: Optional[str] = "Not mentioned"
 
 class SummaryResponse(BaseModel):
@@ -46,7 +47,8 @@ class SummaryResponse(BaseModel):
 class SendEmailRequest(BaseModel):
     summary: CloseoutSummary
     transcription: str
-    technician_name: Optional[str] = None
+    # technician_name removed - not required by backend
+    technician_email: Optional[str] = None
 
 class EmailResponse(BaseModel):
     success: bool

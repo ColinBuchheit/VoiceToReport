@@ -1,5 +1,5 @@
-// voice-report-app/screens/SummaryScreen.tsx - UPDATED: Always editable fields, no Edit/Preview toggle, no title
-import React, { useState } from 'react';
+// voice-report-app/screens/SummaryScreen.tsx - UPDATED with Email Success Popup
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,16 +7,20 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
 import { sendCloseoutEmail } from '../services/api';
+import emailHistoryService from '../services/emailHistoryService';
 import AIAgent from '../components/AIAgent';
+import EmailSuccessPopup from '../components/EmailSuccessPopup';
 import { useSummaryScreenContext } from '../hooks/useScreenContext';
 import { CloseoutSummary } from '../types/aiAgent';
+import { useFontScale } from '../context/FontScaleContext';
+import userProfileService from '../services/userProfileService';
+import { useTheme } from '../context/ThemeContext';
 
 type SummaryScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -38,39 +42,53 @@ interface EditableFieldProps {
   placeholder?: string;
 }
 
-const EditableField: React.FC<EditableFieldProps> = ({
+const EditableField: React.FC<EditableFieldProps & { scaled:(n:number)=>number }> = ({
   label,
   value,
   onChangeText,
   isEditing,
   multiline = false,
   placeholder = '',
-}) => (
-  <View style={styles.fieldContainer}>
-    <Text style={styles.fieldLabel}>{label}</Text>
-    {isEditing ? (
-      <TextInput
-        style={[styles.fieldInput, multiline && styles.multilineInput]}
-        value={value}
-        onChangeText={onChangeText}
-        multiline={multiline}
-        textAlignVertical={multiline ? 'top' : 'center'}
-        placeholder={placeholder}
-      />
-    ) : (
-      <Text style={styles.fieldValue}>
-        {value || 'Not specified'}
-      </Text>
-    )}
-  </View>
-);
+  scaled,
+}) => {
+  const { colors, isDark } = useTheme();
+  return (
+    <View style={styles.fieldContainer}>
+      {!!label && <Text style={[styles.fieldLabel, { fontSize: scaled(14), color: colors.textSecondary }]}>{label}</Text>}
+      {isEditing ? (
+        <TextInput
+          style={[styles.fieldInput, {
+            fontSize: scaled(16),
+            backgroundColor: isDark ? colors.surfaceAlt : '#fff',
+            borderColor: colors.border,
+            color: colors.textPrimary,
+          }, multiline && styles.multilineInput]}
+          value={value}
+          onChangeText={onChangeText}
+          multiline={multiline}
+          textAlignVertical={multiline ? 'top' : 'center'}
+          placeholder={placeholder}
+          placeholderTextColor={colors.textSecondary}
+        />
+      ) : (
+        <Text style={[styles.fieldValue, {
+          fontSize: scaled(16),
+          color: colors.textPrimary,
+          backgroundColor: isDark ? colors.surfaceAlt : '#ecf0f1',
+        }]}>
+          {value || 'Not specified'}
+        </Text>
+      )}
+    </View>
+  );
+};
 
 export default function SummaryScreen({ navigation, route }: Props) {
+  const { scaled } = useFontScale();
+  const { colors } = useTheme();
   // Initialize CloseoutSummary with proper field mapping
   const initializeCloseoutSummary = (summary: CloseoutSummary): CloseoutSummary => {
     console.log('🔧 Initializing CloseoutSummary from:', summary);
-    console.log('🔧 Summary type:', typeof summary);
-    console.log('🔧 Summary keys:', Object.keys(summary || {}));
     
     const result: CloseoutSummary = {
       // Primary closeout fields
@@ -80,6 +98,9 @@ export default function SummaryScreen({ navigation, route }: Props) {
       delays: summary?.delays || '',
       troubleshooting_steps: summary?.troubleshooting_steps || '',
       scope_completed: summary?.scope_completed || summary?.outcome || '',
+      
+      
+      // Sign-off and tracking
       released_by: summary?.released_by || '',
       release_code: summary?.release_code || '',
       return_tracking: summary?.return_tracking || '',
@@ -95,8 +116,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
       photos_uploaded: summary?.photos_uploaded || '',
       
       // Additional context
+      work_order: summary?.work_order || '',
       location: summary?.location || '',
-      datetime: summary?.datetime || '',
       technician_name: summary?.technician_name || '',
       
       // Legacy fields for backward compatibility
@@ -104,14 +125,6 @@ export default function SummaryScreen({ navigation, route }: Props) {
       outcome: summary?.outcome || summary?.scope_completed || '',
       notes: summary?.notes || '',
     };
-    
-    // DEBUGGING: Log what we extracted
-    console.log('✅ Initialized CloseoutSummary:');
-    console.log('  - onsite_contact:', result.onsite_contact);
-    console.log('  - support_contact:', result.support_contact);
-    console.log('  - work_completed:', result.work_completed);
-    console.log('  - location:', result.location);
-    console.log('  - technician_name:', result.technician_name);
     
     return result;
   };
@@ -121,6 +134,30 @@ export default function SummaryScreen({ navigation, route }: Props) {
   );
   const [editableTranscription, setEditableTranscription] = useState(route.params.transcription);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
+  const [profileLoaded, setProfileLoaded] = useState(false);
+
+  // Load technician profile for pre-fill
+  useEffect(() => {
+    (async () => {
+      try {
+        const profile = await userProfileService.getProfile();
+        if (profile) {
+          const current = editableSummary.technician_name || '';
+          const lower = current.trim().toLowerCase();
+          const isPlaceholder = !current.trim() || ['not mentioned', 'not specified', 'n/a', 'none'].includes(lower);
+          if (isPlaceholder) {
+            setEditableSummary(prev => ({ ...prev, technician_name: userProfileService.fullName(profile) }));
+          }
+        }        
+      } catch (e) {
+        console.warn('Failed to load profile for summary', e);
+      } finally {
+        setProfileLoaded(true);
+      }
+    })();
+  }, []);
 
   // Enhanced screen context for AI - always in edit mode
   const screenContext = useSummaryScreenContext(
@@ -139,24 +176,61 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const handleSendEmail = async () => {
     try {
       setIsSendingEmail(true);
+  // Debug: log work_order and summary before sending
+  console.log('📤 Sending email with work_order:', editableSummary.work_order);
+  console.log('📤 Full summary payload:', editableSummary);
       
+      let techEmail: string | undefined = undefined;
+      try {
+        const profile = await userProfileService.getProfile();
+        techEmail = profile?.workEmail;
+      } catch {}
+
       const emailResponse = await sendCloseoutEmail({
         summary: editableSummary,
         transcription: editableTranscription,
-        technician_name: editableSummary.technician_name
+        technicianEmail: techEmail,
       });
       
-      Alert.alert(
-        'Email Sent Successfully!',
-        `Report has been sent to ${emailResponse.recipients.join(', ')}`,
-        [{ text: 'OK', onPress: () => navigation.navigate('Home') }]
-      );
+      // Show success popup instead of Alert
+      setEmailRecipients(emailResponse.recipients);
+      setShowSuccessPopup(true);
+
+      // Persist to local email history (non-blocking)
+      (async () => {
+        try {
+          console.log('💾 Saving email with transcription length:', editableTranscription?.length || 0);
+          console.log('💾 Transcription preview:', editableTranscription ? editableTranscription.slice(0, 100) : 'EMPTY');
+          await emailHistoryService.addEmail({
+            recipients: emailResponse.recipients || [],
+            workOrder: editableSummary.work_order,
+            technicianName: editableSummary.technician_name || editableSummary.released_by || '',
+            transcription: editableTranscription,
+            summary: {
+              work_completed: editableSummary.work_completed,
+              ...editableSummary,
+            },
+            rawBody: JSON.stringify({ summary: editableSummary, transcription: editableTranscription }),
+          });
+          console.log('🗂️ Email added to local history');
+        } catch (historyErr) {
+          console.warn('Failed to add email to history:', historyErr);
+        }
+      })();
+      
     } catch (error) {
       console.error('Email sending failed:', error);
-      Alert.alert('Error', 'Failed to send email. Please try again.');
+      // Keep the error as an Alert for now
+      alert('Failed to send email. Please try again.');
     } finally {
       setIsSendingEmail(false);
     }
+  };
+
+  const handleSuccessComplete = () => {
+    setShowSuccessPopup(false);
+    // Navigate to Home after popup closes
+    navigation.navigate('Home');
   };
 
   const handleFieldUpdate = (fieldName: string, value: string) => {
@@ -168,37 +242,65 @@ export default function SummaryScreen({ navigation, route }: Props) {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }] }>
       <ScrollView style={styles.scrollContainer}>
-        {/* REMOVED: Header with title and mode toggle button */}
-
         {/* CLOSEOUT NOTES SECTION */}
-        <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>CLOSEOUT NOTES</Text>
+        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]} accessibilityRole="header">CLOSEOUT NOTES</Text>
           
           <EditableField
             label="Who did you meet with on-site?"
             value={editableSummary.onsite_contact || ''}
             onChangeText={(text) => updateSummaryField('onsite_contact', text)}
-            isEditing={true} // Always editable
+            isEditing={true}
             placeholder="Name and role of on-site contact person..."
+            scaled={scaled}
+          />
+
+          <EditableField
+            label="Work Order #"
+            value={editableSummary.work_order || ''}
+            onChangeText={(text) => updateSummaryField('work_order', text)}
+            isEditing={true}
+            placeholder="Enter the work order number..."
+            scaled={scaled}
+          />
+
+          <EditableField
+            label="Location"
+            value={editableSummary.location || ''}
+            onChangeText={(text) => updateSummaryField('location', text)}
+            isEditing={true}
+            placeholder="Enter the location / site name..."
+            scaled={scaled}
+          />
+
+          <EditableField
+            label="Technician Name"
+            value={editableSummary.technician_name || ''}
+            onChangeText={(text) => updateSummaryField('technician_name', text)}
+            isEditing={true}
+            placeholder="Enter your name..."
+            scaled={scaled}
           />
 
           <EditableField
             label="Who did you work with for support?"
             value={editableSummary.support_contact || ''}
             onChangeText={(text) => updateSummaryField('support_contact', text)}
-            isEditing={true} // Always editable
+            isEditing={true}
             placeholder="Support team members or remote assistance..."
+            scaled={scaled}
           />
 
           <EditableField
             label="What work was completed?"
             value={editableSummary.work_completed || ''}
             onChangeText={(text) => updateSummaryField('work_completed', text)}
-            isEditing={true} // Always editable
+            isEditing={true}
             multiline
             placeholder="Describe all tasks and work that was completed..."
+            scaled={scaled}
           />
 
           <EditableField
@@ -208,6 +310,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             multiline
             placeholder="Any delays encountered and reasons..."
+            scaled={scaled}
           />
 
           <EditableField
@@ -216,7 +319,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('troubleshooting_steps', text)}
             isEditing={true}
             multiline
-            placeholder="Describe troubleshooting or diagnostic steps..."
+            placeholder="Describe debugging or problem-solving steps..."
+            scaled={scaled}
           />
 
           <EditableField
@@ -225,152 +329,133 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('scope_completed', text)}
             isEditing={true}
             multiline
-            placeholder="Yes/No and details about scope completion..."
+            placeholder="Describe the outcome and completion status..."
+            scaled={scaled}
           />
+        </View>
 
+        
+
+        {/* SIGN-OFF & TRACKING SECTION */}
+        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>SIGN-OFF & TRACKING</Text>
+          
           <EditableField
             label="Who released you?"
             value={editableSummary.released_by || ''}
             onChangeText={(text) => updateSummaryField('released_by', text)}
             isEditing={true}
-            placeholder="Name or title of person who released you..."
+            placeholder="Name of person who signed off..."
+            scaled={scaled}
           />
 
           <EditableField
-            label="Is there a release code? If so, what is it?"
+            label="Release Code"
             value={editableSummary.release_code || ''}
             onChangeText={(text) => updateSummaryField('release_code', text)}
             isEditing={true}
-            placeholder="Release code or completion code..."
+            placeholder="Enter release code if applicable..."
+            scaled={scaled}
           />
 
           <EditableField
-            label="Is there a return tracking number? If so, what is it?"
+            label="Return Tracking #"
             value={editableSummary.return_tracking || ''}
             onChangeText={(text) => updateSummaryField('return_tracking', text)}
             isEditing={true}
-            placeholder="Return tracking number for parts/equipment..."
+            placeholder="Enter return tracking number..."
+            scaled={scaled}
           />
         </View>
 
-        {/* EXPENSES SECTION */}
-        <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>EXPENSES</Text>
+        {/* EXPENSES & MATERIALS SECTION */}
+        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>EXPENSES & MATERIALS</Text>
           
           <EditableField
-            label="Did you have any expenses (parking fees, etc)?"
+            label="Expenses"
             value={editableSummary.expenses || ''}
             onChangeText={(text) => updateSummaryField('expenses', text)}
             isEditing={true}
             multiline
-            placeholder="Parking fees, tolls, meals, or other expenses..."
+            placeholder="List any expenses incurred..."
+            scaled={scaled}
           />
 
           <EditableField
-            label="What materials did you use?"
+            label="Materials Used"
             value={editableSummary.materials_used || ''}
             onChangeText={(text) => updateSummaryField('materials_used', text)}
             isEditing={true}
             multiline
-            placeholder="Parts, supplies, equipment used during service..."
+            placeholder="List materials and parts used..."
+            scaled={scaled}
           />
         </View>
 
-        {/* OUT OF SCOPE SECTION */}
-        <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>OUT OF SCOPE</Text>
+        {/* ADDITIONAL INFORMATION SECTION */}
+        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>ADDITIONAL INFORMATION</Text>
           
           <EditableField
-            label="Was there any out of scope work? If so, what is it and who approved the work?"
+            label="Out of Scope Work"
             value={editableSummary.out_of_scope_work || ''}
             onChangeText={(text) => updateSummaryField('out_of_scope_work', text)}
             isEditing={true}
             multiline
-            placeholder="Any additional work performed and who approved it..."
+            placeholder="Describe any work outside the original scope..."
+            scaled={scaled}
           />
-        </View>
 
-        {/* PHOTOS SECTION */}
-        <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>PHOTOS</Text>
-          
           <EditableField
-            label="How many photos did you upload?"
+            label="Photos Uploaded"
             value={editableSummary.photos_uploaded || ''}
             onChangeText={(text) => updateSummaryField('photos_uploaded', text)}
             isEditing={true}
-            placeholder="Number of photos taken and uploaded..."
-          />
-        </View>
-
-        {/* ADDITIONAL CONTEXT SECTION */}
-        <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>ADDITIONAL CONTEXT</Text>
-          
-          <EditableField
-            label="Location"
-            value={editableSummary.location || ''}
-            onChangeText={(text) => updateSummaryField('location', text)}
-            isEditing={true} // Always editable
-            placeholder="Work location, address, or site..."
-          />
-
-          <EditableField
-            label="Date/Time"
-            value={editableSummary.datetime || ''}
-            onChangeText={(text) => updateSummaryField('datetime', text)}
-            isEditing={true} // Always editable
-            placeholder="When the work was completed..."
-          />
-
-          <EditableField
-            label="Technician Name"
-            value={editableSummary.technician_name || ''}
-            onChangeText={(text) => updateSummaryField('technician_name', text)}
-            isEditing={true} // Always editable
-            placeholder="Your name as the technician..."
-          />
-
-          <EditableField
-            label="Additional Notes"
-            value={editableSummary.notes || ''}
-            onChangeText={(text) => updateSummaryField('notes', text)}
-            isEditing={true} // Always editable
             multiline
-            placeholder="Any additional notes or comments..."
+            placeholder="List photos taken and uploaded..."
+            scaled={scaled}
           />
         </View>
 
-        {/* TRANSCRIPTION SECTION */}
+        {/* ORIGINAL TRANSCRIPTION SECTION */}
         <View style={styles.transcriptionSection}>
-          <View style={styles.transcriptionCard}>
-            <Text style={styles.sectionTitle}>ORIGINAL TRANSCRIPTION</Text>
+          <View style={[styles.transcriptionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>ORIGINAL TRANSCRIPTION</Text>
             <EditableField
-              label="Voice Recording Transcription"
+              label=""
               value={editableTranscription}
               onChangeText={setEditableTranscription}
-              isEditing={true} // Always editable
+              isEditing={true}
               multiline
-              placeholder="Original voice recording transcription..."
+              placeholder="Original voice transcription..."
+              scaled={scaled}
             />
           </View>
         </View>
 
-        {/* SIMPLIFIED ACTION BUTTONS - Only Email */}
+        {/* SEND EMAIL BUTTON */}
         <View style={styles.actionButtons}>
           <TouchableOpacity
-            style={[styles.emailButton, isSendingEmail && styles.emailButtonDisabled]}
+            style={[styles.emailButton, { backgroundColor: colors.accent }, isSendingEmail && styles.emailButtonDisabled]}
             onPress={handleSendEmail}
             disabled={isSendingEmail}
           >
             {isSendingEmail ? (
               <ActivityIndicator color="white" size="small" />
             ) : (
-              <Text style={styles.emailButtonText}>Send Email Report</Text>
+              <Text style={[styles.emailButtonText, { fontSize: scaled(16), color: colors.accentContrast }]}>Send Email Report</Text>
             )}
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* Email Success Popup */}
+      <EmailSuccessPopup
+        visible={showSuccessPopup}
+        emailList={emailRecipients}
+        onComplete={handleSuccessComplete}
+      />
 
       {/* AI Agent - Floating button always visible */}
       <AIAgent
@@ -385,6 +470,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
         position="bottom-right"
         showDebugInfo={false}
       />
+
     </View>
   );
 }
@@ -396,9 +482,8 @@ const styles = StyleSheet.create({
   },
   scrollContainer: {
     flex: 1,
-    paddingTop: 20, // Add some top padding since we removed the header
+    paddingTop: 20,
   },
-  // REMOVED: header, title, modeButton, previewModeButton, modeButtonText, previewModeText styles
   sectionContainer: {
     backgroundColor: 'white',
     borderRadius: 12,
@@ -413,6 +498,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
+    borderWidth: 1,
+    borderColor: '#ecf0f1'
   },
   sectionTitle: {
     fontSize: 18,
@@ -470,6 +557,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
+    borderWidth: 1,
+    borderColor: '#ecf0f1'
   },
   actionButtons: {
     flexDirection: 'row',

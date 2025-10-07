@@ -1,4 +1,4 @@
-# backend/services/voice_agent.py - COMPLETE FIXED VERSION
+# backend/services/voice_agent.py - FIXED VERSION WITH SCREEN AWARENESS
 import json
 import logging
 import re
@@ -56,312 +56,206 @@ class VoiceAgentService:
     async def _gpt_command_processing(self, transcription: str, screen_context: Dict[str, Any]) -> Dict[str, Any]:
         """Advanced GPT-based command processing"""
         try:
-            prompt = self._build_enhanced_prompt(transcription, screen_context)
+            # Build screen-specific prompt
+            if screen_context.get('screenName') == 'transcript':
+                prompt = self._build_transcript_screen_prompt(transcription, screen_context)
+            else:  # summary screen
+                prompt = self._build_summary_screen_prompt(transcription, screen_context)
             
             response = self.client.chat.completions.create(
-                model=getattr(settings, 'gpt_model', 'gpt-4-turbo-preview'),
+                model=settings.gpt_model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a voice command processor for a mobile field service app. Always respond with valid JSON. Be action-focused and avoid unnecessary responses."
+                        "content": "You are a voice command processor for a mobile field service app. Always respond with valid JSON. Be action-focused and context-aware."
                     },
                     {"role": "user", "content": prompt}
-                ],
-                max_tokens=getattr(settings, 'gpt_max_tokens', 500),
-                temperature=0.1
+                ]
             )
             
-            gpt_response = response.choices[0].message.content.strip()
-            return self._parse_gpt_response(gpt_response)
+            response_text = response.choices[0].message.content.strip()
+            logger.info(f"GPT response received: {response_text[:200]}...")
+            
+            # Parse and validate response
+            parsed_response = self._parse_gpt_response(response_text)
+            
+            # Ensure response has all required fields
+            return self._validate_response_structure(parsed_response)
             
         except Exception as e:
             logger.error(f"GPT processing failed: {e}")
             raise e
     
-    def _build_enhanced_prompt(self, transcription: str, screen_context: Dict[str, Any]) -> str:
-        """Build enhanced prompt for GPT processing"""
-        
-        fields_info = self._format_available_fields(screen_context.get('visibleFields', []))
-        current_values = self._format_current_values(screen_context.get('currentValues', {}))
-        
-        return f"""Process this voice command for a field service app:
-
-SCREEN: {screen_context.get('screenName', 'unknown')}
-MODE: {screen_context.get('mode', 'N/A')}
-
-AVAILABLE FIELDS:
-{fields_info}
-
-CURRENT VALUES:
-{current_values}
-
-COMMAND: "{transcription}"
-
-Determine the appropriate action and respond with JSON:
-
-{{
-  "action": "update_field|toggle_mode|execute_action|acknowledge",
-  "target": "field_name_or_action",
-  "value": "new_value_if_updating",
-  "confidence": 0.9,
-  "confirmation": "brief_confirmation",
-  "ttsText": "",
-  "success": true,
-  "needs_clarification": false
-}}
-
-EXAMPLES:
-- "Change location to downtown" → {{"action": "update_field", "target": "location", "value": "downtown", "confidence": 0.9, "confirmation": "Location updated"}}
-- "Set contact to John" → {{"action": "update_field", "target": "onsite_contact", "value": "John", "confidence": 0.9, "confirmation": "Contact updated"}}
-- "Switch to edit mode" → {{"action": "toggle_mode", "target": "edit_mode", "confidence": 0.9, "confirmation": "Edit mode activated"}}
-
-RULES:
-- Use exact field names from available fields
-- Keep ttsText empty for simple updates
-- Only use ttsText for read commands or clarifications
-- Be action-focused, not chatty"""
-    
-    def _fallback_command_processing(self, transcription: str, screen_context: Dict[str, Any]) -> Dict[str, Any]:
-        """Fallback pattern-based command processing"""
-        try:
-            logger.info("Using fallback pattern matching for command processing")
-            command_lower = transcription.lower().strip()
-            
-            # Field update patterns
-            field_updates = self._detect_field_updates(command_lower, transcription, screen_context)
-            if field_updates:
-                return field_updates
-            
-            # Mode toggle patterns
-            mode_toggle = self._detect_mode_toggle(command_lower)
-            if mode_toggle:
-                return mode_toggle
-            
-            # Read/playback commands
-            read_command = self._detect_read_command(command_lower, screen_context)
-            if read_command:
-                return read_command
-            
-            # Action commands
-            action_command = self._detect_action_command(command_lower)
-            if action_command:
-                return action_command
-            
-            # Default acknowledgment
-            return self._create_acknowledge_response(transcription)
-            
-        except Exception as e:
-            logger.error(f"Fallback processing failed: {e}")
-            return self._create_error_response(str(e))
-    
-    def _detect_field_updates(self, command_lower: str, original_command: str, screen_context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Detect field update commands"""
-        
-        # Check for update keywords
-        update_keywords = ['change', 'update', 'set', 'put', 'make', 'edit', 'modify']
-        if not any(keyword in command_lower for keyword in update_keywords):
-            return None
-        
-        # FIXED: Field mapping with synonyms - returns actual field names
-        field_mappings = {
-            'location': ['location', 'place', 'site', 'where', 'address'],
-            'onsite_contact': ['contact', 'met with', 'person', 'who', 'onsite', 'front desk', 'who did you meet'],
-            'support_contact': ['support', 'help', 'it support', 'technical', 'worked with for support'],
-            'work_completed': ['work', 'task', 'job', 'completed', 'did', 'what work', 'work completed'],
-            'transcription': ['transcription', 'text', 'transcript', 'recording', 'what i said', 'transcription text'],
-            'technician_name': ['name', 'technician', 'my name', 'i am', 'technician name'],
-            'delays': ['delay', 'delayed', 'wait', 'waiting', 'late', 'were there any delays'],
-            'expenses': ['expense', 'cost', 'money', 'paid', 'parking', 'expenses'],
-            'materials_used': ['material', 'parts', 'equipment', 'used', 'installed', 'materials used'],
-            'troubleshooting_steps': ['troubleshooting', 'steps', 'debug', 'diagnose', 'troubleshooting steps'],
-            'scope_completed': ['scope', 'completed', 'finished', 'done', 'scope completed'],
-            'released_by': ['released', 'dismissed', 'who released', 'released by'],
-            'release_code': ['release code', 'code', 'completion code'],
-            'return_tracking': ['tracking', 'return', 'ups', 'fedex', 'tracking number'],
-            'out_of_scope_work': ['out of scope', 'additional work', 'extra work'],
-            'photos_uploaded': ['photos', 'pictures', 'images', 'how many photos']
+    def _validate_response_structure(self, response: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensure response has all required fields for frontend"""
+        required_fields = {
+            'action': 'acknowledge',
+            'target': '',
+            'value': '',
+            'confidence': 0.5,
+            'confirmation': 'Command processed',
+            'ttsText': '',
+            'success': True,
+            'needs_clarification': False,
+            'clarification_question': '',
+            'fieldUpdates': {}
         }
         
-        # Try to match field
-        matched_field = None
-        for field_name, synonyms in field_mappings.items():
-            if any(synonym in command_lower for synonym in synonyms):
-                matched_field = field_name
+        for field, default in required_fields.items():
+            if field not in response:
+                response[field] = default
+        
+        return response
+    
+    def _build_transcript_screen_prompt(self, transcription: str, screen_context: Dict[str, Any]) -> str:
+        """Build prompt specific to transcript screen (single field)"""
+        
+        # Extract current transcription text
+        current_text = ""
+        visible_fields = screen_context.get('visibleFields', [])
+        for field in visible_fields:
+            if field.get('name') == 'transcription':
+                current_text = field.get('currentValue', '')
                 break
         
-        if not matched_field:
-            return None
+        prompt = f"""Voice Command: "{transcription}"
+
+CURRENT SCREEN: transcript (Voice Transcription Screen)
+MODE: {screen_context.get('mode', 'unknown')}
+
+CURRENT TRANSCRIPTION TEXT:
+"{current_text}"
+
+This screen has ONLY ONE FIELD: the transcription text itself.
+
+INSTRUCTIONS:
+Analyze the voice command and determine the appropriate action.
+
+Return a JSON response with these fields:
+- action: "update_field" | "execute_action" | "navigate" | "clarify" | "acknowledge"
+- target: field name or action name
+- value: new value or complete modified text for replacements
+- confidence: 0.0 to 1.0
+- confirmation: brief confirmation message
+- ttsText: text to speak (if any)
+- success: boolean
+- needs_clarification: boolean
+- clarification_question: question to ask if clarification needed
+
+RULES FOR TRANSCRIPT SCREEN:
+1. TEXT REPLACEMENT: Any "change X to Y" command should modify the transcription text
+   - Find X in the current text and replace with Y
+   - Return the ENTIRE modified text in the value field
+   - target should be "transcription"
+
+2. POLISH/PROFESSIONAL: "make it professional", "clean it up" commands
+   - Rewrite the entire transcription to be more professional
+   - Return the ENTIRE rewritten text in the value field
+   - target should be "transcription"
+
+3. NAVIGATION: "generate summary", "generate closeout"
+   - action should be "execute_action"
+   - target should be "generate_summary"
+
+Since this is the transcript screen with only one text field, assume most editing commands 
+refer to modifying the transcription text content.
+
+Respond ONLY with valid JSON, no markdown formatting."""
         
-        # Extract value
-        value = self._extract_field_value(command_lower, original_command)
-        
-        # Special handling for transcription changes
-        if matched_field == 'transcription':
-            current_transcription = screen_context.get('currentValues', {}).get('transcription', '')
-            value = self._apply_transcription_changes(original_command, current_transcription)
-        
-        return {
-            "action": "update_field",
-            "target": matched_field,
-            "value": value,
-            "confidence": 0.8,
-            "confirmation": f"Updated {matched_field.replace('_', ' ')}",
-            "ttsText": "",
-            "success": True,
-            "needs_clarification": False
-        }
+        return prompt
     
-    def _detect_mode_toggle(self, command_lower: str) -> Optional[Dict[str, Any]]:
-        """Detect mode toggle commands"""
-        mode_keywords = ['edit', 'edit mode', 'modify', 'change mode', 'let me edit']
+    def _build_summary_screen_prompt(self, transcription: str, screen_context: Dict[str, Any]) -> str:
+        """Build prompt specific to summary screen (multiple fields)"""
         
-        if any(keyword in command_lower for keyword in mode_keywords):
-            return {
-                "action": "toggle_mode",
-                "target": "edit_mode",
-                "value": "true",
-                "confidence": 0.9,
-                "confirmation": "Switched to edit mode",
-                "ttsText": "",
-                "success": True,
-                "needs_clarification": False
-            }
+        # Extract current content and fields
+        current_text = ""
+        visible_fields = screen_context.get('visibleFields', [])
         
-        return None
-    
-    def _detect_read_command(self, command_lower: str, screen_context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Detect read/playback commands"""
-        read_keywords = ['read', 'tell me', 'what does it say', 'read out', 'say back']
-        
-        if any(keyword in command_lower for keyword in read_keywords):
-            # Determine what to read
-            if 'transcription' in command_lower or 'transcript' in command_lower:
-                text_to_read = screen_context.get('currentValues', {}).get('transcription', 'No transcription available')
-            else:
-                text_to_read = screen_context.get('currentValues', {}).get('transcription', 'Nothing to read')
-            
-            return {
-                "action": "acknowledge",
-                "target": "read_transcription",
-                "value": "",
-                "confidence": 0.9,
-                "confirmation": "Reading transcription",
-                "ttsText": text_to_read,
-                "success": True,
-                "needs_clarification": False
-            }
-        
-        return None
-    
-    def _detect_action_command(self, command_lower: str) -> Optional[Dict[str, Any]]:
-        """Detect action commands"""
-        action_mappings = {
-            'generate_summary': ['generate', 'create summary', 'summarize', 'make summary'],
-            'send_email': ['send email', 'email report', 'send report'],
-            'save': ['save', 'save changes', 'commit'],
-            'help': ['help', 'what can you do', 'capabilities']
-        }
-        
-        for action, keywords in action_mappings.items():
-            if any(keyword in command_lower for keyword in keywords):
-                return {
-                    "action": "execute_action",
-                    "target": action,
-                    "value": "",
-                    "confidence": 0.8,
-                    "confirmation": f"Executing {action.replace('_', ' ')}",
-                    "ttsText": "",
-                    "success": True,
-                    "needs_clarification": False
-                }
-        
-        return None
-    
-    def _extract_field_value(self, command_lower: str, original_command: str) -> str:
-        """Extract value from command"""
-        # Look for patterns like "set X to Y" or "change X to Y"
-        patterns = [
-            r'(?:set|change|update|put|make)\s+.*?\s+to\s+(.+)',
-            r'(?:set|change|update|put|make)\s+.*?\s+is\s+(.+)',
-            r'(?:set|change|update|put|make)\s+.*?\s+as\s+(.+)'
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, command_lower)
-            if match:
-                return match.group(1).strip()
-        
-        # Fallback: take words after common prepositions
-        prepositions = ['to', 'is', 'as', 'with']
-        words = original_command.split()
-        for i, word in enumerate(words):
-            if word.lower() in prepositions and i + 1 < len(words):
-                return ' '.join(words[i + 1:]).strip()
-        
-        # Last resort: return the command itself
-        return original_command
-    
-    def _apply_transcription_changes(self, command: str, current_transcription: str) -> str:
-        """Apply changes to transcription based on command"""
-        command_lower = command.lower()
-        
-        # Handle text replacements
-        if 'change' in command_lower:
-            if 'hi' in command_lower and 'hello' in command_lower:
-                if current_transcription:
-                    return current_transcription.replace('hi', 'hello').replace('Hi', 'Hello')
-            elif 'hello' in command_lower and 'hi' in command_lower:
-                if current_transcription:
-                    return current_transcription.replace('hello', 'hi').replace('Hello', 'Hi')
-        
-        # For other changes, return the extracted value
-        return self._extract_field_value(command_lower, command)
-    
-    def _format_available_fields(self, fields: List[Dict]) -> str:
-        """Format available fields for prompt"""
-        if not fields:
-            return "No fields available"
-        
-        formatted = []
-        for field in fields:
-            name = field.get('name', '')
-            label = field.get('label', '')
+        # Build field descriptions with current values
+        field_info = []
+        for field in visible_fields:
+            field_name = field.get('name', '')
+            field_label = field.get('label', '')
+            field_type = field.get('type', 'text')
+            current_value = field.get('currentValue', '')
             synonyms = field.get('synonyms', [])
-            current = field.get('currentValue', '')[:50]
             
-            formatted.append(f"- {label} ({name}): '{current}' [synonyms: {', '.join(synonyms)}]")
+            if field_name == 'transcription':
+                current_text = current_value
+            
+            if field_name:
+                field_desc = f"- {field_name} ({field_label}): {field_type} field"
+                if current_value:
+                    # Show current value for context
+                    field_desc += f", current value: '{current_value[:100]}...'" if len(current_value) > 100 else f", current value: '{current_value}'"
+                if synonyms:
+                    field_desc += f", synonyms: {', '.join(synonyms[:5])}"
+                field_info.append(field_desc)
         
-        return '\n'.join(formatted)
+        fields_description = "\n".join(field_info) if field_info else "No fields available"
+        
+        prompt = f"""Voice Command: "{transcription}"
+
+CURRENT SCREEN: summary (Closeout Summary Screen)
+MODE: edit (always editable)
+
+AVAILABLE FIELDS IN SUMMARY:
+{fields_description}
+
+This screen has MULTIPLE FIELDS for different aspects of the closeout report.
+
+INSTRUCTIONS:
+Analyze the voice command and determine the appropriate action.
+
+Return a JSON response with these fields:
+
+RULES FOR SUMMARY SCREEN:
+
+1. FIELD UPDATES: Commands that mention field names, labels, or synonyms
+   IMPORTANT: Look for these patterns that indicate field updates:
+   - "change [number] photos to [number]" → update photos_uploaded field
+   - "set [field] to [value]" → update that field
+   - "update [field]" → update that field (may need clarification for value)
+   - Numbers often refer to field values (e.g., "3 photos" refers to photos_uploaded field)
+   
+   Examples:
+   - "change 3 photos to 4" → target: "photos_uploaded", value: "4 photos"
+   - "change the photos from 3 to 4" → target: "photos_uploaded", value: "4 photos"
+
+2. TEXT REPLACEMENT IN TRANSCRIPTION FIELD ONLY:
+   Only use text replacement if:
+   - The user explicitly mentions "transcription" or "transcript"
+   - OR the text to replace is found in the transcription field content
+   
+3. EMAIL ACTION: "send email", "email report"
+   - action should be "execute_action"
+   - target should be "send_email"
+
+DISAMBIGUATION RULES:
+
+Common field update patterns:
+
+Respond ONLY with valid JSON, no markdown formatting:"""
+        
+        return prompt
     
-    def _format_current_values(self, values: Dict[str, Any]) -> str:
-        """Format current values for prompt"""
-        if not values:
-            return "No current values"
-        
-        formatted = []
-        for key, value in values.items():
-            if isinstance(value, str) and len(value) > 100:
-                display_value = value[:100] + "..."
-            else:
-                display_value = str(value)
-            formatted.append(f"- {key}: '{display_value}'")
-        
-        return '\n'.join(formatted)
-    
-    def _parse_gpt_response(self, response: str) -> Dict[str, Any]:
-        """Parse GPT JSON response with fallback"""
+    def _parse_gpt_response(self, response_text: str) -> Dict[str, Any]:
+        """Parse GPT response with robust error handling"""
         try:
-            # Extract JSON
-            start_idx = response.find('{')
-            end_idx = response.rfind('}') + 1
+            # Try to extract JSON from markdown code blocks
+            if "```json" in response_text:
+                json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
+                if json_match:
+                    response_text = json_match.group(1)
+            elif "```" in response_text:
+                json_match = re.search(r'```\s*(.*?)\s*```', response_text, re.DOTALL)
+                if json_match:
+                    response_text = json_match.group(1)
             
-            if start_idx == -1 or end_idx == 0:
-                raise ValueError("No JSON found")
+            # Parse JSON
+            parsed = json.loads(response_text)
             
-            json_str = response[start_idx:end_idx]
-            parsed = json.loads(json_str)
-            
-            # Ensure required fields
+            # Ensure all required fields exist with defaults
             required_fields = {
                 'action': 'acknowledge',
                 'target': '',
@@ -370,18 +264,221 @@ RULES:
                 'confirmation': 'Command processed',
                 'ttsText': '',
                 'success': True,
-                'needs_clarification': False
+                'needs_clarification': False,
+                'clarification_question': ''
             }
             
             for field, default in required_fields.items():
                 if field not in parsed:
                     parsed[field] = default
-            
+
+            # Normalize bulk field updates from various GPT shapes into 'fieldUpdates' dict
+            # Accepts:
+            # - 'fields': [ { field: 'name', value: 'x' }, ... ]
+            # - 'updates': [ { field/name/target: 'name', value: 'x' }, ... ]
+            # - 'field_updates': { name: value, ... }
+            if 'fieldUpdates' not in parsed:
+                # 1) 'fields' array
+                if 'fields' in parsed and isinstance(parsed['fields'], list):
+                    updates = {}
+                    for item in parsed['fields']:
+                        try:
+                            fname = item.get('field') or item.get('name') or item.get('target')
+                            fval = item.get('value')
+                            if fname:
+                                updates[fname] = fval
+                        except Exception:
+                            continue
+                    if updates:
+                        parsed['fieldUpdates'] = updates
+                        logger.info(f"Normalized 'fields' array into fieldUpdates: {list(updates.keys())}")
+                        if not parsed.get('action'):
+                            parsed['action'] = 'update_fields'
+
+                # 2) 'updates' array (alternate key used by some prompts/models)
+                elif 'updates' in parsed and isinstance(parsed['updates'], list):
+                    updates = {}
+                    for item in parsed['updates']:
+                        try:
+                            fname = None
+                            if isinstance(item, dict):
+                                fname = item.get('field') or item.get('name') or item.get('target')
+                                fval = item.get('value')
+                            else:
+                                # If item is a simple string like 'field:value' attempt a split
+                                parts = str(item).split(':', 1)
+                                if len(parts) == 2:
+                                    fname = parts[0].strip()
+                                    fval = parts[1].strip()
+                                else:
+                                    continue
+                            if fname:
+                                updates[fname] = fval
+                        except Exception:
+                            continue
+                    if updates:
+                        parsed['fieldUpdates'] = updates
+                        logger.info(f"Normalized 'updates' array into fieldUpdates: {list(updates.keys())}")
+                        if not parsed.get('action'):
+                            parsed['action'] = 'update_fields'
+
+                # 3) 'field_updates' dict
+                elif 'field_updates' in parsed and isinstance(parsed['field_updates'], dict):
+                    parsed['fieldUpdates'] = parsed['field_updates']
+                    logger.info("Mapped 'field_updates' dict to fieldUpdates")
+
             return parsed
             
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning(f"Failed to parse GPT response: {e}")
             return self._create_acknowledge_response("Command received")
+    
+    def _fallback_command_processing(self, transcription: str, screen_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Fallback pattern matching for command processing"""
+        logger.info("Using fallback pattern matching for command processing")
+        
+        transcription_lower = transcription.lower()
+        screen_name = screen_context.get('screenName', 'unknown')
+        
+        # Get current text content and field info
+        current_text = ""
+        visible_fields = screen_context.get('visibleFields', [])
+        for field in visible_fields:
+            if field.get('name') == 'transcription':
+                current_text = field.get('currentValue', '')
+                break
+        
+        # SUMMARY SCREEN: Check for field updates first
+        if screen_name == 'summary':
+            # Pattern 1: Photos field updates
+            photo_patterns = [
+                r'(?:change|update|set)\s+(?:the\s+)?(\d+)\s+photos?\s+to\s+(?:say\s+)?(\d+)',
+                r'(?:change|update)\s+photos?\s+(?:from\s+)?(\d+)?\s*to\s+(\d+)',
+                r'(\d+)\s+photos?\s+(?:should be|to)\s+(\d+)',
+            ]
+            
+            for pattern in photo_patterns:
+                match = re.search(pattern, transcription_lower)
+                if match:
+                    # Extract the new number (last captured group)
+                    new_value = match.group(match.lastgroup)
+                    
+                    return {
+                        "action": "update_field",
+                        "target": "photos_uploaded",
+                        "value": f"{new_value} photos",
+                        "confidence": 0.9,
+                        "confirmation": f"Updated photos to {new_value}",
+                        "ttsText": "",
+                        "success": True,
+                        "needs_clarification": False
+                    }
+            
+            # Pattern 2: Other field updates
+            field_update_patterns = [
+                r'(?:set|change|update)\s+(?:the\s+)?([a-z_]+)\s+(?:to|as)\s+(.+)',
+                r'([a-z_]+)\s+(?:is|should be|equals)\s+(.+)',
+            ]
+            
+            for pattern in field_update_patterns:
+                match = re.search(pattern, transcription_lower)
+                if match:
+                    field_ref = match.group(1).strip()
+                    new_value = match.group(2).strip()
+                    
+                    # Try to match field name
+                    field_name = self._match_field_name(field_ref, screen_context)
+                    
+                    if field_name:
+                        return {
+                            "action": "update_field",
+                            "target": field_name,
+                            "value": new_value,
+                            "confidence": 0.8,
+                            "confirmation": f"Updated {field_name.replace('_', ' ')}",
+                            "ttsText": "",
+                            "success": True,
+                            "needs_clarification": False
+                        }
+        
+        # TRANSCRIPT SCREEN: Text replacements
+        elif screen_name == 'transcript':
+            text_change_patterns = [
+                r'(?:change|replace)\s+["\']?(.+?)["\']?\s+(?:to|with)\s+["\']?(.+?)["\']?(?:\?|$)',
+            ]
+            
+            for pattern in text_change_patterns:
+                match = re.search(pattern, transcription_lower)
+                if match:
+                    old_text = match.group(1).strip()
+                    new_text = match.group(2).strip()
+                    
+                    # Check if old_text exists in current transcription
+                    if old_text in current_text.lower():
+                        # Perform case-insensitive replacement
+                        import re
+                        modified_text = re.sub(
+                            re.escape(old_text), 
+                            new_text, 
+                            current_text, 
+                            flags=re.IGNORECASE
+                        )
+                        
+                        return {
+                            "action": "update_field",
+                            "target": "transcription",
+                            "value": modified_text,
+                            "confidence": 0.85,
+                            "confirmation": f"Replaced '{old_text}' with '{new_text}'",
+                            "ttsText": "",
+                            "success": True,
+                            "needs_clarification": False
+                        }
+        
+        # Pattern 3: Navigation commands (both screens)
+        if any(phrase in transcription_lower for phrase in ['generate summary', 'generate closeout', 'create summary']):
+            return {
+                "action": "execute_action",
+                "target": "generate_summary",
+                "value": "",
+                "confidence": 0.9,
+                "confirmation": "Generating closeout summary",
+                "ttsText": "",
+                "success": True,
+                "needs_clarification": False
+            }
+        
+        # Default: acknowledge
+        return self._create_acknowledge_response(transcription)
+    
+    def _match_field_name(self, field_ref: str, screen_context: Dict[str, Any]) -> Optional[str]:
+        """Match a field reference to an actual field name"""
+        visible_fields = screen_context.get('visibleFields', [])
+        field_ref_lower = field_ref.lower()
+        
+        for field in visible_fields:
+            field_name = field.get('name', '').lower()
+            field_label = field.get('label', '').lower()
+            synonyms = [s.lower() for s in field.get('synonyms', [])]
+            
+            # Check direct matches
+            if field_ref_lower == field_name:
+                return field.get('name')
+            
+            # Check label matches
+            if field_ref_lower in field_label:
+                return field.get('name')
+            
+            # Check synonym matches
+            if field_ref_lower in synonyms:
+                return field.get('name')
+            
+            # Check partial matches in synonyms
+            for synonym in synonyms:
+                if field_ref_lower in synonym or synonym in field_ref_lower:
+                    return field.get('name')
+        
+        return None
     
     def _create_acknowledge_response(self, transcription: str) -> Dict[str, Any]:
         """Create standard acknowledgment response"""

@@ -39,7 +39,8 @@ export interface VoiceCommand {
 export interface VoiceCommandResponse {
   action: 
     | 'respond'
-    | 'update_field' 
+    | 'update_field'
+    | 'update_fields'
     | 'navigate' 
     | 'toggle_mode' 
     | 'clarify' 
@@ -147,8 +148,8 @@ export interface CloseoutSummary {
   photos_uploaded?: string;
   
   // Additional context
+  work_order?: string;
   location?: string;
-  datetime?: string;
   technician_name?: string;
   
   // Legacy fields for backward compatibility
@@ -160,8 +161,6 @@ export interface CloseoutSummary {
 // Legacy summary structure for backward compatibility
 export interface LegacySummary {
   taskDescription: string;
-  location?: string;
-  datetime?: string;
   outcome?: string;
   notes?: string;
 }

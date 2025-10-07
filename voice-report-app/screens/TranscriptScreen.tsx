@@ -15,10 +15,12 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
+import { useFontScale } from '../context/FontScaleContext';
 import Loader from '../components/Loader';
 import { generateSummary } from '../services/api';
 import AIAgent from '../components/AIAgent';
 import { ScreenContext, FieldInfo, CloseoutSummary } from '../types/aiAgent';
+import { useTheme } from '../context/ThemeContext';
 
 type TranscriptScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -32,9 +34,15 @@ interface Props {
 }
 
 export default function TranscriptScreen({ navigation, route }: Props) {
+  const { scaled } = useFontScale();
+  const { colors, isDark } = useTheme();
   const [transcription, setTranscription] = useState(route.params.transcription);
   const [isEditing, setIsEditing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [estimateSeconds, setEstimateSeconds] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [progressPercent, setProgressPercent] = useState<number>(0);
+  const progressInterval = useRef<NodeJS.Timeout | null>(null);
   
   // Press and hold state for clear button
   const [isHoldingClear, setIsHoldingClear] = useState(false);
@@ -112,15 +120,51 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   }, [transcription, isEditing]);
 
   const handleGenerateSummary = async () => {
+    // Heuristic progress simulation based on transcription length
+    const chars = transcription ? transcription.length : 0;
+    // Estimate formula: base 6s + 0.02s per character, capped to 180s (API timeout)
+    const estimate = Math.min(180, Math.max(6, Math.round(chars * 0.02 + 6)));
+    setEstimateSeconds(estimate);
+    setElapsedSeconds(0);
+    setProgressPercent(0);
+
+    // Start simulated progress timer
+    if (progressInterval.current) {
+      clearInterval(progressInterval.current);
+      progressInterval.current = null;
+    }
+
+    setIsProcessing(true);
+
+    let completed = false;
+    progressInterval.current = setInterval(() => {
+      setElapsedSeconds(prev => {
+        const next = prev + 0.5;
+        // Compute progress with staged weights: upload/transcribe 15%, summarize 70%, finalize 15%
+        const est = estimate;
+        const raw = (() => {
+          if (next <= est * 0.15) {
+            return Math.round((next / (est * 0.15)) * 15);
+          } else if (next <= est * 0.85) {
+            return Math.round(15 + ((next - est * 0.15) / (est * 0.7)) * 70);
+          } else {
+            return Math.round(85 + ((next - est * 0.85) / (est * 0.15)) * 15);
+          }
+        })();
+
+        // Stall at 99% until completed
+        const p = completed ? raw : Math.min(99, raw);
+        setProgressPercent(Math.max(0, Math.min(99, p)));
+        return next;
+      });
+    }, 500);
+
     try {
-      setIsProcessing(true);
-      console.log('🔄 Generating summary from transcription:', transcription.substring(0, 100) + '...');
-      
+      console.log('🔄 Generating summary from transcription (with heuristic):', transcription.substring(0, 100) + '...');
       const response = await generateSummary(transcription);
+
       console.log('📥 Raw API response:', response);
-      
       let closeoutSummary: CloseoutSummary;
-      
       if (response && typeof response === 'object' && 'summary' in response) {
         closeoutSummary = (response as any).summary;
         console.log('✅ Using CloseoutSummary from response.summary');
@@ -128,22 +172,30 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         closeoutSummary = response as CloseoutSummary;
         console.log('✅ Using response as CloseoutSummary directly');
       }
-      
-      console.log('📋 Extracted closeout summary:', closeoutSummary);
-      
+
+      // Immediately fill to 100% and navigate after a short visual pause
+      if (progressInterval.current) {
+        clearInterval(progressInterval.current);
+        progressInterval.current = null;
+      }
+      setProgressPercent(100);
+      // Small delay so user sees 100%
+      await new Promise(res => setTimeout(res, 250));
       navigation.navigate('Summary', {
         transcription,
         summary: closeoutSummary,
       });
-      
     } catch (error) {
       console.error('❌ Error generating summary:', error);
-      Alert.alert(
-        'Error', 
-        `Failed to generate summary: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      Alert.alert('Error', `Failed to generate summary: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsProcessing(false);
+      setEstimateSeconds(null);
+      setElapsedSeconds(0);
+      if (progressInterval.current) {
+        clearInterval(progressInterval.current);
+        progressInterval.current = null;
+      }
     }
   };
 
@@ -248,32 +300,55 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     setIsEditing(!isEditing);
   };
 
+  // Progress UI while generating summary
   if (isProcessing) {
-    return <Loader message="Generating summary..." />;
+    let phase = 'Preparing';
+    if (estimateSeconds) {
+      const ratio = elapsedSeconds / estimateSeconds;
+      if (ratio < 0.15) phase = 'Uploading & Transcribing';
+      else if (ratio < 0.85) phase = 'Summarizing';
+      else phase = 'Finalizing';
+    }
+
+    return (
+      <View style={{flex:1, justifyContent:'center', alignItems:'center', padding:20, backgroundColor: colors.background}}>
+        <View style={{width:'100%', backgroundColor: colors.surface, borderRadius:12, padding:20, alignItems:'center', elevation:2, borderWidth:1, borderColor: colors.border}}>
+          <Text style={{fontSize: scaled(18), fontWeight:'600', marginBottom:8, color: colors.textPrimary}}>Generating summary</Text>
+          <Text style={{color: colors.textSecondary, marginBottom:12, fontSize: scaled(14)}}>{phase}</Text>
+
+          {/* Progress bar background */}
+          <View style={{height:12, width:'100%', backgroundColor: colors.border, borderRadius:6, overflow:'hidden', marginBottom:8}}>
+            <View style={{height:'100%', width:`${progressPercent}%`, backgroundColor: colors.accent}} />
+          </View>
+
+          <Text style={{fontSize: scaled(14), fontWeight:'600', marginBottom:4, color: colors.textPrimary}}>{progressPercent}%</Text>
+        </View>
+      </View>
+    );
   }
 
   return (
     <KeyboardAvoidingView 
-      style={styles.container} 
+      style={[styles.container, { backgroundColor: colors.background }]} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView style={styles.scrollContainer}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Voice Transcription</Text>
+      <ScrollView style={[styles.scrollContainer]}>
+        <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+          <Text style={[styles.title, { fontSize: scaled(24), color: colors.textPrimary }]}>Voice Transcription</Text>
           <TouchableOpacity
-            style={[styles.editButton, isEditing && styles.editButtonActive]}
+            style={[styles.editButton, { backgroundColor: isEditing ? colors.accent : colors.surfaceAlt, borderColor: colors.border }, isEditing && { } ]}
             onPress={handleModeToggle}
           >
-            <Text style={[styles.editButtonText, isEditing && styles.editButtonTextActive]}>
+            <Text style={[styles.editButtonText, { fontSize: scaled(14), color: isEditing ? colors.accentContrast : colors.textPrimary }]}>
               {isEditing ? 'Done' : 'Edit'}
             </Text>
           </TouchableOpacity>
         </View>
 
-        <View style={styles.transcriptionCard}>
+        <View style={[styles.transcriptionCard, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
           {isEditing ? (
             <TextInput
-              style={styles.transcriptionInput}
+              style={[styles.transcriptionInput, { fontSize: scaled(16), lineHeight: scaled(24), color: colors.textPrimary }]}
               value={transcription}
               onChangeText={(text) => {
                 console.log('📝 Direct TextInput change:', text.substring(0, 50) + '...');
@@ -282,10 +357,10 @@ export default function TranscriptScreen({ navigation, route }: Props) {
               multiline
               textAlignVertical="top"
               placeholder="Your voice recording transcription will appear here..."
-              key={`transcript-input-${transcription?.length || 0}`}  // Force re-render on content change
+              placeholderTextColor={colors.textSecondary}
             />
           ) : (
-            <Text style={styles.transcriptionText}>
+            <Text style={[styles.transcriptionText, { fontSize: scaled(16), lineHeight: scaled(24), color: colors.textPrimary }]}>
               {transcription || 'No transcription available'}
             </Text>
           )}
@@ -294,18 +369,18 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         <View style={styles.actionButtons}>
           {/* Generate Button - Orange */}
           <TouchableOpacity
-            style={[styles.generateButton, styles.orangeButton]}
+            style={[styles.generateButton, { backgroundColor: colors.accent }]}
             onPress={handleGenerateSummary}
             disabled={!transcription || isProcessing}
           >
-            <Text style={styles.generateButtonText}>
+            <Text style={[styles.generateButtonText, { fontSize: scaled(16), color: colors.accentContrast }]}>
               Generate Closeout
             </Text>
           </TouchableOpacity>
 
           {/* Clear Button - Press and Hold with Progress Bar */}
           <TouchableOpacity
-            style={[styles.clearButton, styles.orangeButton]}
+            style={[styles.clearButton, { backgroundColor: colors.accent }]}
             onPressIn={handleClearPressIn}
             onPressOut={handleClearPressOut}
             activeOpacity={0.8}
@@ -326,7 +401,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
             </View>
             
             {/* Button Text */}
-            <Text style={styles.clearButtonText}>
+            <Text style={[styles.clearButtonText, { fontSize: scaled(16), color: colors.accentContrast }]}>
               {isHoldingClear ? 'Hold to Clear...' : 'Clear'}
             </Text>
           </TouchableOpacity>
@@ -368,6 +443,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 10,
+    borderBottomWidth: 1,
   },
   title: {
     fontSize: 24,
@@ -375,13 +451,10 @@ const styles = StyleSheet.create({
     color: '#2c3e50',
   },
   editButton: {
-    backgroundColor: '#ecf0f1',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 6,
-  },
-  editButtonActive: {
-    backgroundColor: '#3498db',
+    borderWidth: 1,
   },
   editButtonText: {
     color: '#2c3e50',

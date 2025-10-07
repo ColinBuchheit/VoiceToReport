@@ -1,12 +1,12 @@
-# backend/main.py - CORRECTED VERSION WITH PROPER VOICE AGENT
-
+# backend/main.py - FIXED ASYNC ISSUE
 import os
 import tempfile
 import base64
 import logging
 from datetime import datetime
+from typing import List, Dict, Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from openai import OpenAI
@@ -23,8 +23,8 @@ from models import (
 from services.transcription import TranscriptionService
 from services.summarization import SummarizationService
 from services.email_service import EmailService
-from services.voice_agent import VoiceAgentService  # CRITICAL: This import was missing
-from config import settings  # Use settings instead of direct env vars
+from services.voice_agent import VoiceAgentService
+from config import settings
 
 # Load environment variables
 load_dotenv()
@@ -33,6 +33,54 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def cors_origin_validator(origin: str) -> bool:
+    """
+    Custom origin validator for secure CORS handling
+    """
+    if not origin:
+        return False
+    
+    # Allow ngrok domains (they change dynamically)
+    ngrok_patterns = [".ngrok.io", ".ngrok-free.app", ".ngrok.app"]
+    for pattern in ngrok_patterns:
+        if pattern in origin:
+            logger.info(f"✅ Allowing ngrok origin: {origin}")
+            return True
+    
+    # Allow local development origins
+    local_patterns = [
+        "http://localhost:",
+        "http://127.0.0.1:",
+        "exp://localhost:",
+        "exp://127.0.0.1:",
+    ]
+    for pattern in local_patterns:
+        if origin.startswith(pattern):
+            logger.info(f"✅ Allowing local development origin: {origin}")
+            return True
+    
+    # Allow local network origins (for mobile testing)
+    local_network_patterns = [
+        "http://192.168.",
+        "http://10.0.",
+        "http://172.16.",
+    ]
+    for pattern in local_network_patterns:
+        if origin.startswith(pattern):
+            logger.info(f"✅ Allowing local network origin: {origin}")
+            return True
+    
+    # Check against environment-specified origins
+    env_origins = os.getenv("ALLOWED_ORIGINS", "").strip()
+    if env_origins:
+        allowed_list = [o.strip() for o in env_origins.split(",") if o.strip()]
+        if origin in allowed_list:
+            logger.info(f"✅ Allowing environment-specified origin: {origin}")
+            return True
+    
+    logger.warning(f"❌ Rejecting origin: {origin}")
+    return False
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Voice-to-Report API",
@@ -40,14 +88,47 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# Configure CORS for mobile app and ngrok
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-)
+# SECURE CORS MIDDLEWARE - Custom implementation
+@app.middleware("http")
+async def cors_middleware(request: Request, call_next):
+    """
+    Custom CORS middleware with secure defaults and development flexibility
+    """
+    response = await call_next(request)
+    
+    # Get the origin from the request
+    origin = request.headers.get("origin")
+    
+    # Handle preflight requests
+    if request.method == "OPTIONS":
+        # Validate origin
+        if origin and cors_origin_validator(origin):
+            response.headers["Access-Control-Allow-Origin"] = origin
+        else:
+            response.headers["Access-Control-Allow-Origin"] = "null"
+        
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = (
+            "Content-Type, Authorization, X-API-Key, ngrok-skip-browser-warning, "
+            "User-Agent, Accept, Cache-Control"
+        )
+        response.headers["Access-Control-Max-Age"] = "3600"
+        response.status_code = 200
+        return response
+    
+    # Handle actual requests
+    if origin and cors_origin_validator(origin):
+        response.headers["Access-Control-Allow-Origin"] = origin
+    
+    # Security headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    
+    # Ngrok-specific headers
+    response.headers["ngrok-skip-browser-warning"] = "true"
+    
+    return response
 
 # Initialize OpenAI client using settings
 openai_client = None
@@ -75,7 +156,6 @@ except Exception as e:
     logger.error(f"Failed to initialize summarization service: {e}")
     summarization_service = None
 
-# CRITICAL FIX: Initialize Voice Agent Service
 try:
     voice_agent_service = VoiceAgentService() if openai_client else None
     logger.info("Voice agent service initialized")
@@ -86,7 +166,6 @@ except Exception as e:
 try:
     email_service = EmailService()
     logger.info("Email service initialized")
-    logger.info(f"Email configured for: {', '.join(email_service.recipients)}")
 except Exception as e:
     logger.error(f"Failed to initialize email service: {e}")
     email_service = None
@@ -107,234 +186,195 @@ def decode_audio_data(audio_data: str) -> bytes:
         # Decode base64
         audio_bytes = base64.b64decode(audio_data)
         logger.info(f"Decoded audio: {len(audio_bytes)} bytes")
+        
+        # Validate size (25MB limit)
+        if len(audio_bytes) > 25 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Audio file too large (max 25MB)")
+            
         return audio_bytes
     except Exception as e:
         logger.error(f"Failed to decode audio data: {e}")
-        raise HTTPException(status_code=400, detail="Invalid audio data format")
+        raise HTTPException(status_code=400, detail="Invalid audio data")
 
 # API Endpoints
 
-@app.get("/", response_model=HealthResponse)
-async def root():
-    """Root endpoint with service status"""
-    return await health_check()
-
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
-    """Health check endpoint"""
-    try:
-        services_status = {
-            "transcription": "available" if transcription_service else "unavailable",
-            "summarization": "available" if summarization_service else "unavailable", 
-            "voice_agent": "available" if voice_agent_service else "unavailable",  # Added this
-            "email": "available" if email_service else "unavailable",
-            "openai": "available" if openai_client else "unavailable"
-        }
-        
-        return HealthResponse(
-            status="healthy",
-            version="2.0.0",
-            services=services_status
-        )
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        raise HTTPException(status_code=500, detail="Health check failed")
+    """Enhanced health check with CORS configuration info"""
+    services = {
+        "transcription": "available" if transcription_service else "unavailable",
+        "summarization": "available" if summarization_service else "unavailable", 
+        "voice_agent": "available" if voice_agent_service else "unavailable",
+        "email": "available" if email_service else "unavailable",
+        "openai": "available" if openai_client else "unavailable"
+    }
+    
+    # Add CORS configuration info for debugging
+    services["cors_configured"] = "secure"
+    services["ngrok_support"] = "enabled"
+    services["local_dev_support"] = "enabled"
+    
+    return HealthResponse(
+        status="healthy" if services["openai"] == "available" else "degraded",
+        version="2.0.0",
+        services=services
+    )
 
 @app.post("/transcribe", response_model=TranscriptionResponse)
-async def transcribe_audio(request: TranscribeRequest):
-    """Transcribe audio to text - optimized for mobile uploads"""
+async def transcribe_audio_endpoint(request: TranscribeRequest):
+    """Transcribe audio to text using OpenAI Whisper - FIXED ASYNC ISSUE"""
     
     if not transcription_service:
-        raise HTTPException(status_code=503, detail="Transcription service unavailable - check OpenAI API key")
+        raise HTTPException(status_code=503, detail="Transcription service unavailable")
     
     try:
-        logger.info("Processing transcription request")
-        logger.info(f"Audio format: {request.format}")
-        logger.info(f"Audio data length: {len(request.audio)} characters")
-        
         # Validate audio format
         if not validate_audio_format(request.format):
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Unsupported audio format: {request.format}. Supported formats: m4a, mp4, wav, mp3, webm"
-            )
+            raise HTTPException(status_code=400, detail=f"Unsupported audio format: {request.format}")
         
         # Decode audio data
         audio_bytes = decode_audio_data(request.audio)
-        audio_size_mb = len(audio_bytes) / (1024 * 1024)
-        logger.info(f"Audio size: {audio_size_mb:.2f} MB")
         
-        # Validate audio size (25MB limit)
-        if audio_size_mb > 25:
-            raise HTTPException(status_code=413, detail="Audio file too large (max 25MB)")
-        
-        # Create temporary file and pass file path to transcription service
-        with tempfile.NamedTemporaryFile(suffix=f'.{request.format}', delete=False) as temp_file:
-            temp_file.write(audio_bytes)
-            temp_file_path = temp_file.name
-        
+        # Create temporary file for processing
+        temp_filename = None
         try:
-            # Pass file path to transcription service (not bytes)
-            transcription = transcription_service.transcribe_audio(temp_file_path)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{request.format}") as temp_file:
+                temp_file.write(audio_bytes)
+                temp_filename = temp_file.name
             
-            logger.info("Transcription completed successfully")
-            logger.info(f"Transcription length: {len(transcription)} characters")
+            logger.info(f"Processing audio file: {temp_filename}")
             
-            return TranscriptionResponse(
-                transcription=transcription,
-                success=True,
-                message="Audio transcribed successfully"
-            )
+            # FIXED: Remove 'await' since transcribe_audio is NOT an async function
+            transcription = transcription_service.transcribe_audio(temp_filename)
+            
+            if not transcription:
+                raise HTTPException(status_code=422, detail="Could not transcribe audio - please try speaking more clearly")
+            
+            logger.info(f"Transcription completed: {len(transcription)} characters")
+            
+            return TranscriptionResponse(transcription=transcription)
             
         finally:
             # Clean up temporary file
-            try:
-                os.unlink(temp_file_path)
-            except Exception as e:
-                logger.warning(f"Failed to clean up temp file: {e}")
-    
+            if temp_filename and os.path.exists(temp_filename):
+                os.unlink(temp_filename)
+                
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Transcription failed: {e}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Transcription failed: {str(e)}"
-        )
-
-# CRITICAL FIX: Properly implement voice command endpoint
-@app.post("/voice-command", response_model=VoiceCommandResponse)
-async def process_voice_command(request: VoiceCommandRequest):
-    """Process voice command for AI agent - FIXED to use proper VoiceAgentService"""
-    
-    if not voice_agent_service:
-        raise HTTPException(status_code=503, detail="Voice agent service unavailable - check OpenAI API key")
-    
-    if not transcription_service:
-        raise HTTPException(status_code=503, detail="Transcription service unavailable - check OpenAI API key")
-    
-    try:
-        logger.info("Processing voice command request")
-        logger.info(f"Screen context: {request.screenContext.get('screenName', 'unknown')} - {request.screenContext.get('mode', 'N/A')}")
-        
-        # Decode audio data
-        audio_bytes = decode_audio_data(request.audio)
-        
-        # Create temporary file
-        with tempfile.NamedTemporaryFile(suffix=f'.{request.format}', delete=False) as temp_file:
-            temp_file.write(audio_bytes)
-            temp_file_path = temp_file.name
-        
-        try:
-            # Transcribe the voice command
-            transcription = transcription_service.transcribe_audio(temp_file_path)
-            logger.info(f"Voice command transcribed: '{transcription}'")
-            
-            # CRITICAL FIX: Use VoiceAgentService to process the command properly
-            response_data = await voice_agent_service.process_voice_command(
-                transcription, 
-                request.screenContext
-            )
-            
-            logger.info(f"Voice command processed: action='{response_data.get('action')}', target='{response_data.get('target', 'N/A')}'")
-            
-            # Build proper response matching frontend expectations
-            return VoiceCommandResponse(
-                action=response_data.get('action', 'acknowledge'),
-                target=response_data.get('target', ''),
-                value=response_data.get('value', ''),
-                confidence=response_data.get('confidence', 0.5),
-                clarification=response_data.get('clarification', ''),
-                confirmation=response_data.get('confirmation', 'Command processed'),
-                ttsText=response_data.get('ttsText', ''),
-                success=response_data.get('success', True),
-                needs_clarification=response_data.get('needs_clarification', False),
-                clarification_question=response_data.get('clarification_question', ''),
-                replacement=response_data.get('replacement', ''),
-                fieldUpdates=response_data.get('fieldUpdates', {}),
-                metadata=response_data.get('metadata', {})
-            )
-            
-        finally:
-            # Clean up temporary file
-            try:
-                os.unlink(temp_file_path)
-            except Exception as e:
-                logger.warning(f"Failed to clean up temp file: {e}")
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Voice command processing failed: {e}")
-        return VoiceCommandResponse(
-            action="acknowledge",
-            confirmation="Sorry, I couldn't process that command.",
-            ttsText="I encountered an error. Please try again.",
-            success=False
-        )
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
 
 @app.post("/summarize", response_model=SummaryResponse)
-async def summarize_transcription(request: SummarizeRequest):
-    """Summarize transcription into structured closeout report"""
+async def summarize_transcription_endpoint(request: SummarizeRequest):
+    """Generate structured summary from transcription"""
     
     if not summarization_service:
-        raise HTTPException(status_code=503, detail="Summarization service unavailable - check OpenAI API key")
+        raise HTTPException(status_code=503, detail="Summarization service unavailable")
     
     try:
-        logger.info("Processing summarization request")
-        logger.info(f"Transcription preview: {request.transcription[:200]}...")
+        logger.info(f"Summarizing transcription: {len(request.transcription)} characters")
         
         # Generate structured summary
         summary = summarization_service.generate_closeout_summary(request.transcription)
         
-        # Log extraction results for debugging
-        populated_fields = [k for k, v in summary.items() if v and v != "Not mentioned"]
-        logger.info(f"Summarization completed: {len(populated_fields)}/16 fields populated: {populated_fields}")
+        logger.info("Summarization completed successfully")
         
-        return SummaryResponse(
-            summary=summary,
-            success=True,
-            message="Transcription summarized successfully"
-        )
+        return SummaryResponse(summary=summary)
         
     except Exception as e:
         logger.error(f"Summarization failed: {e}")
-        return SummaryResponse(
-            summary={},
-            success=False,
-            message=f"Summarization failed: {str(e)}. Please try again.",
-        )
+        raise HTTPException(status_code=500, detail=f"Summarization failed: {str(e)}")
+
+@app.post("/voice-command", response_model=VoiceCommandResponse)
+async def process_voice_command_endpoint(request: VoiceCommandRequest):
+    """Process voice command and return action response - FIXED ASYNC ISSUE"""
+    
+    if not voice_agent_service:
+        raise HTTPException(status_code=503, detail="Voice agent service unavailable")
+    
+    try:
+        # Validate audio format
+        if not validate_audio_format(request.format):
+            raise HTTPException(status_code=400, detail=f"Unsupported audio format: {request.format}")
+        
+        # Decode audio data
+        audio_bytes = decode_audio_data(request.audio)
+        
+        # First transcribe the audio
+        temp_filename = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{request.format}") as temp_file:
+                temp_file.write(audio_bytes)
+                temp_filename = temp_file.name
+            
+            # Transcribe audio
+            if not transcription_service:
+                raise HTTPException(status_code=503, detail="Transcription service required for voice commands")
+            
+            # FIXED: Remove 'await' since transcribe_audio is NOT an async function
+            transcription = transcription_service.transcribe_audio(temp_filename)
+            
+            if not transcription:
+                return VoiceCommandResponse(
+                    action="acknowledge",
+                    confirmation="I couldn't understand that. Please try again.",
+                    success=False,
+                    needs_clarification=True
+                )
+            
+            # Process the voice command
+            response = await voice_agent_service.process_voice_command(
+                transcription, 
+                request.screenContext
+            )
+            
+            return VoiceCommandResponse(**response)
+            
+        finally:
+            # Clean up temporary file
+            if temp_filename and os.path.exists(temp_filename):
+                os.unlink(temp_filename)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Voice command processing failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Voice command processing failed: {str(e)}")
 
 @app.post("/send-email", response_model=EmailResponse)
-async def send_closeout_email(request: SendEmailRequest):
+async def send_email_endpoint(request: SendEmailRequest):
     """Send closeout report via email"""
     
     if not email_service:
-        raise HTTPException(status_code=500, detail="Email service not available")
+        raise HTTPException(status_code=503, detail="Email service unavailable")
     
     try:
-        logger.info("Processing email send request")
-        
-        # Check email configuration
-        if not settings.email_user or not settings.email_password:
-            raise HTTPException(
-                status_code=500, 
-                detail="Email not configured - missing EMAIL_USER or EMAIL_PASSWORD in .env file"
-            )
-        
-        # Send email using email service
-        success = email_service.send_closeout_email(
-            closeout_data=request.summary.dict(),
-            transcription=request.transcription,
-            technician_name=request.technician_name
+        logger.info("Sending closeout report email")
+        # Log received summary for debugging
+        try:
+            # request.summary is a Pydantic model; convert to dict for clearer logs
+            summary_dict = request.summary.dict() if hasattr(request.summary, 'dict') else dict(request.summary)
+        except Exception:
+            summary_dict = getattr(request.summary, '__dict__', str(request.summary))
+
+        logger.info(f"📥 Received summary.work_order (raw): {summary_dict.get('work_order') if isinstance(summary_dict, dict) else getattr(request.summary, 'work_order', None)}")
+        logger.info(f"📥 Received summary payload: {summary_dict}")
+
+        # Send email with summary and transcription
+        result = email_service.send_closeout_email(
+            request.summary,
+            request.transcription,
+            None,
+            request.technician_email,
         )
         
-        if success:
+        if result.get("success", False):
             logger.info("Email sent successfully")
             return EmailResponse(
                 success=True,
-                message="Closeout report sent successfully",
-                recipients=email_service.recipients
+                message="Email sent successfully",
+                recipients=result.get("recipients", [])
             )
         else:
             raise HTTPException(status_code=500, detail="Failed to send email - check email configuration")
@@ -365,19 +405,16 @@ async def test_email_configuration():
             "message": f"Email test failed: {str(e)}"
         }
 
-# Add middleware to handle ngrok browser warnings
-@app.middleware("http")
-async def add_ngrok_headers(request, call_next):
-    """Add headers to handle ngrok browser warnings and mobile app requests"""
-    response = await call_next(request)
-    
-    # Add headers for ngrok compatibility
-    response.headers["ngrok-skip-browser-warning"] = "true"
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "*"
-    
-    return response
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler for unhandled errors"""
+    logger.error(f"Unhandled exception: {exc}")
+    return Response(
+        content='{"detail": "Internal server error"}',
+        status_code=500,
+        media_type="application/json"
+    )
 
 # Handle preflight requests for CORS
 @app.options("/{path:path}")
@@ -387,15 +424,18 @@ async def options_handler(path: str):
         status_code=200,
         headers={
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, ngrok-skip-browser-warning",
         }
     )
 
 if __name__ == "__main__":
     import uvicorn
     print("🚀 Starting Voice-to-Report API Server...")
-    print("🔧 Voice Agent Service: ENABLED")
+    print("🔒 CORS: Secure configuration with development flexibility")
+    print("🌐 Origins: Ngrok, localhost, and local network support enabled")
+    print("📱 Mobile: Expo tunnel and local IP connectivity supported")
+    print("🔧 Voice Agent Service: ENABLED" if voice_agent_service else "🔧 Voice Agent Service: DISABLED")
     print("📧 Email Service: ENABLED" if email_service else "📧 Email Service: NEEDS CONFIGURATION")
     print("🌐 Binding to all network interfaces (0.0.0.0:8000)")
     print("📍 Mobile app and ngrok tunnel support enabled")
