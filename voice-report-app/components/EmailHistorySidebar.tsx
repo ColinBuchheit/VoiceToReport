@@ -13,6 +13,8 @@ import {
   Dimensions,
   StatusBar,
   PanResponder,
+  Easing,
+  Platform,
 } from 'react-native';
 import { EmailHistoryItem } from '../services/emailHistoryService';
 // import emailHistoryService if it is the default export
@@ -40,6 +42,9 @@ export default function EmailHistorySidebar({
   const [recentlyDeleted, setRecentlyDeleted] = useState<{ item: EmailHistoryItem; index: number } | null>(null);
   const slideAnim = useRef(new Animated.Value(SCREEN_WIDTH)).current;
   const animationMapRef = useRef<Record<string, { scale: Animated.Value; opacity: Animated.Value; swipeX: Animated.Value }>>({});
+  // Per-email haptic trigger tracking & undo timeout ref
+  const hapticTriggeredMapRef = useRef<Record<string, boolean>>({});
+  const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (visible) {
@@ -110,30 +115,34 @@ export default function EmailHistorySidebar({
     });
   };
 
-  // Direct deletion helper (for swipe)
+  // Direct deletion helper (for swipe) with timeout management
   const deleteDirect = async (email: EmailHistoryItem) => {
+    if (undoTimeoutRef.current) {
+      clearTimeout(undoTimeoutRef.current);
+      undoTimeoutRef.current = null;
+    }
     const index = history.findIndex(h => h.id === email.id);
     delete animationMapRef.current[email.id];
+    delete hapticTriggeredMapRef.current[email.id];
     await emailHistoryService.deleteEmail(email.id);
     setRecentlyDeleted({ item: email, index: index === -1 ? 0 : index });
     await loadHistory();
-    setTimeout(() => setRecentlyDeleted(null), 6000);
+    undoTimeoutRef.current = setTimeout(() => {
+      setRecentlyDeleted(null);
+      undoTimeoutRef.current = null;
+    }, 6000);
   };
 
   const handleUndo = async () => {
     if (!recentlyDeleted) return;
+    if (undoTimeoutRef.current) {
+      clearTimeout(undoTimeoutRef.current);
+      undoTimeoutRef.current = null;
+    }
     const restoredId = recentlyDeleted.item.id;
-
-    // Clear the deleted item snackbar state first so UI updates immediately
     setRecentlyDeleted(null);
-
-    // Restore at original index
     await emailHistoryService.restoreEmail(recentlyDeleted.item, recentlyDeleted.index);
-
-    // Reload full history (fresh reference + potential reordering)
     await loadHistory();
-
-    // After the list has updated on the next frame, ensure animation values exist & are reset
     setTimeout(() => {
       if (!animationMapRef.current[restoredId]) {
         animationMapRef.current[restoredId] = {
@@ -149,24 +158,29 @@ export default function EmailHistorySidebar({
     }, 50);
   };
 
+  // Cleanup undo timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (undoTimeoutRef.current) {
+        clearTimeout(undoTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Absolute date-time formatting (e.g., "Jan 15, 2025 at 2:30 PM")
   const formatDateTime = (isoString: string) => {
     const date = new Date(isoString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-
-    return date.toLocaleDateString('en-US', {
+    const dateStr = date.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
-      year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined,
+      year: 'numeric',
     });
+    const timeStr = date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+    return `${dateStr} at ${timeStr}`;
   };
 
   const getInitials = (text: string) => {
@@ -226,46 +240,106 @@ export default function EmailHistorySidebar({
                   }
                   const { scale: scaleAnim, opacity: opacityAnim, swipeX } = animationMapRef.current[email.id];
 
-                  const SWIPE_THRESHOLD = 120;
+                  const SWIPE_THRESHOLD = 50; // Further reduced for easier deletion
+                  const MIN_SWIPE_START = 8; // More forgiving swipe start
+
+                  if (hapticTriggeredMapRef.current[email.id] === undefined) {
+                    hapticTriggeredMapRef.current[email.id] = false;
+                  }
+
+                  const deleteProgress = swipeX.interpolate({
+                    inputRange: [0, SWIPE_THRESHOLD, SCREEN_WIDTH * 0.5],
+                    outputRange: [0, 0.7, 1],
+                    extrapolate: 'clamp',
+                  });
+                  const deleteIconScale = swipeX.interpolate({
+                    inputRange: [0, SWIPE_THRESHOLD * 0.5, SWIPE_THRESHOLD],
+                    outputRange: [0, 0.8, 1],
+                    extrapolate: 'clamp',
+                  });
+                  const deleteIconOpacity = swipeX.interpolate({
+                    inputRange: [0, SWIPE_THRESHOLD * 0.6, SWIPE_THRESHOLD],
+                    outputRange: [0, 0.5, 1],
+                    extrapolate: 'clamp',
+                  });
+
                   const panResponder = PanResponder.create({
+                    onStartShouldSetPanResponder: () => false,
                     onMoveShouldSetPanResponder: (_evt, gesture) => {
                       const { dx, dy } = gesture;
-                      return Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy);
+                      const isHorizontal = Math.abs(dx) > Math.abs(dy) * 1.2; // more forgiving ratio
+                      const exceedsMin = Math.abs(dx) > 3; // lower activation distance
+                      return isHorizontal && exceedsMin;
+                    },
+                    onPanResponderTerminationRequest: () => false,
+                    onPanResponderGrant: () => {
+                      hapticTriggeredMapRef.current[email.id] = false;
                     },
                     onPanResponderMove: (_evt, gesture) => {
                       if (gesture.dx > 0) {
-                        swipeX.setValue(Math.min(gesture.dx, SCREEN_WIDTH * 0.6));
+                        const clampedValue = Math.min(gesture.dx, SCREEN_WIDTH * 0.5);
+                        swipeX.setValue(clampedValue);
+                        if (gesture.dx >= SWIPE_THRESHOLD && !hapticTriggeredMapRef.current[email.id]) {
+                          hapticTriggeredMapRef.current[email.id] = true;
+                          try {
+                            if (Platform.OS === 'ios' || Platform.OS === 'android') {
+                              const Haptics = require('react-native').Vibration;
+                              Haptics.vibrate(15);
+                            }
+                          } catch {}
+                        }
                       }
                     },
                     onPanResponderRelease: (_evt, gesture) => {
-                      if (gesture.dx > SWIPE_THRESHOLD) {
+                      hapticTriggeredMapRef.current[email.id] = false;
+                      const fastSwipe = Math.abs(gesture.vx) > 0.5;
+                      const exceededThreshold = gesture.dx > SWIPE_THRESHOLD;
+                      const exceededMinimum = gesture.dx > MIN_SWIPE_START;
+                      if ((exceededThreshold && exceededMinimum) || (fastSwipe && gesture.dx > 30)) {
                         Animated.timing(swipeX, {
                           toValue: SCREEN_WIDTH + 40,
-                          duration: 200,
+                          duration: 250,
+                          easing: Easing.out(Easing.cubic),
                           useNativeDriver: true,
                         }).start(() => deleteDirect(email));
                       } else {
                         Animated.spring(swipeX, {
                           toValue: 0,
                           useNativeDriver: true,
-                          bounciness: 8,
+                          tension: 180,
+                          friction: 22,
+                          velocity: -gesture.vx * 0.5,
                         }).start();
                       }
                     },
                     onPanResponderTerminate: () => {
+                      hapticTriggeredMapRef.current[email.id] = false;
                       Animated.spring(swipeX, {
                         toValue: 0,
                         useNativeDriver: true,
-                        bounciness: 8,
+                        tension: 180,
+                        friction: 22,
                       }).start();
                     },
                   });
 
                   return (
                     <View key={email.id} style={styles.swipeContainer}>
-                      <View style={styles.swipeUnderlay}>
-                        <Text style={styles.swipeUnderlayText}>Deleting…</Text>
-                      </View>
+                      <Animated.View
+                        style={[styles.swipeUnderlay, { opacity: deleteProgress }]}
+                      >
+                        <Animated.View
+                          style={[
+                            styles.deleteIconContainer,
+                            { transform: [{ scale: deleteIconScale }], opacity: deleteIconOpacity },
+                          ]}
+                        >
+                          <Text style={styles.deleteIcon}>✕</Text>
+                        </Animated.View>
+                        <Animated.View style={{ opacity: deleteProgress }}>
+                          <Text style={styles.swipeUnderlayText}>Release to Delete</Text>
+                        </Animated.View>
+                      </Animated.View>
                       <Animated.View
                         {...panResponder.panHandlers}
                         style={[
@@ -467,20 +541,45 @@ const styles = StyleSheet.create({
     borderColor: '#EFEFEF',
     marginBottom: 14,
   },
-  swipeContainer: { position: 'relative' },
+  swipeContainer: {
+    position: 'relative',
+    marginBottom: 14,
+  },
   swipeUnderlay: {
     position: 'absolute',
     top: 0,
-    bottom: 0,
+    bottom: 14, // Match spacing under card
     left: 0,
     right: 0,
     backgroundColor: '#DC2626',
     borderRadius: 14,
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-    paddingLeft: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 20,
+    shadowColor: '#DC2626',
+    shadowOffset: { width: -2, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
-  swipeUnderlayText: { color: '#FFF', fontSize: 16, fontWeight: '700', letterSpacing: 0.5 },
+  deleteIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  deleteIcon: { fontSize: 22 },
+  swipeUnderlayText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    textShadowColor: 'rgba(0,0,0,0.2)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
 
   // Card Header
   cardHeader: {
