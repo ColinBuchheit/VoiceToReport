@@ -149,6 +149,8 @@ export interface CloseoutSummary {
   
   // Additional context
   work_order?: string;
+  location?: string;
+  technician_name?: string;
   
   // Legacy fields for backward compatibility
   taskDescription?: string;

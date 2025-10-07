@@ -37,7 +37,9 @@ class CloseoutSummary(BaseModel):
     
     # Additional fields for context
     work_order: Optional[str] = "Not mentioned"
-    # (Removed) location, datetime, technician_name - handled elsewhere if needed
+    # Newly reintroduced fields for richer context
+    location: Optional[str] = "Not mentioned"
+    technician_name: Optional[str] = "Not mentioned"
 
 class SummaryResponse(BaseModel):
     summary: CloseoutSummary

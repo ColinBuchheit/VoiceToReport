@@ -137,7 +137,8 @@ export default function EmailHistorySidebar({ visible, onClose, onEmailSelect }:
               <View style={styles.emailList}>
                 {history.map((email, index) => {
                   const timestamp = formatDateTime(email.timestamp);
-                  const initials = getInitials(email.technicianName || 'Unknown');
+                  const location = (email.summary && (email.summary.location || email.summary.work_order)) || 'Unknown Location';
+                  const initials = getInitials(location);
                   
                   return (
                     <TouchableOpacity
@@ -160,7 +161,7 @@ export default function EmailHistorySidebar({ visible, onClose, onEmailSelect }:
                           </View>
                           <View style={styles.cardHeaderText}>
                             <Text style={styles.techName} numberOfLines={1}>
-                              {email.technicianName || 'Unknown Technician'}
+                              {location}
                             </Text>
                             <Text style={styles.timestamp}>{timestamp}</Text>
                           </View>

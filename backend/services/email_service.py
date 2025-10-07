@@ -80,6 +80,7 @@ class EmailService:
 
         logger.info(f"📋 Work Order for email: '{work_order}'")
 
+        location_name = self._safe_get(closeout_data, 'location', None)
         tech_name = technician_name or self._safe_get(closeout_data, 'technician_name', None)
         logo_src = logo_src_override or self._get_logo_base64()
 
@@ -259,10 +260,9 @@ class EmailService:
                                                     <tr>
                                                         <td>
                                                             <div class="wo-badge" style="display: inline-block; background-color: #FF6B35; color: #FFFFFF; padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight:700; letter-spacing:0.01em;">
-                                                                WO {work_order}
+                                                                {location_name if location_name and location_name != 'Not specified' else 'Location'} · WO {work_order}
                                                             </div>
                                                         </td>
-                                                        {"<td style='padding-left: 10px;'><div class='tech-badge' style='display: inline-block; background-color: #F7F7F8; color: #374151; padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight:600; border: 1px solid #ECEFF1;'>" + tech_name + "</div></td>" if tech_name and tech_name != 'Not specified' else ""}
                                                     </tr>
                                                 </table>
                                             </td>
@@ -333,11 +333,9 @@ class EmailService:
             
             # Build subject line
             timestamp = datetime.now().strftime("%Y-%m-%d")
-            tech_name_for_subject = technician_name or self._safe_get(closeout_data, 'technician_name', None)
-
-            subject = (f"Field Service Closeout - WO: {work_order} - {tech_name_for_subject} - {timestamp}" 
-                       if tech_name_for_subject and tech_name_for_subject != 'Not specified' 
-                       else f"Field Service Closeout - WO: {work_order} - {timestamp}")
+            location_name = self._safe_get(closeout_data, 'location', None)
+            subject = (f"{location_name} - WO {work_order}" if location_name and location_name != 'Not specified' 
+                       else f"WO {work_order} - {timestamp}")
 
             logger.info(f"📧 Email Subject: {subject}")
 

@@ -98,6 +98,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
       
       // Additional context
       work_order: summary?.work_order || '',
+      location: summary?.location || '',
+      technician_name: summary?.technician_name || '',
       
       // Legacy fields for backward compatibility
       taskDescription: summary?.taskDescription || summary?.work_completed || '',
@@ -152,10 +154,9 @@ export default function SummaryScreen({ navigation, route }: Props) {
           await emailHistoryService.addEmail({
             recipients: emailResponse.recipients || [],
             workOrder: editableSummary.work_order,
-            technicianName: editableSummary.released_by || '', // reuse released_by as a proxy for technician name if not separately captured
+            technicianName: editableSummary.technician_name || editableSummary.released_by || '',
             transcription: editableTranscription,
             summary: {
-              // Ensure at least work_completed present plus spread all editable fields for later display
               work_completed: editableSummary.work_completed,
               ...editableSummary,
             },
@@ -211,6 +212,22 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('work_order', text)}
             isEditing={true}
             placeholder="Enter the work order number..."
+          />
+
+          <EditableField
+            label="Location"
+            value={editableSummary.location || ''}
+            onChangeText={(text) => updateSummaryField('location', text)}
+            isEditing={true}
+            placeholder="Enter the location / site name..."
+          />
+
+          <EditableField
+            label="Technician Name"
+            value={editableSummary.technician_name || ''}
+            onChangeText={(text) => updateSummaryField('technician_name', text)}
+            isEditing={true}
+            placeholder="Enter your name..."
           />
 
           <EditableField

@@ -41,6 +41,8 @@ export interface CloseoutSummary {
   
   // Additional fields
   work_order?: string;
+  location?: string;
+  technician_name?: string;
   
 }
 
