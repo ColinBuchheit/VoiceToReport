@@ -87,6 +87,29 @@ class EmailHistoryService {
     return [...this.cache];
   }
 
+  async deleteEmail(id: string): Promise<boolean> {
+    await this.ensureLoaded();
+    const originalLength = this.cache.length;
+    this.cache = this.cache.filter(item => item.id !== id);
+    if (this.cache.length !== originalLength) {
+      await this.persist();
+      return true;
+    }
+    return false;
+  }
+
+  async restoreEmail(item: EmailHistoryItem, index?: number): Promise<void> {
+    await this.ensureLoaded();
+    // Avoid duplicate IDs
+    if (this.cache.find(e => e.id === item.id)) return;
+    if (index !== undefined && index >= 0 && index <= this.cache.length) {
+      this.cache.splice(index, 0, item);
+    } else {
+      this.cache.unshift(item);
+    }
+    await this.persist();
+  }
+
   async clear() {
     this.cache = [];
     this.loaded = true;

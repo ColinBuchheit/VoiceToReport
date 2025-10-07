@@ -1,5 +1,5 @@
 // voice-report-app/components/EmailHistorySidebar.tsx
-import React, { useState, useEffect, JSX } from 'react';
+import React, { useState, useEffect, useRef, JSX } from 'react';
 import {
   View,
   Text,
@@ -25,6 +25,13 @@ interface Props {
 export default function EmailHistorySidebar({ visible, onClose, onEmailSelect }: Props): JSX.Element {
   const [slideAnim] = useState(new Animated.Value(SCREEN_WIDTH));
   const [history, setHistory] = useState<EmailHistoryItem[]>([]);
+  const [recentlyDeleted, setRecentlyDeleted] = useState<{
+    item: EmailHistoryItem;
+    index: number;
+  } | null>(null);
+  const undoTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Store per-item animations without calling hooks inside lists
+  const animationMapRef = useRef<Record<string, { scale: Animated.Value; opacity: Animated.Value }>>({});
 
   useEffect(() => {
     if (visible) {
@@ -47,6 +54,37 @@ export default function EmailHistorySidebar({ visible, onClose, onEmailSelect }:
   const loadHistory = async () => {
     const emails = await emailHistoryService.getEmailHistory();
     setHistory(emails);
+  };
+
+  const handleDelete = async (id: string) => {
+    // Find index & item
+    setHistory(prev => {
+      const idx = prev.findIndex(e => e.id === id);
+      if (idx === -1) return prev;
+      const item = prev[idx];
+      setRecentlyDeleted({ item, index: idx });
+      // Start undo timer
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = setTimeout(() => {
+        setRecentlyDeleted(null);
+      }, 6000);
+      // Remove with animation by marking an animation prop separately
+      return prev.filter(e => e.id !== id);
+    });
+    const success = await emailHistoryService.deleteEmail(id);
+    if (!success) loadHistory();
+  };
+
+  const handleUndo = async () => {
+    if (!recentlyDeleted) return;
+    const { item, index } = recentlyDeleted;
+    setRecentlyDeleted(null);
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    await emailHistoryService.restoreEmail(item, index);
+    loadHistory();
   };
 
   const formatDateTime = (isoString: string) => {
@@ -139,19 +177,24 @@ export default function EmailHistorySidebar({ visible, onClose, onEmailSelect }:
                   const timestamp = formatDateTime(email.timestamp);
                   const location = (email.summary && (email.summary.location || email.summary.work_order)) || 'Unknown Location';
                   const initials = getInitials(location);
-                  
+
+                  // Get or create animation values for this item
+                  if (!animationMapRef.current[email.id]) {
+                    animationMapRef.current[email.id] = {
+                      scale: new Animated.Value(1),
+                      opacity: new Animated.Value(1),
+                    };
+                  }
+                  const { scale: scaleAnim, opacity: opacityAnim } = animationMapRef.current[email.id];
+
                   return (
-                    <TouchableOpacity
+                    <Animated.View
                       key={email.id}
                       style={[
                         styles.emailCard,
-                        index === 0 && styles.emailCardFirst
+                        index === 0 && styles.emailCardFirst,
+                        { transform: [{ scale: scaleAnim }], opacity: opacityAnim }
                       ]}
-                      onPress={() => {
-                        onEmailSelect(email);
-                        onClose();
-                      }}
-                      activeOpacity={0.7}
                     >
                       {/* Avatar and Header Row */}
                       <View style={styles.cardHeader}>
@@ -160,16 +203,41 @@ export default function EmailHistorySidebar({ visible, onClose, onEmailSelect }:
                             <Text style={styles.avatarText}>{initials}</Text>
                           </View>
                           <View style={styles.cardHeaderText}>
-                            <Text style={styles.techName} numberOfLines={1}>
+                            <Text style={styles.techName}>
                               {location}
                             </Text>
                             <Text style={styles.timestamp}>{timestamp}</Text>
                           </View>
                         </View>
-                        <View style={styles.workOrderBadge}>
-                          <Text style={styles.workOrderText}>
-                            {email.workOrder || 'N/A'}
-                          </Text>
+                        <View style={styles.cardRightActions}>
+                          <View style={styles.workOrderBadge}>
+                            <Text style={styles.workOrderText}>
+                              {email.workOrder ? `WO ${email.workOrder}` : 'WO N/A'}
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => {
+                              // Animate pop (scale up then shrink & fade)
+                              Animated.sequence([
+                                Animated.parallel([
+                                  Animated.timing(scaleAnim, { toValue: 1.04, duration: 90, useNativeDriver: true }),
+                                  Animated.timing(opacityAnim, { toValue: 0.85, duration: 90, useNativeDriver: true }),
+                                ]),
+                                Animated.parallel([
+                                  Animated.timing(scaleAnim, { toValue: 0.65, duration: 140, useNativeDriver: true }),
+                                  Animated.timing(opacityAnim, { toValue: 0, duration: 140, useNativeDriver: true }),
+                                ])
+                              ]).start(() => {
+                                // Cleanup animation map entry to prevent memory growth
+                                delete animationMapRef.current[email.id];
+                                handleDelete(email.id);
+                              });
+                            }}
+                            style={styles.deleteButton}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Text style={styles.deleteButtonText}>✕</Text>
+                          </TouchableOpacity>
                         </View>
                       </View>
 
@@ -193,12 +261,54 @@ export default function EmailHistorySidebar({ visible, onClose, onEmailSelect }:
                         <Text style={styles.actionText}>Tap to view details</Text>
                         <Text style={styles.actionArrow}>→</Text>
                       </View>
-                    </TouchableOpacity>
+                      {/* Make remainder of card (excluding header actions) tappable */}
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => {
+                          onEmailSelect(email);
+                          onClose();
+                        }}
+                      >
+                        {/* Recipients */}
+                        <View style={styles.recipientsRow}>
+                          <Text style={styles.recipientsLabel}>To: </Text>
+                          <Text style={styles.recipientsText}>
+                            {email.recipients.join(', ')}
+                          </Text>
+                        </View>
+
+                        {/* Work Preview */}
+                        {email.summary.work_completed && (
+                          <Text style={styles.previewText}>
+                            {email.summary.work_completed}
+                          </Text>
+                        )}
+
+                        {/* Action Indicator */}
+                        <View style={styles.actionRow}>
+                          <Text style={styles.actionText}>Tap to view details</Text>
+                          <Text style={styles.actionArrow}>→</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </Animated.View>
                   );
                 })}
               </View>
             )}
           </ScrollView>
+          {recentlyDeleted && (
+            <View style={styles.undoBar}>
+              <TouchableOpacity onPress={handleUndo} style={styles.undoLeft}>
+                <Text style={styles.undoArrow}>↩</Text>
+              </TouchableOpacity>
+              <Text style={styles.undoText} numberOfLines={1}>
+                Email removed. Tap to restore.
+              </Text>
+              <TouchableOpacity onPress={() => setRecentlyDeleted(null)} style={styles.undoDismiss}>
+                <Text style={styles.undoDismissText}>Dismiss</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </Animated.View>
       </View>
     </Modal>
@@ -346,6 +456,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#F3F4F6',
     marginBottom: 16,
+    overflow: 'hidden',
+    position: 'relative'
   },
   emailCardFirst: {
     borderLeftWidth: 4,
@@ -401,10 +513,75 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FEE2E2',
   },
+  cardRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   workOrderText: {
     fontSize: 13,
     fontWeight: '700',
     color: '#DC2626',
+  },
+  deleteButton: {
+    marginLeft: 8,
+    backgroundColor: '#FEE2E2',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  deleteButtonText: {
+    color: '#DC2626',
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: -1,
+  },
+  undoBar: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1F2937',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  undoArrow: {
+    fontSize: 20,
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  undoLeft: {
+    marginRight: 14,
+  },
+  undoText: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  undoDismiss: {
+    marginLeft: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#374151',
+  },
+  undoDismissText: {
+    color: '#F3F4F6',
+    fontSize: 12,
+    fontWeight: '600'
   },
   
   // Recipients Row
