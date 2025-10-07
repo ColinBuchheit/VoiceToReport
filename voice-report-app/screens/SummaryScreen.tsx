@@ -403,6 +403,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
         position="bottom-right"
         showDebugInfo={false}
       />
+
     </View>
   );
 }

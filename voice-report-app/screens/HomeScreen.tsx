@@ -4,13 +4,13 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   Alert,
   Image,
   ScrollView,
   TouchableOpacity,
   Platform,
 } from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
@@ -50,7 +50,7 @@ let persistedState: {
   shouldReset: false, // Flag to trigger complete reset
 };
 
-export default function HomeScreen({ navigation }: Props) {
+function HomeScreenInner({ navigation }: Props) {
   const [isProcessing, setIsProcessing] = useState(false);
   // Initialize from persisted state
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>(persistedState.checkedItems);
@@ -316,10 +316,11 @@ export default function HomeScreen({ navigation }: Props) {
     }));
   };
 
+  const insets = useSafeAreaInsets();
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 8) }]}>    
       {/* Fixed Header */}
-      <View style={styles.header}>
+  <View style={[styles.header, { paddingTop: (Platform.OS === 'ios' ? 10 : 20) + insets.top * 0.2 }]}> 
         <Image 
           source={require('../assets/bears&t.png')} 
           style={styles.logo}
@@ -454,7 +455,15 @@ export default function HomeScreen({ navigation }: Props) {
         onClose={() => setShowHistorySidebar(false)}
         onEmailSelect={handleEmailSelect}
       />
-    </SafeAreaView>
+    </View>
+  );
+}
+
+export default function HomeScreen(props: Props) {
+  return (
+    <SafeAreaProvider>
+      <HomeScreenInner {...props} />
+    </SafeAreaProvider>
   );
 }
 
