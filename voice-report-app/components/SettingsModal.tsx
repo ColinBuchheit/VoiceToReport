@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, Modal, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, TextInput, Alert } from 'react-native';
+import { useFontScale } from '../context/FontScaleContext';
 import userProfileService from '../services/userProfileService';
 
 interface SettingsModalProps {
@@ -14,6 +15,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const { fontScale, setFontScale, scaled } = useFontScale();
+  // Dynamic slider resolution with graceful fallback if dependency missing
+  let SliderComp: any = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    SliderComp = require('@react-native-community/slider').default;
+  } catch {}
 
   useEffect(() => {
     let mounted = true;
@@ -103,7 +111,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
         />
         <View style={styles.settingsPanel}>
           <View style={styles.settingsHeader}>
-            <Text style={styles.settingsTitle}>Settings</Text>
+            <Text style={[styles.settingsTitle, { fontSize: scaled(24) }]}>Settings</Text>
             <TouchableOpacity onPress={onClose} style={styles.settingsCloseButton}>
               <Text style={styles.settingsCloseText}>✕</Text>
             </TouchableOpacity>
@@ -120,38 +128,71 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
               showsVerticalScrollIndicator={false}
             >
               <View style={styles.settingsSection}>
-                <Text style={styles.settingsSectionTitle}>Technician Profile</Text>
+                <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13) }]}>Technician Profile</Text>
                 <View style={styles.settingsItemNoBorder}>
-                  <Text style={styles.settingsItemLabel}>First Name</Text>
+                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16) }]}>First Name</Text>
                 </View>
                 <View style={styles.inlineInputWrapper}>
-                  <TextInput value={firstName} onChangeText={setFirstName} style={styles.inlineInput} placeholder="First name" />
+                  <TextInput value={firstName} onChangeText={setFirstName} style={[styles.inlineInput, { fontSize: scaled(16) }]} placeholder="First name" />
                 </View>
                 <View style={styles.settingsItemNoBorder}>
-                  <Text style={styles.settingsItemLabel}>Last Name</Text>
+                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16) }]}>Last Name</Text>
                 </View>
                 <View style={styles.inlineInputWrapper}>
-                  <TextInput value={lastName} onChangeText={setLastName} style={styles.inlineInput} placeholder="Last name" />
+                  <TextInput value={lastName} onChangeText={setLastName} style={[styles.inlineInput, { fontSize: scaled(16) }]} placeholder="Last name" />
                 </View>
                 <View style={styles.settingsItemNoBorder}>
-                  <Text style={styles.settingsItemLabel}>Work Email</Text>
+                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16) }]}>Work Email</Text>
                 </View>
                 <View style={styles.inlineInputWrapper}>
-                  <TextInput value={workEmail} onChangeText={setWorkEmail} style={styles.inlineInput} placeholder="name@company.com" autoCapitalize="none" keyboardType="email-address" />
+                  <TextInput value={workEmail} onChangeText={setWorkEmail} style={[styles.inlineInput, { fontSize: scaled(16) }]} placeholder="name@company.com" autoCapitalize="none" keyboardType="email-address" />
                 </View>
-                {error ? <Text style={styles.settingsError}>{error}</Text> : null}
+                {error ? <Text style={[styles.settingsError, { fontSize: scaled(13) }]}>{error}</Text> : null}
                 <TouchableOpacity style={[styles.profileSaveButton, saving && { opacity:0.6 }]} onPress={handleSave} disabled={saving}>
-                  <Text style={styles.profileSaveButtonText}>{saving ? 'Saving...' : 'Save Profile'}</Text>
+                  <Text style={[styles.profileSaveButtonText, { fontSize: scaled(15) }]}>{saving ? 'Saving...' : 'Save Profile'}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.clearProfileButton} onPress={handleClear}>
-                  <Text style={styles.clearProfileButtonText}>Clear Profile</Text>
+                  <Text style={[styles.clearProfileButtonText, { fontSize: scaled(14) }]}>Clear Profile</Text>
                 </TouchableOpacity>
               </View>
               <View style={styles.settingsSection}>
-                <Text style={styles.settingsSectionTitle}>About</Text>
+                <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13) }]}>Accessibility</Text>
+                <View style={styles.settingsItemNoBorder}>
+                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), flex: 1 }]}>Font Size</Text>
+                  <Text style={{ fontSize: scaled(14), color: '#6B7280', width: 50, textAlign: 'right' }}>{(fontScale).toFixed(2)}x</Text>
+                </View>
+                {SliderComp ? (
+                  <SliderComp
+                    style={{ width: '100%', height: 40 }}
+                    minimumValue={0.8}
+                    maximumValue={1.6}
+                    step={0.05}
+                    minimumTrackTintColor="#FF6B35"
+                    maximumTrackTintColor="#D1D5DB"
+                    thumbTintColor="#FF6B35"
+                    value={fontScale}
+                    onValueChange={setFontScale}
+                  />
+                ) : (
+                  <View style={styles.fallbackStepperRow}>
+                    <TouchableOpacity accessibilityLabel="Decrease font size" style={styles.stepperButton} onPress={() => setFontScale(fontScale - 0.05)}>
+                      <Text style={styles.stepperButtonText}>−</Text>
+                    </TouchableOpacity>
+                    <View style={styles.stepperValueBox}>
+                      <Text style={[styles.stepperValueText, { fontSize: scaled(14) }]}>{fontScale.toFixed(2)}x</Text>
+                    </View>
+                    <TouchableOpacity accessibilityLabel="Increase font size" style={styles.stepperButton} onPress={() => setFontScale(fontScale + 0.05)}>
+                      <Text style={styles.stepperButtonText}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                <Text style={{ fontSize: scaled(12), color: '#6B7280', marginTop: 4 }}>Adjust overall text size across the app.</Text>
+              </View>
+              <View style={styles.settingsSection}>
+                <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13) }]}>About</Text>
                 <View style={styles.settingsItem}>
-                  <Text style={styles.settingsItemLabel}>Version</Text>
-                  <Text style={styles.settingsItemValue}>1.0.0</Text>
+                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16) }]}>Version</Text>
+                  <Text style={[styles.settingsItemValue, { fontSize: scaled(16) }]}>1.0.0</Text>
                 </View>
               </View>
             </ScrollView>
@@ -235,4 +276,34 @@ const styles = StyleSheet.create({
   profileSaveButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
   clearProfileButton: { backgroundColor: '#F3F4F6', paddingVertical: 12, borderRadius: 10, alignItems: 'center', marginTop: 10, borderWidth: 1, borderColor: '#E5E7EB' },
   clearProfileButtonText: { color: '#DC2626', fontSize: 14, fontWeight: '600' },
+  // Fallback slider (stepper) styles
+  fallbackStepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  stepperButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#FFE4D7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FFC8B0',
+    marginHorizontal: 12,
+  },
+  stepperButtonText: { fontSize: 24, fontWeight: '600', color: '#FF6B35', marginTop: -4 },
+  stepperValueBox: {
+    minWidth: 70,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+  },
+  stepperValueText: { fontWeight: '600', color: '#374151' },
 });

@@ -18,6 +18,7 @@ import AIAgent from '../components/AIAgent';
 import EmailSuccessPopup from '../components/EmailSuccessPopup';
 import { useSummaryScreenContext } from '../hooks/useScreenContext';
 import { CloseoutSummary } from '../types/aiAgent';
+import { useFontScale } from '../context/FontScaleContext';
 import userProfileService from '../services/userProfileService';
 
 type SummaryScreenNavigationProp = NativeStackNavigationProp<
@@ -40,19 +41,20 @@ interface EditableFieldProps {
   placeholder?: string;
 }
 
-const EditableField: React.FC<EditableFieldProps> = ({
+const EditableField: React.FC<EditableFieldProps & { scaled:(n:number)=>number }> = ({
   label,
   value,
   onChangeText,
   isEditing,
   multiline = false,
   placeholder = '',
+  scaled,
 }) => (
   <View style={styles.fieldContainer}>
-    <Text style={styles.fieldLabel}>{label}</Text>
+    {!!label && <Text style={[styles.fieldLabel, { fontSize: scaled(14) }]}>{label}</Text>}
     {isEditing ? (
       <TextInput
-        style={[styles.fieldInput, multiline && styles.multilineInput]}
+        style={[styles.fieldInput, { fontSize: scaled(16) }, multiline && styles.multilineInput]}
         value={value}
         onChangeText={onChangeText}
         multiline={multiline}
@@ -60,7 +62,7 @@ const EditableField: React.FC<EditableFieldProps> = ({
         placeholder={placeholder}
       />
     ) : (
-      <Text style={styles.fieldValue}>
+      <Text style={[styles.fieldValue, { fontSize: scaled(16) }]}>
         {value || 'Not specified'}
       </Text>
     )}
@@ -68,6 +70,7 @@ const EditableField: React.FC<EditableFieldProps> = ({
 );
 
 export default function SummaryScreen({ navigation, route }: Props) {
+  const { scaled } = useFontScale();
   // Initialize CloseoutSummary with proper field mapping
   const initializeCloseoutSummary = (summary: CloseoutSummary): CloseoutSummary => {
     console.log('🔧 Initializing CloseoutSummary from:', summary);
@@ -228,7 +231,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
       <ScrollView style={styles.scrollContainer}>
         {/* CLOSEOUT NOTES SECTION */}
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>CLOSEOUT NOTES</Text>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18) }]}>CLOSEOUT NOTES</Text>
           
           <EditableField
             label="Who did you meet with on-site?"
@@ -236,6 +239,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('onsite_contact', text)}
             isEditing={true}
             placeholder="Name and role of on-site contact person..."
+            scaled={scaled}
           />
 
           <EditableField
@@ -244,6 +248,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('work_order', text)}
             isEditing={true}
             placeholder="Enter the work order number..."
+            scaled={scaled}
           />
 
           <EditableField
@@ -252,6 +257,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('location', text)}
             isEditing={true}
             placeholder="Enter the location / site name..."
+            scaled={scaled}
           />
 
           <EditableField
@@ -260,6 +266,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('technician_name', text)}
             isEditing={true}
             placeholder="Enter your name..."
+            scaled={scaled}
           />
 
           <EditableField
@@ -268,6 +275,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('support_contact', text)}
             isEditing={true}
             placeholder="Support team members or remote assistance..."
+            scaled={scaled}
           />
 
           <EditableField
@@ -277,6 +285,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             multiline
             placeholder="Describe all tasks and work that was completed..."
+            scaled={scaled}
           />
 
           <EditableField
@@ -286,6 +295,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             multiline
             placeholder="Any delays encountered and reasons..."
+            scaled={scaled}
           />
 
           <EditableField
@@ -295,6 +305,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             multiline
             placeholder="Describe debugging or problem-solving steps..."
+            scaled={scaled}
           />
 
           <EditableField
@@ -304,6 +315,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             multiline
             placeholder="Describe the outcome and completion status..."
+            scaled={scaled}
           />
         </View>
 
@@ -311,7 +323,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
         {/* SIGN-OFF & TRACKING SECTION */}
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>SIGN-OFF & TRACKING</Text>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18) }]}>SIGN-OFF & TRACKING</Text>
           
           <EditableField
             label="Who released you?"
@@ -319,6 +331,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('released_by', text)}
             isEditing={true}
             placeholder="Name of person who signed off..."
+            scaled={scaled}
           />
 
           <EditableField
@@ -327,6 +340,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('release_code', text)}
             isEditing={true}
             placeholder="Enter release code if applicable..."
+            scaled={scaled}
           />
 
           <EditableField
@@ -335,12 +349,13 @@ export default function SummaryScreen({ navigation, route }: Props) {
             onChangeText={(text) => updateSummaryField('return_tracking', text)}
             isEditing={true}
             placeholder="Enter return tracking number..."
+            scaled={scaled}
           />
         </View>
 
         {/* EXPENSES & MATERIALS SECTION */}
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>EXPENSES & MATERIALS</Text>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18) }]}>EXPENSES & MATERIALS</Text>
           
           <EditableField
             label="Expenses"
@@ -349,6 +364,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             multiline
             placeholder="List any expenses incurred..."
+            scaled={scaled}
           />
 
           <EditableField
@@ -358,12 +374,13 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             multiline
             placeholder="List materials and parts used..."
+            scaled={scaled}
           />
         </View>
 
         {/* ADDITIONAL INFORMATION SECTION */}
         <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>ADDITIONAL INFORMATION</Text>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18) }]}>ADDITIONAL INFORMATION</Text>
           
           <EditableField
             label="Out of Scope Work"
@@ -372,6 +389,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             multiline
             placeholder="Describe any work outside the original scope..."
+            scaled={scaled}
           />
 
           <EditableField
@@ -381,13 +399,14 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             multiline
             placeholder="List photos taken and uploaded..."
+            scaled={scaled}
           />
         </View>
 
         {/* ORIGINAL TRANSCRIPTION SECTION */}
         <View style={styles.transcriptionSection}>
           <View style={styles.transcriptionCard}>
-            <Text style={styles.sectionTitle}>ORIGINAL TRANSCRIPTION</Text>
+            <Text style={[styles.sectionTitle, { fontSize: scaled(18) }]}>ORIGINAL TRANSCRIPTION</Text>
             <EditableField
               label=""
               value={editableTranscription}
@@ -395,6 +414,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
               isEditing={true}
               multiline
               placeholder="Original voice transcription..."
+              scaled={scaled}
             />
           </View>
         </View>
@@ -409,7 +429,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             {isSendingEmail ? (
               <ActivityIndicator color="white" size="small" />
             ) : (
-              <Text style={styles.emailButtonText}>Send Email Report</Text>
+              <Text style={[styles.emailButtonText, { fontSize: scaled(16) }]}>Send Email Report</Text>
             )}
           </TouchableOpacity>
         </View>

@@ -1,6 +1,7 @@
 // voice-report-app/screens/HomeScreen.tsx - COMPLETE VERSION WITH ALL FIXES
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, Alert, Image, ScrollView, TouchableOpacity, Platform } from 'react-native';
+import { useFontScale } from '../context/FontScaleContext';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
@@ -315,6 +316,9 @@ function HomeScreenInner({ navigation }: Props) {
   };
 
   const insets = useSafeAreaInsets();
+  const { scaled } = useFontScale();
+  // Space to ensure last checklist items (e.g., Photos) are not hidden behind bottom nav
+  const bottomNavOverlaySpace = 160 + (Platform.OS === 'ios' ? insets.bottom : 0);
 
   // SettingsModal extracted to separate component to prevent remounts on each render (which caused flicker during recording updates)
 
@@ -332,8 +336,8 @@ function HomeScreenInner({ navigation }: Props) {
       {/* Progress Summary */}
       <View style={styles.progressSummary}>
         <View style={styles.progressInfo}>
-          <Text style={styles.progressTitle}>Report Progress</Text>
-          <Text style={styles.progressDetails}>
+          <Text style={[styles.progressTitle, { fontSize: scaled(16) }]}>Report Progress</Text>
+          <Text style={[styles.progressDetails, { fontSize: scaled(13) }]}>
             {checkedRequiredCount}/{requiredItems.length} required • {checkedCount}/{totalItems} total
           </Text>
         </View>
@@ -349,7 +353,7 @@ function HomeScreenInner({ navigation }: Props) {
             style={styles.toggleButton}
             onPress={() => setShowChecklist(!showChecklist)}
           >
-            <Text style={styles.toggleText}>
+            <Text style={[styles.toggleText, { fontSize: scaled(14) }]}>
               {showChecklist ? 'Hide Checklist' : 'Show Checklist'}
             </Text>
           </TouchableOpacity>
@@ -360,7 +364,7 @@ function HomeScreenInner({ navigation }: Props) {
           <ScrollView 
             style={styles.checklistContainer}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.checklistContent}
+            contentContainerStyle={[styles.checklistContent, { paddingBottom: bottomNavOverlaySpace }]}
           >
             {criteriaCategories.map((category) => {
               const categoryChecked = category.items.filter(item => checkedItems[item.id]).length;
@@ -368,7 +372,7 @@ function HomeScreenInner({ navigation }: Props) {
               return (
                 <View key={category.title} style={styles.categorySection}>
                   <View style={styles.categoryHeader}>
-                    <Text style={styles.categoryTitle}>{category.title}</Text>
+                    <Text style={[styles.categoryTitle, { fontSize: scaled(16) }]}>{category.title}</Text>
                     <Text style={styles.categoryProgress}>
                       {categoryChecked}/{category.items.length}
                     </Text>
@@ -391,6 +395,7 @@ function HomeScreenInner({ navigation }: Props) {
                         <View style={styles.itemLabelRow}>
                           <Text style={[
                             styles.itemLabel,
+                            { fontSize: scaled(15) },
                             checkedItems[item.id] && styles.itemLabelChecked
                           ]}>
                             {item.label}
@@ -399,15 +404,13 @@ function HomeScreenInner({ navigation }: Props) {
                             <View style={styles.requiredDot} />
                           )}
                         </View>
-                        <Text style={styles.itemHint}>{item.hint}</Text>
+                        <Text style={[styles.itemHint, { fontSize: scaled(13), lineHeight: scaled(16) }]}>{item.hint}</Text>
                       </View>
                     </TouchableOpacity>
                   ))}
                 </View>
               );
             })}
-
-            <View style={styles.bottomPadding} />
           </ScrollView>
         ) : (
           /* Large Centered Record Button */
@@ -450,7 +453,7 @@ function HomeScreenInner({ navigation }: Props) {
                   color={showHistorySidebar ? '#FFFFFF' : '#FF6B35'}
                 />
               </View>
-              <Text style={[styles.navLabel, showHistorySidebar && styles.navLabelActive]}>History</Text>
+              <Text style={[styles.navLabel, { fontSize: scaled(12) }, showHistorySidebar && styles.navLabelActive]}>History</Text>
             </TouchableOpacity>
           </View>
 
@@ -489,7 +492,7 @@ function HomeScreenInner({ navigation }: Props) {
                   color={showSettings ? '#FFFFFF' : '#FF6B35'}
                 />
               </View>
-              <Text style={[styles.navLabel, showSettings && styles.navLabelActive]}>Settings</Text>
+              <Text style={[styles.navLabel, { fontSize: scaled(12) }, showSettings && styles.navLabelActive]}>Settings</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -513,7 +516,7 @@ function HomeScreenInner({ navigation }: Props) {
                   color={showHistorySidebar ? '#FFFFFF' : '#FF6B35'}
                 />
               </View>
-              <Text style={[styles.navLabelLarge, showHistorySidebar && styles.navLabelActive]}>History</Text>
+              <Text style={[styles.navLabelLarge, { fontSize: scaled(14) }, showHistorySidebar && styles.navLabelActive]}>History</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.simpleNavButton}
@@ -532,7 +535,7 @@ function HomeScreenInner({ navigation }: Props) {
                   color={showSettings ? '#FFFFFF' : '#FF6B35'}
                 />
               </View>
-              <Text style={[styles.navLabelLarge, showSettings && styles.navLabelActive]}>Settings</Text>
+              <Text style={[styles.navLabelLarge, { fontSize: scaled(14) }, showSettings && styles.navLabelActive]}>Settings</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -651,20 +654,24 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 60,
     paddingHorizontal: 40,
+    // Reserve space so large recorder doesn't look low due to bottom nav overlay
+    paddingBottom: 120,
+    // Slight top padding to visually balance status bubble offset
+    paddingTop: 10,
   },
   
   // Category Sections
   categorySection: {
-    marginBottom: 24,
+    // Reduced to tighten vertical density
+    marginBottom: 16,
   },
   categoryHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
-    paddingBottom: 8,
+    marginBottom: 8,
+    paddingBottom: 6,
     borderBottomWidth: 2,
     borderBottomColor: '#E5E7EB',
   },
@@ -687,7 +694,8 @@ const styles = StyleSheet.create({
   checklistItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingVertical: 12,
+    // Reduced vertical padding for denser list
+    paddingVertical: 8,
     paddingHorizontal: 4,
   },
   checklistItemChecked: {
@@ -716,7 +724,7 @@ const styles = StyleSheet.create({
   itemLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   itemLabel: {
     fontSize: 15,
@@ -738,12 +746,10 @@ const styles = StyleSheet.create({
   itemHint: {
     fontSize: 13,
     color: '#6B7280',
-    lineHeight: 18,
+    // Slightly tighter line height to conserve space while staying readable
+    lineHeight: 16,
   },
   
-  bottomPadding: {
-    height: 20,
-  },
   
   // Bottom Navigation Container
   bottomNavContainer: {

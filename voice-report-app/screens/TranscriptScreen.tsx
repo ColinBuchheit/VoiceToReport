@@ -15,6 +15,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
+import { useFontScale } from '../context/FontScaleContext';
 import Loader from '../components/Loader';
 import { generateSummary } from '../services/api';
 import AIAgent from '../components/AIAgent';
@@ -32,6 +33,7 @@ interface Props {
 }
 
 export default function TranscriptScreen({ navigation, route }: Props) {
+  const { scaled } = useFontScale();
   const [transcription, setTranscription] = useState(route.params.transcription);
   const [isEditing, setIsEditing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -309,15 +311,15 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     return (
       <View style={{flex:1, justifyContent:'center', alignItems:'center', padding:20}}>
         <View style={{width:'100%', backgroundColor:'#fff', borderRadius:12, padding:20, alignItems:'center', elevation:2}}>
-          <Text style={{fontSize:18, fontWeight:'600', marginBottom:8}}>Generating summary</Text>
-          <Text style={{color:'#6B7280', marginBottom:12}}>{phase}</Text>
+          <Text style={{fontSize: scaled(18), fontWeight:'600', marginBottom:8}}>Generating summary</Text>
+          <Text style={{color:'#6B7280', marginBottom:12, fontSize: scaled(14)}}>{phase}</Text>
 
           {/* Progress bar background */}
           <View style={{height:12, width:'100%', backgroundColor:'#E5E7EB', borderRadius:6, overflow:'hidden', marginBottom:8}}>
             <View style={{height:'100%', width:`${progressPercent}%`, backgroundColor:'#FF6B35'}} />
           </View>
 
-          <Text style={{fontSize:14, fontWeight:'600', marginBottom:4}}>{progressPercent}%</Text>
+          <Text style={{fontSize: scaled(14), fontWeight:'600', marginBottom:4}}>{progressPercent}%</Text>
         </View>
       </View>
     );
@@ -330,12 +332,12 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     >
       <ScrollView style={styles.scrollContainer}>
         <View style={styles.header}>
-          <Text style={styles.title}>Voice Transcription</Text>
+          <Text style={[styles.title, { fontSize: scaled(24) }]}>Voice Transcription</Text>
           <TouchableOpacity
             style={[styles.editButton, isEditing && styles.editButtonActive]}
             onPress={handleModeToggle}
           >
-            <Text style={[styles.editButtonText, isEditing && styles.editButtonTextActive]}>
+            <Text style={[styles.editButtonText, { fontSize: scaled(14) }, isEditing && styles.editButtonTextActive]}>
               {isEditing ? 'Done' : 'Edit'}
             </Text>
           </TouchableOpacity>
@@ -344,7 +346,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         <View style={styles.transcriptionCard}>
           {isEditing ? (
             <TextInput
-              style={styles.transcriptionInput}
+              style={[styles.transcriptionInput, { fontSize: scaled(16), lineHeight: scaled(24) }]}
               value={transcription}
               onChangeText={(text) => {
                 console.log('📝 Direct TextInput change:', text.substring(0, 50) + '...');
@@ -355,7 +357,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
               placeholder="Your voice recording transcription will appear here..."
             />
           ) : (
-            <Text style={styles.transcriptionText}>
+            <Text style={[styles.transcriptionText, { fontSize: scaled(16), lineHeight: scaled(24) }]}>
               {transcription || 'No transcription available'}
             </Text>
           )}
@@ -368,7 +370,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
             onPress={handleGenerateSummary}
             disabled={!transcription || isProcessing}
           >
-            <Text style={styles.generateButtonText}>
+            <Text style={[styles.generateButtonText, { fontSize: scaled(16) }]}>
               Generate Closeout
             </Text>
           </TouchableOpacity>
@@ -396,7 +398,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
             </View>
             
             {/* Button Text */}
-            <Text style={styles.clearButtonText}>
+            <Text style={[styles.clearButtonText, { fontSize: scaled(16) }]}>
               {isHoldingClear ? 'Hold to Clear...' : 'Clear'}
             </Text>
           </TouchableOpacity>

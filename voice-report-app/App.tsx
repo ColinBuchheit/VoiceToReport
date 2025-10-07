@@ -12,6 +12,7 @@ import OnboardingScreen from './screens/OnboardingScreen';
 import userProfileService from './services/userProfileService';
 import { ActivityIndicator, View } from 'react-native';
 import { CloseoutSummary } from './types/aiAgent'; // FIXED: Import from correct types file
+import { FontScaleProvider } from './context/FontScaleContext';
 
 // Navigation types to match API structure
 export type RootStackParamList = {
@@ -71,10 +72,12 @@ function AppNavigator() {
 export default function App() {
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="dark-content" />
-      <NavigationContainer>
-        <AppNavigator />
-      </NavigationContainer>
+      <FontScaleProvider>
+        <StatusBar barStyle="dark-content" />
+        <NavigationContainer>
+          <AppNavigator />
+        </NavigationContainer>
+      </FontScaleProvider>
     </SafeAreaProvider>
   );
 }
