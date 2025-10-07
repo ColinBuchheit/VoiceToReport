@@ -63,7 +63,7 @@ class EmailService:
         """Get current list of email recipients"""
         return self.recipients.copy()
     
-    def format_closeout_email_html(self, closeout_data: Union[Dict[str, Any], object], transcription: str, technician_name: str = None, logo_src_override: str = None) -> str:
+    def format_closeout_email_html(self, closeout_data: Union[Dict[str, Any], object], transcription: str, technician_name: str = None, technician_email: str = None, logo_src_override: str = None) -> str:
         """Format closeout data into a sleek, professional HTML email inspired by Stripe/Notion"""
         
         timestamp = datetime.now().strftime("%B %d, %Y")
@@ -82,6 +82,15 @@ class EmailService:
 
         location_name = self._safe_get(closeout_data, 'location', None)
         tech_name = technician_name or self._safe_get(closeout_data, 'technician_name', None)
+        # Normalize placeholders
+        if tech_name in (None, '', 'Not specified', 'Not mentioned'):
+            tech_name = None
+
+        # Clean technician email
+        if technician_email:
+            technician_email = technician_email.strip()
+        if technician_email in (None, '', 'Not specified', 'Not mentioned'):
+            technician_email = None
         logo_src = logo_src_override or self._get_logo_base64()
 
     # Define field groups with clean organization
@@ -196,6 +205,70 @@ class EmailService:
             </tr>
             """
         
+        # Build copy/paste consolidated summary (flat text)
+        # Iterate same field_groups used above to keep ordering consistent
+        copy_lines = []
+        # Add technician details first
+        if tech_name or technician_email:
+            if tech_name and technician_email:
+                copy_lines.append(f"Technician Info: {tech_name} ({technician_email})")
+            elif tech_name:
+                copy_lines.append(f"Technician Info: {tech_name}")
+            else:
+                copy_lines.append(f"Technician Info: {technician_email}")
+        if location_name and location_name != 'Not specified':
+            copy_lines.append(f"Location: {location_name}")
+        if work_order and work_order != 'Not Specified':
+            copy_lines.append(f"Work Order: {work_order}")
+        for group in field_groups:
+            for field_name, label in group["fields"]:
+                value = self._safe_get(closeout_data, field_name)
+                if value and value != 'Not specified':
+                    copy_lines.append(f"{label}: {value}")
+        if transcription and transcription.strip() and transcription != 'Not specified':
+            copy_lines.append("Transcription: " + transcription.strip())
+
+        copy_block_text = ("\n".join(copy_lines)).replace('<', '⟨').replace('>', '⟩')  # avoid unintended HTML rendering
+
+        copy_paste_html = f"""
+            <tr>
+                <td style="padding: 28px 0 12px 0;">
+                    <h2 class=\"section-title\" style=\"margin:0; font-size:12px; font-weight:700; color:#9CA3AF; text-transform:uppercase; letter-spacing:0.08em;\">Copy/Paste Summary</h2>
+                </td>
+            </tr>
+            <tr>
+                <td style=\"padding: 8px 0 16px 0;\">
+                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"background-color:#F7F7F8; border:1px solid #ECEFF1; border-radius:10px;\">
+                        <tr>
+                            <td style=\"padding:14px 16px;\">
+                                <div style=\"font-family:Menlo,Consolas,'Courier New',monospace; font-size:12px; line-height:1.55; white-space:pre-wrap; color:#374151;\">{copy_block_text}</div>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        """
+
+        # Header technician badge (if available)
+        technician_badge_html = ""
+        if tech_name or technician_email:
+            tech_label_parts = []
+            if tech_name:
+                tech_label_parts.append(tech_name)
+            if technician_email:
+                tech_label_parts.append(f"<span style=\"color:#6B7280;\">{technician_email}</span>")
+            # Build labeled technician info string
+            tech_label = f"<strong>Technician Info:</strong> " + " · ".join(tech_label_parts)
+            technician_badge_html = f"""
+                <tr>
+                    <td align=\"center\" style=\"padding-top:14px;\">
+                        <div class=\"tech-badge\" style=\"display:inline-block; background-color:#F7F7F8; color:#374151; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; border:1px solid #ECEFF1;\">
+                            {tech_label}
+                        </div>
+                    </td>
+                </tr>
+            """
+
         html_body = f"""
         <!DOCTYPE html>
         <html lang="en">
@@ -258,12 +331,13 @@ class EmailService:
                                             <td align="center">
                                                 <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin: 0 auto;">
                                                     <tr>
-                                                        <td>
+                                                        <td style="text-align:center;">
                                                             <div class="wo-badge" style="display: inline-block; background-color: #FF6B35; color: #FFFFFF; padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight:700; letter-spacing:0.01em;">
                                                                 {location_name if location_name and location_name != 'Not specified' else 'Location'} · WO {work_order}
                                                             </div>
                                                         </td>
                                                     </tr>
+                                                    {technician_badge_html}
                                                 </table>
                                             </td>
                                         </tr>
@@ -284,6 +358,7 @@ class EmailService:
                                     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                                         {sections_html}
                                         {transcription_html}
+                                        {copy_paste_html}
                                     </table>
                                 </td>
                             </tr>
@@ -340,7 +415,13 @@ class EmailService:
             logger.info(f"📧 Email Subject: {subject}")
 
             # Generate HTML with inline logo reference
-            html_body = self.format_closeout_email_html(closeout_data, transcription, technician_name, logo_src_override='cid:bear_logo')
+            html_body = self.format_closeout_email_html(
+                closeout_data,
+                transcription,
+                technician_name,
+                technician_email,
+                logo_src_override='cid:bear_logo'
+            )
 
             # Create multipart message
             msg = MIMEMultipart('related')

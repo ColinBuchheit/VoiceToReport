@@ -594,9 +594,10 @@ function HomeScreenInner({ navigation }: Props) {
         )}
       </View>
 
-      {/* Bottom Navigation with Recorder (always visible) */}
-      <View style={styles.bottomNavContainer}>
-          {/* Left (History) */}
+      {/* Bottom Navigation: variant changes depending on checklist visibility */}
+      {showChecklist ? (
+        <View style={styles.bottomNavContainer}>
+          {/* History */}
           <View style={styles.navSide}>
             <TouchableOpacity
               style={styles.bottomNavButton}
@@ -620,22 +621,22 @@ function HomeScreenInner({ navigation }: Props) {
             </TouchableOpacity>
           </View>
 
-          {/* Center Recorder (kept visually centered) */}
-          <View style={styles.recorderWrapper} pointerEvents="box-none">
-            <Recorder
-              onRecordingComplete={handleRecordingComplete}
-              isProcessing={isProcessing}
-              size="small"
-              isRecording={isRecording}
-              setIsRecording={setIsRecording}
-              recording={recording}
-              setRecording={setRecording}
-              recordingDuration={recordingDuration}
-              setRecordingDuration={setRecordingDuration}
-            />
-          </View>
+          {/* Small inline recorder */}
+            <View style={styles.recorderWrapper} pointerEvents="box-none">
+              <Recorder
+                onRecordingComplete={handleRecordingComplete}
+                isProcessing={isProcessing}
+                size="small"
+                isRecording={isRecording}
+                setIsRecording={setIsRecording}
+                recording={recording}
+                setRecording={setRecording}
+                recordingDuration={recordingDuration}
+                setRecordingDuration={setRecordingDuration}
+              />
+            </View>
 
-          {/* Right (Settings) */}
+          {/* Settings */}
           <View style={styles.navSide}>
             <TouchableOpacity
               style={styles.bottomNavButton}
@@ -659,6 +660,50 @@ function HomeScreenInner({ navigation }: Props) {
             </TouchableOpacity>
           </View>
         </View>
+      ) : (
+        <View style={[styles.bottomNavContainer, styles.bottomNavContainerSimple]}>
+          <View style={styles.simpleButtonsRow}>
+            <TouchableOpacity
+              style={styles.simpleNavButton}
+              onPress={() => setShowHistorySidebar(true)}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Open email history"
+            >
+              <View style={[
+                styles.navIconContainerLarge,
+                showHistorySidebar && styles.navIconContainerActive
+              ]}>
+                <Ionicons
+                  name="mail-outline"
+                  size={30}
+                  color={showHistorySidebar ? '#FFFFFF' : '#FF6B35'}
+                />
+              </View>
+              <Text style={[styles.navLabelLarge, showHistorySidebar && styles.navLabelActive]}>History</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.simpleNavButton}
+              onPress={() => { console.log('⚙️ Settings button pressed'); setShowSettings(true); }}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Open settings"
+            >
+              <View style={[
+                styles.navIconContainerLarge,
+                showSettings && styles.navIconContainerActive
+              ]}>
+                <Ionicons
+                  name="settings-outline"
+                  size={30}
+                  color={showSettings ? '#FFFFFF' : '#FF6B35'}
+                />
+              </View>
+              <Text style={[styles.navLabelLarge, showSettings && styles.navLabelActive]}>Settings</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {/* Email History Sidebar */}
       <EmailHistorySidebar
@@ -874,7 +919,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 16,
@@ -887,8 +932,26 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 10,
+    zIndex: 20,
   },
-  navSide: { flex: 1, alignItems: 'center', justifyContent: 'flex-end' },
+  // Simplified variant when checklist hidden (no recorder in bar)
+  bottomNavContainerSimple: {
+    justifyContent: 'center',
+    paddingHorizontal: 0,
+  },
+  simpleButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-evenly',
+    width: '100%',
+    paddingHorizontal: 24,
+  },
+  simpleNavButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  navSide: { width: 90, alignItems: 'center', justifyContent: 'center' },
   bottomNavButton: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -910,6 +973,22 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 3,
   },
+  navIconContainerLarge: {
+    width: 70,
+    height: 70,
+    borderRadius: 24,
+    backgroundColor: '#FFE4D7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#FFC8B0',
+    shadowColor: '#FF6B35',
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 3 },
+    shadowRadius: 8,
+    elevation: 4,
+  },
   navIconContainerActive: {
     backgroundColor: '#FF6B35',
     borderColor: '#FF6B35',
@@ -924,15 +1003,20 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontWeight: '500',
   },
+  navLabelLarge: {
+    fontSize: 14,
+    color: '#6B7280',
+    fontWeight: '600',
+  },
   navLabelActive: {
     color: '#FF6B35',
     fontWeight: '600',
   },
   recorderWrapper: {
+    width: 120,
     alignItems: 'center',
     justifyContent: 'center',
-    flexShrink: 0,
-    paddingHorizontal: 8,
+    paddingHorizontal: 4,
   },
 
   // Settings modal styles
