@@ -90,6 +90,53 @@ class VoiceAgentService:
                     revert_attempt = self._attempt_revert(transcription, screen_context)
                     if revert_attempt:
                         return revert_attempt
+
+            # Post-processing: location append logic
+            # If the user said to append/add to the location ("append X to location", "add X to location", "at the end of location X")
+            # and we currently have an existing location value, merge instead of full replace to preserve prior context.
+            try:
+                if validated.get('fieldUpdates') and 'location' in validated['fieldUpdates']:
+                    trans_l = lower_tx
+                    additive_intent = False
+                    # Detect additive phrases around 'location'
+                    additive_patterns = [
+                        r'(append|add)\s+[^.?!]{0,80}\blocation',
+                        r'\bat the end of\s+location',
+                        r'location\s+(?:field\s+)?(?:append|add)',
+                        r'(?:append|add)\s+[^.?!]{0,10}$'  # trailing add (edge)
+                    ]
+                    for pat in additive_patterns:
+                        if re.search(pat, trans_l):
+                            additive_intent = True
+                            break
+                    # Additional heuristic: phrase "at the end of location" specifically
+                    if 'at the end of location' in trans_l:
+                        additive_intent = True
+
+                    if additive_intent:
+                        # Obtain current location from screen context
+                        current_location = None
+                        for f in screen_context.get('visibleFields', []):
+                            if f.get('name') == 'location':
+                                current_location = f.get('currentValue') or ''
+                                break
+                        new_fragment = validated['fieldUpdates'].get('location') or ''
+                        if current_location and current_location.lower() not in ['not mentioned', '']:
+                            # Avoid duplicating if already present
+                            if new_fragment and new_fragment.lower() not in current_location.lower():
+                                merged = current_location.rstrip() + (' ' if not current_location.endswith(' ') else '') + new_fragment.lstrip()
+                                logger.info(f"Appending to location instead of replacing. Prev='{current_location}' Add='{new_fragment}' -> New='{merged}'")
+                                validated['fieldUpdates']['location'] = merged
+                                # If single-field update semantics used
+                                if validated.get('action') == 'update_field' and validated.get('target') == 'location':
+                                    validated['value'] = merged
+                                # Update confirmation to reflect append
+                                if validated.get('confirmation') and 'Updated' in validated['confirmation']:
+                                    validated['confirmation'] = 'Appended to location'
+                                else:
+                                    validated['confirmation'] = 'Appended to location'
+            except Exception as e:
+                logger.warning(f"Location append merge logic failed: {e}")
             return validated
             
         except Exception as e:
@@ -463,6 +510,29 @@ Respond ONLY with valid JSON, no markdown formatting:"""
                     field_name = self._match_field_name(field_ref, screen_context)
                     
                     if field_name:
+                        # Special case: additive location modifications (append/add/at the end of location)
+                        if field_name == 'location':
+                            trans_l = transcription_lower
+                            if any(kw in trans_l for kw in ['append', 'add ', 'at the end of location']):
+                                # Retrieve current location to append
+                                current_location = None
+                                for f in screen_context.get('visibleFields', []):
+                                    if f.get('name') == 'location':
+                                        current_location = f.get('currentValue') or ''
+                                        break
+                                if current_location and current_location.lower() not in ['not mentioned', ''] and new_value.lower() not in current_location.lower():
+                                    merged = current_location.rstrip() + (' ' if not current_location.endswith(' ') else '') + new_value.lstrip()
+                                    logger.info(f"Fallback append to location. Prev='{current_location}' Add='{new_value}' -> New='{merged}'")
+                                    return {
+                                        "action": "update_field",
+                                        "target": field_name,
+                                        "value": merged,
+                                        "confidence": 0.82,
+                                        "confirmation": "Appended to location",
+                                        "ttsText": "",
+                                        "success": True,
+                                        "needs_clarification": False
+                                    }
                         return {
                             "action": "update_field",
                             "target": field_name,
