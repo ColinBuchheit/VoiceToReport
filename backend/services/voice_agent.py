@@ -80,7 +80,17 @@ class VoiceAgentService:
             parsed_response = self._parse_gpt_response(response_text)
             
             # Ensure response has all required fields
-            return self._validate_response_structure(parsed_response)
+            validated = self._validate_response_structure(parsed_response)
+
+            # Post-processing: if user intent is revert/undo but GPT didn't produce an update, attempt deterministic revert
+            lower_tx = transcription.lower()
+            if ('revert' in lower_tx or 'undo' in lower_tx):
+                # Only override if GPT did NOT already produce a concrete update_field(s)
+                if not (validated.get('action') in ['update_field', 'update_fields'] and validated.get('fieldUpdates')):
+                    revert_attempt = self._attempt_revert(transcription, screen_context)
+                    if revert_attempt:
+                        return revert_attempt
+            return validated
             
         except Exception as e:
             logger.error(f"GPT processing failed: {e}")
@@ -104,6 +114,20 @@ class VoiceAgentService:
         for field, default in required_fields.items():
             if field not in response:
                 response[field] = default
+
+        # Normalize common action typos/synonyms
+        action_map = {
+            'field_update': 'update_field',
+            'edit': 'update_field',
+            'change_field': 'update_field',
+        }
+        act_lower = (response.get('action') or '').lower()
+        if act_lower in action_map:
+            response['action'] = action_map[act_lower]
+
+        # If target present & action is acknowledge but it looks like a field update
+        if response.get('action') == 'acknowledge' and response.get('target') and response.get('value'):
+            response['action'] = 'update_field'
         
         return response
     
@@ -277,6 +301,7 @@ Respond ONLY with valid JSON, no markdown formatting:"""
             # - 'fields': [ { field: 'name', value: 'x' }, ... ]
             # - 'updates': [ { field/name/target: 'name', value: 'x' }, ... ]
             # - 'field_updates': { name: value, ... }
+            # - 'field_updates': [ { target/name/field: 'name', value: 'x' }, ... ]  <-- newly supported
             if 'fieldUpdates' not in parsed:
                 # 1) 'fields' array
                 if 'fields' in parsed and isinstance(parsed['fields'], list):
@@ -319,13 +344,57 @@ Respond ONLY with valid JSON, no markdown formatting:"""
                     if updates:
                         parsed['fieldUpdates'] = updates
                         logger.info(f"Normalized 'updates' array into fieldUpdates: {list(updates.keys())}")
-                        if not parsed.get('action'):
-                            parsed['action'] = 'update_fields'
+                        # Upgrade action if missing or just an acknowledge placeholder
+                        if not parsed.get('action') or parsed.get('action') in ['acknowledge', '']:
+                            parsed['action'] = 'update_fields' if len(updates) > 1 else 'update_field'
+                            if len(updates) == 1:
+                                only_field, only_val = next(iter(updates.items()))
+                                parsed.setdefault('target', only_field)
+                                parsed.setdefault('value', only_val)
+                                parsed.setdefault('confirmation', f"Updated {only_field.replace('_',' ')}")
 
                 # 3) 'field_updates' dict
                 elif 'field_updates' in parsed and isinstance(parsed['field_updates'], dict):
                     parsed['fieldUpdates'] = parsed['field_updates']
                     logger.info("Mapped 'field_updates' dict to fieldUpdates")
+                    if not parsed.get('action') or parsed.get('action') in ['acknowledge', '']:
+                        parsed['action'] = 'update_fields' if len(parsed['field_updates']) > 1 else 'update_field'
+                        if len(parsed['field_updates']) == 1:
+                            only_field, only_val = next(iter(parsed['field_updates'].items()))
+                            parsed.setdefault('target', only_field)
+                            parsed.setdefault('value', only_val)
+                            parsed.setdefault('confirmation', f"Updated {only_field.replace('_',' ')}")
+
+                # 4) 'field_updates' list (common alternative the model returns)
+                elif 'field_updates' in parsed and isinstance(parsed['field_updates'], list):
+                    updates = {}
+                    for item in parsed['field_updates']:
+                        if not isinstance(item, dict):
+                            continue
+                        fname = item.get('field') or item.get('name') or item.get('target')
+                        fval = item.get('value')
+                        if fname:
+                            updates[fname] = fval
+                    if updates:
+                        parsed['fieldUpdates'] = updates
+                        logger.info(f"Normalized 'field_updates' list into fieldUpdates: {list(updates.keys())}")
+                        if not parsed.get('action') or parsed.get('action') in ['acknowledge', '']:
+                            parsed['action'] = 'update_fields' if len(updates) > 1 else 'update_field'
+                            if len(updates) == 1:
+                                only_field, only_val = next(iter(updates.items()))
+                                parsed.setdefault('target', only_field)
+                                parsed.setdefault('value', only_val)
+                                parsed.setdefault('confirmation', f"Updated {only_field.replace('_',' ')}")
+
+            # Final safeguard: if we still have 'acknowledge' but fieldUpdates exist, promote the action
+            if parsed.get('fieldUpdates') and (parsed.get('action') in ['acknowledge', '', None]):
+                updates = parsed['fieldUpdates']
+                parsed['action'] = 'update_fields' if len(updates) > 1 else 'update_field'
+                if len(updates) == 1 and (not parsed.get('target') or not parsed.get('value')):
+                    only_field, only_val = next(iter(updates.items()))
+                    parsed.setdefault('target', only_field)
+                    parsed.setdefault('value', only_val)
+                    parsed.setdefault('confirmation', f"Updated {only_field.replace('_',' ')}")
 
             return parsed
             
@@ -350,6 +419,10 @@ Respond ONLY with valid JSON, no markdown formatting:"""
         
         # SUMMARY SCREEN: Check for field updates first
         if screen_name == 'summary':
+            # First attempt revert detection
+            revert_attempt = self._attempt_revert(transcription, screen_context)
+            if revert_attempt:
+                return revert_attempt
             # Pattern 1: Photos field updates
             photo_patterns = [
                 r'(?:change|update|set)\s+(?:the\s+)?(\d+)\s+photos?\s+to\s+(?:say\s+)?(\d+)',
@@ -450,6 +523,104 @@ Respond ONLY with valid JSON, no markdown formatting:"""
         
         # Default: acknowledge
         return self._create_acknowledge_response(transcription)
+
+    def _attempt_revert(self, transcription: str, screen_context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Attempt to build a revert response if the transcription requests a revert/undo."""
+        t_lower = transcription.lower().strip()
+        if not any(k in t_lower for k in ['revert', 'undo']):
+            return None
+
+        history = screen_context.get('history') or {}
+        history_meta = screen_context.get('history_meta') or {}
+
+        # Patterns capturing explicit field reference
+        patterns = [
+            r'(?:revert|undo)\s+(?:the\s+)?([a-z_ ]+?)\s*(?:field|change)?[?.!]*$',
+            r'(?:can you|please)?\s*(?:revert|undo).*?(work order number|work order|location|onsite contact|support contact|materials used|expenses|photos uploaded)[?.!]*$',
+        ]
+        field_ref = None
+        for pat in patterns:
+            m = re.search(pat, t_lower)
+            if m:
+                grp = None
+                # find last non-empty group
+                for g in m.groups():
+                    if g:
+                        grp = g
+                if grp:
+                    grp = grp.strip()
+                    if 'last change' not in grp:
+                        field_ref = grp
+                        break
+
+        # Field synonym mapping
+        synonym_map = {
+            'work order': 'work_order',
+            'work order number': 'work_order',
+            'onsite contact': 'onsite_contact',
+            'support contact': 'support_contact',
+            'materials used': 'materials_used',
+            'photos uploaded': 'photos_uploaded',
+        }
+
+        # Generic last change request
+        if not field_ref or field_ref in ['change', 'last', 'last change', 'that change', 'that']:
+            # choose most recent field with previous
+            recent_field = None
+            recent_ts = -1
+            for fname, ts in history_meta.items():
+                try:
+                    if fname in history and history[fname].get('previous') and ts > recent_ts:
+                        recent_field = fname
+                        recent_ts = ts
+                except Exception:
+                    continue
+            field_ref = recent_field
+
+        if not field_ref:
+            return {
+                "action": "acknowledge",
+                "target": "",
+                "value": "",
+                "confidence": 0.55,
+                "confirmation": "Please specify which field to revert.",
+                "ttsText": "Which field should I revert?",
+                "success": False,
+                "needs_clarification": True,
+                "clarification_question": "Which field should I revert?"
+            }
+
+        # Normalize via synonym map
+        raw_ref = field_ref.lower()
+        mapped = synonym_map.get(raw_ref, raw_ref.replace(' ', '_'))
+        mapped = self._match_field_name(mapped, screen_context) or mapped
+
+        prior = None
+        if mapped in history:
+            prior = history[mapped].get('previous') or history[mapped].get('prior')
+
+        if not prior:
+            return {
+                "action": "acknowledge",
+                "target": mapped,
+                "value": "",
+                "confidence": 0.55,
+                "confirmation": f"No earlier value stored for {mapped.replace('_',' ')}",
+                "ttsText": f"I don't have a previous value for {mapped.replace('_',' ')}",
+                "success": False,
+                "needs_clarification": False
+            }
+
+        return {
+            "action": "update_field",
+            "target": mapped,
+            "value": prior,
+            "confidence": 0.85,
+            "confirmation": f"Reverted {mapped.replace('_',' ')}",
+            "ttsText": "Reverted",
+            "success": True,
+            "needs_clarification": False
+        }
     
     def _match_field_name(self, field_ref: str, screen_context: Dict[str, Any]) -> Optional[str]:
         """Match a field reference to an actual field name"""

@@ -8,7 +8,8 @@
     "start-local": "expo start",
     "android": "expo start --android --tunnel",
     "ios": "expo start --ios --tunnel",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "android-emulator": "powershell -ExecutionPolicy Bypass -File ./scripts/run-android-emulator.ps1"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",

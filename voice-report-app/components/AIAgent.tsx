@@ -222,7 +222,14 @@ export default function AIAgent({
     try {
       console.log('🎯 Executing command:', response.action);
 
-      switch (response.action) {
+      // Normalize backend synonyms using a local mutable variable to avoid TS union issues
+      let action: string = (response as any).action;
+      if (action === 'field_update') {
+        action = 'update_field';
+        (response as any).action = action;
+      }
+
+      switch (action) {
         case 'update_field':
         case 'edit_field':
           if (response.target && onFieldUpdate) {

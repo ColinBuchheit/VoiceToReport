@@ -36,7 +36,7 @@ class SummarizationService:
             
             # Log final results
             populated = sum(1 for v in final_summary.values() if v != "Not mentioned")
-            logger.info(f"Final extraction complete: {populated}/16 fields populated")
+            logger.info(f"Final extraction complete: {populated}/{len(final_summary)} fields populated")
             for field, value in final_summary.items():
                 if value != "Not mentioned":
                     logger.info(f"  - {field}: {value[:50]}...")
@@ -54,9 +54,51 @@ class SummarizationService:
         """Extract fields using regex patterns - very fast and accurate for structured data"""
         result = self._get_empty_summary()
         text_lower = transcription.lower()
-        
-        # LOCATION extraction - FIXED to avoid "Site Delay"
-        # (Removed) location/datetime extraction — not required by current workflow
+
+        # LOCATION extraction (reintroduced & improved)
+        # Heuristics: capture site/store/location names while avoiding delay phrases.
+        # We try several targeted patterns and pick the first high-confidence match.
+        location = None
+        location_patterns = [
+            # Explicit labels
+            r'(?:location|site|store)\s*[:#-]\s*([A-Z0-9][A-Za-z0-9&@.\- ]{2,60})',
+            r'(?:at|arrived at|on site at|onsite at)\s+([A-Z][A-Za-z0-9&@.\- ]{2,60})',
+            # Store / site number alone
+            r'(?:store|site)\s+#?(\d{3,8})',
+        ]
+        exclusion_substrings = {'delay', 'delayed', 'waiting', 'waited'}
+        def _clean_location(raw: str) -> Optional[str]:
+            if not raw:
+                return None
+            raw = raw.strip()
+            # Stop at sentence/pause delimiters
+            raw = re.split(r'[\.;\n]', raw)[0]
+            # Trim trailing filler words
+            raw = re.sub(r'\b(today|yesterday|tonight|this morning)\b.*$', '', raw, flags=re.IGNORECASE).strip()
+            # Collapse multiple spaces
+            raw = re.sub(r'\s{2,}', ' ', raw)
+            # Exclude if contains exclusion terms
+            lowered = raw.lower()
+            if any(term in lowered for term in exclusion_substrings):
+                return None
+            # Avoid overly short / generic captures
+            if len(raw) < 3:
+                return None
+            # Normalize store / site number capture
+            if re.fullmatch(r'\d{3,8}', raw):
+                raw = f"Store {raw}"  # Add label for clarity
+            return raw.strip(' -:')
+        for pattern in location_patterns:
+            match = re.search(pattern, transcription, re.IGNORECASE)
+            if match:
+                candidate = match.group(1)
+                cleaned = _clean_location(candidate)
+                if cleaned:
+                    location = cleaned
+                    logger.info(f"Found location (pattern): {location}")
+                    break
+        if location:
+            result['location'] = location
         
         # ONSITE CONTACT - specific patterns
         contact_patterns = [
@@ -185,31 +227,34 @@ TRANSCRIPTION:
 
 IMPORTANT RULES:
 1. work_completed: List ONLY the actual work performed (installed, configured, verified, etc.). Do NOT include troubleshooting or diagnostic steps.
-2. troubleshooting_steps: List ONLY diagnostic and troubleshooting actions (tested, checked, tried different ports, etc.)
-3. location: Extract the actual location/site name, NOT delays or other information
-4. Keep each field distinct - do not mix content between fields
+2. troubleshooting_steps: List ONLY diagnostic and troubleshooting actions (tested, checked, tried different ports, etc.).
+3. location: Extract ONLY the actual site/location name (store, facility, company site). Do NOT include delay phrases or time info.
+4. Keep each field distinct - do not mix content between fields.
+5. If a field is not clearly stated, return "Not mentioned" exactly.
 
 EXTRACT THESE FIELDS:
 
 1. onsite_contact: Name of person met at site (just the name)
 2. support_contact: Name of support/IT person (just the name)
-3. work_completed: Tasks actually completed (e.g., "Installed new AP, configured settings, verified connectivity")
-4. delays: Any delays and their causes
-5. troubleshooting_steps: Diagnostic steps taken (e.g., "Tested cable, checked power, tried different port")
-6. scope_completed: Was work finished? (Yes/No/Partially)
-7. released_by: Who signed off
-8. release_code: Any reference numbers
-9. return_tracking: Shipping/tracking info
-10. expenses: Money spent (parking, etc.)
-11. materials_used: Parts/equipment used
-12. out_of_scope_work: Extra work beyond original scope
-13. work_order: Work order number if mentioned
-16. photos_uploaded: Number of photos taken
+3. location: Actual site / store / facility name
+4. work_completed: Tasks actually completed (e.g., "Installed new AP, configured settings, verified connectivity")
+5. delays: Any delays and their causes
+6. troubleshooting_steps: Diagnostic steps taken (e.g., "Tested cable, checked power, tried different port")
+7. scope_completed: Was work finished? (Yes/No/Partially)
+8. released_by: Who signed off
+9. release_code: Any reference numbers
+10. return_tracking: Shipping/tracking info
+11. expenses: Money spent (parking, etc.)
+12. materials_used: Parts/equipment used
+13. out_of_scope_work: Extra work beyond original scope
+14. work_order: Work order number if mentioned
+15. photos_uploaded: Number of photos taken
 
 Return ONLY this JSON (no markdown):
 {{
   "onsite_contact": "value or Not mentioned",
   "support_contact": "value or Not mentioned",
+    "location": "value or Not mentioned",
   "work_completed": "value or Not mentioned",
   "delays": "value or Not mentioned",
   "troubleshooting_steps": "value or Not mentioned",
@@ -309,6 +354,7 @@ Return ONLY this JSON (no markdown):
         return {
             "onsite_contact": "Not mentioned",
             "support_contact": "Not mentioned",
+            "location": "Not mentioned",
             "work_completed": "Not mentioned",
             "delays": "Not mentioned",
             "troubleshooting_steps": "Not mentioned",

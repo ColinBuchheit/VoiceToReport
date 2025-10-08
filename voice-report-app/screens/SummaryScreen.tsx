@@ -40,6 +40,8 @@ interface EditableFieldProps {
   isEditing: boolean;
   multiline?: boolean;
   placeholder?: string;
+  highlight?: boolean;
+  highlightBadge?: string;
 }
 
 const EditableField: React.FC<EditableFieldProps & { scaled:(n:number)=>number }> = ({
@@ -50,19 +52,41 @@ const EditableField: React.FC<EditableFieldProps & { scaled:(n:number)=>number }
   multiline = false,
   placeholder = '',
   scaled,
+  highlight = false,
+  highlightBadge = 'AI updated'
 }) => {
   const { colors, isDark } = useTheme();
+  const accent = colors.accent || '#FF6B35';
+  const fieldBorderColor = highlight ? accent : colors.border;
+  const fieldBg = isEditing
+    ? (isDark ? colors.surfaceAlt : '#fff')
+    : (isDark ? colors.surfaceAlt : '#ecf0f1');
+  const highlightGlow = highlight ? {
+    shadowColor: accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
+    elevation: 6,
+  } : {};
+
   return (
-    <View style={styles.fieldContainer}>
-      {!!label && <Text style={[styles.fieldLabel, { fontSize: scaled(14), color: colors.textSecondary }]}>{label}</Text>}
+    <View style={[styles.fieldContainer, highlight && styles.fieldContainerHighlighted]}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: label ? 8 : 0 }}>
+        {!!label && <Text style={[styles.fieldLabel, { fontSize: scaled(14), color: colors.textSecondary }]}>{label}</Text>}
+        {highlight && (
+          <View style={[styles.highlightPill, { backgroundColor: accent + '22', borderColor: accent }]}> 
+            <Text style={[styles.highlightPillText, { color: accent, fontSize: scaled(10) }]}>{highlightBadge}</Text>
+          </View>
+        )}
+      </View>
       {isEditing ? (
         <TextInput
           style={[styles.fieldInput, {
             fontSize: scaled(16),
-            backgroundColor: isDark ? colors.surfaceAlt : '#fff',
-            borderColor: colors.border,
+            backgroundColor: fieldBg,
+            borderColor: fieldBorderColor,
             color: colors.textPrimary,
-          }, multiline && styles.multilineInput]}
+          }, multiline && styles.multilineInput, highlightGlow]}
           value={value}
           onChangeText={onChangeText}
           multiline={multiline}
@@ -73,9 +97,11 @@ const EditableField: React.FC<EditableFieldProps & { scaled:(n:number)=>number }
       ) : (
         <Text style={[styles.fieldValue, {
           fontSize: scaled(16),
-          color: colors.textPrimary,
-          backgroundColor: isDark ? colors.surfaceAlt : '#ecf0f1',
-        }]}>
+            color: colors.textPrimary,
+            backgroundColor: fieldBg,
+            borderColor: fieldBorderColor,
+          }, highlightGlow]}
+        >
           {value || 'Not specified'}
         </Text>
       )}
@@ -129,7 +155,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
     return result;
   };
 
-  const [editableSummary, setEditableSummary] = useState<CloseoutSummary>(
+  // One-time initializer prevents remount or hot-refresh from reusing stale route params
+  const [editableSummary, setEditableSummary] = useState<CloseoutSummary>(() =>
     initializeCloseoutSummary(route.params.summary)
   );
   const [editableTranscription, setEditableTranscription] = useState(route.params.transcription);
@@ -137,6 +164,32 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  // Track recent AI updates (field -> timestamp)
+  const [aiFieldUpdates, setAiFieldUpdates] = useState<Record<string, number>>({});
+  const [fieldHistory, setFieldHistory] = useState<Record<string, { previous?: string; current: string }>>({});
+  const [fieldHistoryMeta, setFieldHistoryMeta] = useState<Record<string, number>>({});
+
+  // Highlight window (ms)
+  const HIGHLIGHT_WINDOW_MS = 8000;
+  const shouldHighlight = (field: string) => {
+    const ts = aiFieldUpdates[field];
+    return !!ts && (Date.now() - ts) < HIGHLIGHT_WINDOW_MS;
+  };
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAiFieldUpdates(prev => {
+        const now = Date.now();
+        let changed = false;
+        const next: Record<string, number> = {};
+        for (const [k, v] of Object.entries(prev)) {
+            if (now - v < HIGHLIGHT_WINDOW_MS) next[k] = v; else changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Load technician profile for pre-fill
   useEffect(() => {
@@ -162,8 +215,10 @@ export default function SummaryScreen({ navigation, route }: Props) {
   // Enhanced screen context for AI - always in edit mode
   const screenContext = useSummaryScreenContext(
     editableSummary,
-    false, // Always false (edit mode)
-    editableTranscription
+    false,
+    editableTranscription,
+    fieldHistory,
+    fieldHistoryMeta
   );
 
   const updateSummaryField = (field: keyof CloseoutSummary, value: string) => {
@@ -234,10 +289,39 @@ export default function SummaryScreen({ navigation, route }: Props) {
   };
 
   const handleFieldUpdate = (fieldName: string, value: string) => {
-    if (fieldName in editableSummary) {
-      updateSummaryField(fieldName as keyof CloseoutSummary, value);
-    } else if (fieldName === 'transcription') {
+    setAiFieldUpdates(prev => ({ ...prev, [fieldName]: Date.now() }));
+    const now = Date.now();
+    if (fieldName === 'transcription') {
+      setFieldHistory(prev => ({
+        ...prev,
+        transcription: {
+          // If first time editing, previous should be the current editableTranscription before change
+          previous: prev.transcription ? (
+            prev.transcription.current !== value ? prev.transcription.current : prev.transcription.previous
+          ) : editableTranscription,
+          current: value
+        }
+      }));
+      setFieldHistoryMeta(prev => ({ ...prev, transcription: now }));
       setEditableTranscription(value);
+      return;
+    }
+    if (fieldName in editableSummary) {
+      const currentVal = (editableSummary as any)[fieldName] || '';
+      if (currentVal !== value) {
+        setFieldHistory(prev => ({
+          ...prev,
+          [fieldName]: {
+            // If no history yet, capture the current value as the previous baseline
+            previous: prev[fieldName] ? (
+              prev[fieldName].current !== value ? prev[fieldName].current : prev[fieldName].previous
+            ) : currentVal,
+            current: value
+          }
+        }));
+        setFieldHistoryMeta(prev => ({ ...prev, [fieldName]: now }));
+      }
+      updateSummaryField(fieldName as keyof CloseoutSummary, value);
     }
   };
 
@@ -255,6 +339,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Name and role of on-site contact person..."
             scaled={scaled}
+            highlight={shouldHighlight('onsite_contact')}
           />
 
           <EditableField
@@ -264,6 +349,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Enter the work order number..."
             scaled={scaled}
+            highlight={shouldHighlight('work_order')}
           />
 
           <EditableField
@@ -273,6 +359,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Enter the location / site name..."
             scaled={scaled}
+            highlight={shouldHighlight('location')}
           />
 
           <EditableField
@@ -282,6 +369,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Enter your name..."
             scaled={scaled}
+            highlight={shouldHighlight('technician_name')}
           />
 
           <EditableField
@@ -291,6 +379,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Support team members or remote assistance..."
             scaled={scaled}
+            highlight={shouldHighlight('support_contact')}
           />
 
           <EditableField
@@ -301,6 +390,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="Describe all tasks and work that was completed..."
             scaled={scaled}
+            highlight={shouldHighlight('work_completed')}
           />
 
           <EditableField
@@ -311,6 +401,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="Any delays encountered and reasons..."
             scaled={scaled}
+            highlight={shouldHighlight('delays')}
           />
 
           <EditableField
@@ -321,6 +412,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="Describe debugging or problem-solving steps..."
             scaled={scaled}
+            highlight={shouldHighlight('troubleshooting_steps')}
           />
 
           <EditableField
@@ -331,6 +423,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="Describe the outcome and completion status..."
             scaled={scaled}
+            highlight={shouldHighlight('scope_completed')}
           />
         </View>
 
@@ -347,6 +440,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Name of person who signed off..."
             scaled={scaled}
+            highlight={shouldHighlight('released_by')}
           />
 
           <EditableField
@@ -356,6 +450,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Enter release code if applicable..."
             scaled={scaled}
+            highlight={shouldHighlight('release_code')}
           />
 
           <EditableField
@@ -365,6 +460,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Enter return tracking number..."
             scaled={scaled}
+            highlight={shouldHighlight('return_tracking')}
           />
         </View>
 
@@ -380,6 +476,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="List any expenses incurred..."
             scaled={scaled}
+            highlight={shouldHighlight('expenses')}
           />
 
           <EditableField
@@ -390,6 +487,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="List materials and parts used..."
             scaled={scaled}
+            highlight={shouldHighlight('materials_used')}
           />
         </View>
 
@@ -405,6 +503,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="Describe any work outside the original scope..."
             scaled={scaled}
+            highlight={shouldHighlight('out_of_scope_work')}
           />
 
           <EditableField
@@ -415,6 +514,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="List photos taken and uploaded..."
             scaled={scaled}
+            highlight={shouldHighlight('photos_uploaded')}
           />
         </View>
 
@@ -430,6 +530,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
               multiline
               placeholder="Original voice transcription..."
               scaled={scaled}
+              highlight={shouldHighlight('transcription')}
+              highlightBadge="AI revised"
             />
           </View>
         </View>
@@ -591,5 +693,20 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  fieldContainerHighlighted: {
+    // container highlight wrapper if needed in future
+  },
+  highlightPill: {
+    marginLeft: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  highlightPillText: {
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase'
   },
 });
