@@ -327,7 +327,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }] }>
-      <ScrollView style={styles.scrollContainer}>
+      <ScrollView style={styles.scrollContainer} contentContainerStyle={{ paddingBottom: 180 }}>
         {/* CLOSEOUT NOTES SECTION */}
         <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]} accessibilityRole="header">CLOSEOUT NOTES</Text>
@@ -569,7 +569,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             handleSendEmail();
           }
         }}
-        position="bottom-right"
+        position="bottom-center"
         showDebugInfo={false}
       />
 

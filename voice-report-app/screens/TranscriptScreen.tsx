@@ -332,7 +332,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
       style={[styles.container, { backgroundColor: colors.background }]} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView style={[styles.scrollContainer]}>
+  <ScrollView style={[styles.scrollContainer]} contentContainerStyle={{ paddingBottom: 180 }}>
         <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <Text style={[styles.title, { fontSize: scaled(24), color: colors.textPrimary }]}>Voice Transcription</Text>
           <TouchableOpacity
@@ -421,7 +421,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
             setTranscription('');
           }
         }}
-        position="bottom-right"
+        position="bottom-center"
         showDebugInfo={false}
       />
     </KeyboardAvoidingView>
