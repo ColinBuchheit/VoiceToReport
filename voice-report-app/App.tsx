@@ -26,6 +26,8 @@ export type RootStackParamList = {
   Summary: {
     transcription: string;
     summary: CloseoutSummary;
+  /** When true, Summary screen will automatically trigger email send on mount */
+  autoSendEmail?: boolean;
   };
 };
 

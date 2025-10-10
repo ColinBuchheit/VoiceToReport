@@ -163,6 +163,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [hasAutoSent, setHasAutoSent] = useState(false);
   // Track recent AI updates (field -> timestamp)
   const [aiFieldUpdates, setAiFieldUpdates] = useState<Record<string, number>>({});
   const [fieldHistory, setFieldHistory] = useState<Record<string, { previous?: string; current: string }>>({});
@@ -443,6 +444,20 @@ export default function SummaryScreen({ navigation, route }: Props) {
     // Navigate to Home after popup closes
     navigation.navigate('Home');
   };
+
+  // Auto-send email if requested by navigation param
+  useEffect(() => {
+    const shouldAutoSend = route.params?.autoSendEmail === true;
+    if (shouldAutoSend && !hasAutoSent && !isSendingEmail) {
+      setHasAutoSent(true);
+      // Defer slightly so UI mounts before sending
+      setTimeout(() => {
+        handleSendEmail().catch(err => {
+          console.warn('Auto-send email failed:', err);
+        });
+      }, 250);
+    }
+  }, [route.params?.autoSendEmail, hasAutoSent, isSendingEmail]);
 
   const handleFieldUpdate = (fieldName: string, value: string) => {
     setAiFieldUpdates(prev => ({ ...prev, [fieldName]: Date.now() }));

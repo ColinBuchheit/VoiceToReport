@@ -413,12 +413,28 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         screenContext={screenContext}
         onFieldUpdate={handleFieldUpdate}
         onModeToggle={handleModeToggle}
-        onAction={(action) => {
+        onAction={async (action) => {
           console.log('🎯 AIAgent action triggered:', action);
-          if (action === 'generate_summary' || action === 'generate closeout summary') {
+          const a = (action || '').toLowerCase();
+          if (a === 'generate_summary' || a === 'generate closeout summary') {
             handleGenerateSummary();
-          } else if (action === 'clear_transcription' || action === 'clear transcription') {
+          } else if (a === 'clear_transcription' || a === 'clear transcription') {
             setTranscription('');
+          } else if (a === 'send_email' || a === 'send email' || a === 'email' || a === 'email_report' || a === 'send email report') {
+            try {
+              console.log('📧 AI requested send_email from Transcript screen. Generating summary first...');
+              // Generate summary, then navigate with flag to auto-send on Summary
+              const closeout = await generateSummary(transcription);
+              const summary = (closeout && (closeout as any).summary) ? (closeout as any).summary : closeout;
+              navigation.navigate('Summary', {
+                transcription,
+                summary: summary as CloseoutSummary,
+                autoSendEmail: true,
+              });
+            } catch (e) {
+              console.error('❌ Auto send flow failed while generating summary:', e);
+              Alert.alert('Error', 'Failed to prepare email. Please try again.');
+            }
           }
         }}
         position="bottom-center"
