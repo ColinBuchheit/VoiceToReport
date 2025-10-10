@@ -1,6 +1,7 @@
 # backend/services/email_service.py - SLEEK PROFESSIONAL DESIGN
 import logging
 import smtplib
+import ssl
 import base64
 import os
 from email.mime.text import MIMEText
@@ -460,13 +461,33 @@ class EmailService:
                 logger.warning(f"⚠️ Failed to attach inline logo: {e}")
             
             # Send email
-            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
-                server.set_debuglevel(1)
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
-                server.login(self.email_user, self.email_password)
-                server.send_message(msg)
+            context = ssl.create_default_context()
+            # Support explicit TLS (587) and implicit TLS/SSL (465)
+            if str(self.smtp_port) == '465':
+                with smtplib.SMTP_SSL(self.smtp_server, int(self.smtp_port), timeout=20, context=context) as server:
+                    server.set_debuglevel(1)
+                    logger.info(f"📧 Connecting via SMTPS (SSL) {self.smtp_server}:{self.smtp_port} ...")
+                    code, banner = server.ehlo()
+                    logger.info(f"📧 EHLO (SSL): {code} {banner}")
+                    logger.info("🔑 Logging in to SMTP server (SSL)...")
+                    server.login(self.email_user, self.email_password)
+                    logger.info("📤 Sending email message via SMTPS...")
+                    server.send_message(msg)
+            else:
+                # STARTTLS flow (typically port 587)
+                with smtplib.SMTP(self.smtp_server, int(self.smtp_port), timeout=20) as server:
+                    server.set_debuglevel(1)
+                    logger.info(f"📧 Connecting to SMTP {self.smtp_server}:{self.smtp_port} ...")
+                    code, banner = server.ehlo()
+                    logger.info(f"📧 EHLO: {code} {banner}")
+                    code, tls_resp = server.starttls(context=context)
+                    logger.info(f"🔐 STARTTLS: {code} {tls_resp}")
+                    code, post_ehlo = server.ehlo()
+                    logger.info(f"📧 EHLO (post-TLS): {code} {post_ehlo}")
+                    logger.info("🔑 Logging in to SMTP server...")
+                    server.login(self.email_user, self.email_password)
+                    logger.info("📤 Sending email message via SMTP...")
+                    server.send_message(msg)
                 logger.info(f"✅ Email sent successfully to {len(final_recipients)} recipients (including technician CC if provided)")
             
             return {
@@ -475,6 +496,29 @@ class EmailService:
                 "recipients": final_recipients
             }
             
+        except smtplib.SMTPAuthenticationError as e:
+            logger.error(f"SMTP auth failed: {e}")
+            hint = ("Authentication failed. If using Gmail, enable 'App Passwords' with 2FA and use that password, "
+                    "or ensure 'Less secure app access' (deprecated) is not required.")
+            return {
+                "success": False,
+                "message": f"SMTP authentication failed: {str(e)}. {hint}",
+                "recipients": []
+            }
+        except smtplib.SMTPServerDisconnected as e:
+            logger.error(f"SMTP server disconnected unexpectedly: {e}")
+            return {
+                "success": False,
+                "message": "SMTP server disconnected unexpectedly during send (STARTTLS or idle timeout).",
+                "recipients": []
+            }
+        except (smtplib.SMTPConnectError, smtplib.SMTPHeloError, smtplib.SMTPException, TimeoutError) as e:
+            logger.error(f"SMTP error: {e}")
+            return {
+                "success": False,
+                "message": f"SMTP error while sending email: {str(e)}",
+                "recipients": []
+            }
         except Exception as e:
             logger.error(f"Failed to send email: {e}")
             return {
@@ -491,13 +535,17 @@ class EmailService:
                     "status": "error",
                     "message": "Email credentials not configured"
                 }
-            
-            with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=10) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
+
+            context = ssl.create_default_context()
+            with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=15) as server:
+                code, banner = server.ehlo()
+                logger.info(f"📧 Test EHLO: {code} {banner}")
+                code, tls_resp = server.starttls(context=context)
+                logger.info(f"🔐 Test STARTTLS: {code} {tls_resp}")
+                code, post = server.ehlo()
+                logger.info(f"📧 Test EHLO (post-TLS): {code} {post}")
                 server.login(self.email_user, self.email_password)
-            
+
             return {
                 "status": "success",
                 "message": "Email configuration is valid",

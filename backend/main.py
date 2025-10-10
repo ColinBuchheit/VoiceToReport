@@ -377,7 +377,9 @@ async def send_email_endpoint(request: SendEmailRequest):
                 recipients=result.get("recipients", [])
             )
         else:
-            raise HTTPException(status_code=500, detail="Failed to send email - check email configuration")
+            detail_msg = result.get("message", "Failed to send email - check email configuration")
+            logger.error(f"Email send reported failure: {detail_msg}")
+            raise HTTPException(status_code=500, detail=detail_msg)
             
     except HTTPException:
         raise

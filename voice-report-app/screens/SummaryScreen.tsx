@@ -16,8 +16,7 @@ import { sendCloseoutEmail } from '../services/api';
 import emailHistoryService from '../services/emailHistoryService';
 import AIAgent from '../components/AIAgent';
 import EmailSuccessPopup from '../components/EmailSuccessPopup';
-import { useSummaryScreenContext } from '../hooks/useScreenContext';
-import { CloseoutSummary } from '../types/aiAgent';
+import { CloseoutSummary, ScreenContext } from '../types/aiAgent';
 import { useFontScale } from '../context/FontScaleContext';
 import userProfileService from '../services/userProfileService';
 import { useTheme } from '../context/ThemeContext';
@@ -212,14 +211,171 @@ export default function SummaryScreen({ navigation, route }: Props) {
     })();
   }, []);
 
-  // Enhanced screen context for AI - always in edit mode
-  const screenContext = useSummaryScreenContext(
-    editableSummary,
-    false,
-    editableTranscription,
-    fieldHistory,
-    fieldHistoryMeta
-  );
+  // Build complete screen context for AI Agent
+  const buildScreenContext = (): ScreenContext => {
+    return {
+      screenName: 'summary',
+      mode: 'edit',
+      visibleFields: [
+        {
+          name: 'onsite_contact',
+          label: 'Who did you meet on-site?',
+          type: 'text',
+          currentValue: editableSummary.onsite_contact || '',
+          isEditable: true,
+          synonyms: ['onsite', 'contact', 'met with', 'onsite contact', 'site contact']
+        },
+        {
+          name: 'work_order',
+          label: 'Work Order #',
+          type: 'text',
+          currentValue: editableSummary.work_order || '',
+          isEditable: true,
+          synonyms: ['work order', 'wo', 'ticket number', 'job number', 'order number']
+        },
+        {
+          name: 'location',
+          label: 'Location',
+          type: 'text',
+          currentValue: editableSummary.location || '',
+          isEditable: true,
+          synonyms: ['location', 'site', 'store', 'facility', 'address', 'place']
+        },
+        {
+          name: 'technician_name',
+          label: 'Technician Name',
+          type: 'text',
+          currentValue: editableSummary.technician_name || '',
+          isEditable: true,
+          synonyms: ['technician', 'tech name', 'my name', 'installer', 'tech']
+        },
+        {
+          name: 'support_contact',
+          label: 'Who did you work with for support?',
+          type: 'text',
+          currentValue: editableSummary.support_contact || '',
+          isEditable: true,
+          synonyms: ['support', 'support contact', 'it contact', 'helped by', 'support person']
+        },
+        {
+          name: 'work_completed',
+          label: 'What work was completed?',
+          type: 'multiline',
+          currentValue: editableSummary.work_completed || '',
+          isEditable: true,
+          synonyms: ['work', 'completed', 'tasks', 'work done', 'installed', 'work completed']
+        },
+        {
+          name: 'delays',
+          label: 'Were there any delays?',
+          type: 'text',
+          currentValue: editableSummary.delays || '',
+          isEditable: true,
+          synonyms: ['delays', 'delay', 'delayed', 'hold ups', 'wait time']
+        },
+        {
+          name: 'troubleshooting_steps',
+          label: 'What troubleshooting steps did you take?',
+          type: 'multiline',
+          currentValue: editableSummary.troubleshooting_steps || '',
+          isEditable: true,
+          synonyms: ['troubleshooting', 'troubleshooting steps', 'diagnostic steps', 'diagnostics', 'troubleshoot', 'tested', 'checked']
+        },
+        {
+          name: 'scope_completed',
+          label: 'Was the scope completed successfully?',
+          type: 'text',
+          currentValue: editableSummary.scope_completed || '',
+          isEditable: true,
+          synonyms: ['scope', 'scope completed', 'finished', 'completed successfully', 'done', 'job complete']
+        },
+        {
+          name: 'released_by',
+          label: 'Who released you?',
+          type: 'text',
+          currentValue: editableSummary.released_by || '',
+          isEditable: true,
+          synonyms: ['released by', 'signed off by', 'released', 'approved by', 'release']
+        },
+        {
+          name: 'release_code',
+          label: 'Release Code',
+          type: 'text',
+          currentValue: editableSummary.release_code || '',
+          isEditable: true,
+          synonyms: ['release code', 'confirmation code', 'reference number', 'ticket', 'code']
+        },
+        {
+          name: 'return_tracking',
+          label: 'Return Tracking #',
+          type: 'text',
+          currentValue: editableSummary.return_tracking || '',
+          isEditable: true,
+          synonyms: ['return tracking', 'tracking number', 'shipping', 'rma', 'tracking']
+        },
+        {
+          name: 'expenses',
+          label: 'Expenses',
+          type: 'text',
+          currentValue: editableSummary.expenses || '',
+          isEditable: true,
+          synonyms: ['expenses', 'costs', 'parking', 'tolls', 'spent', 'money']
+        },
+        {
+          name: 'materials_used',
+          label: 'Materials Used',
+          type: 'text',
+          currentValue: editableSummary.materials_used || '',
+          isEditable: true,
+          synonyms: ['materials', 'materials used', 'parts', 'equipment', 'supplies', 'used']
+        },
+        {
+          name: 'out_of_scope_work',
+          label: 'Out of Scope Work',
+          type: 'multiline',
+          currentValue: editableSummary.out_of_scope_work || '',
+          isEditable: true,
+          synonyms: ['out of scope', 'additional work', 'extra work', 'beyond scope', 'additional']
+        },
+        {
+          name: 'photos_uploaded',
+          label: 'Photos Uploaded',
+          type: 'text',
+          currentValue: editableSummary.photos_uploaded || '',
+          isEditable: true,
+          synonyms: ['photos', 'photos uploaded', 'pictures', 'images', 'pics', 'photo']
+        },
+        {
+          name: 'transcription',
+          label: 'Original Transcript',
+          type: 'multiline',
+          currentValue: editableTranscription || '',
+          isEditable: false,
+          synonyms: ['transcript', 'transcription', 'recording', 'original', 'original transcript']
+        }
+      ],
+      currentValues: {
+        onsite_contact: editableSummary.onsite_contact || '',
+        work_order: editableSummary.work_order || '',
+        location: editableSummary.location || '',
+        technician_name: editableSummary.technician_name || '',
+        support_contact: editableSummary.support_contact || '',
+        work_completed: editableSummary.work_completed || '',
+        delays: editableSummary.delays || '',
+        troubleshooting_steps: editableSummary.troubleshooting_steps || '',
+        scope_completed: editableSummary.scope_completed || '',
+        released_by: editableSummary.released_by || '',
+        release_code: editableSummary.release_code || '',
+        return_tracking: editableSummary.return_tracking || '',
+        expenses: editableSummary.expenses || '',
+        materials_used: editableSummary.materials_used || '',
+        out_of_scope_work: editableSummary.out_of_scope_work || '',
+        photos_uploaded: editableSummary.photos_uploaded || '',
+        transcription: editableTranscription || ''
+      },
+      availableActions: ['update_field', 'update_fields', 'execute_action']
+    };
+  };
 
   const updateSummaryField = (field: keyof CloseoutSummary, value: string) => {
     setEditableSummary(prev => ({
@@ -323,6 +479,55 @@ export default function SummaryScreen({ navigation, route }: Props) {
       }
       updateSummaryField(fieldName as keyof CloseoutSummary, value);
     }
+  };
+
+  // AI Action handler for execute_action (with detailed diagnostics)
+  const handleAIAction = async (actionName: string, params?: any) => {
+    console.log('═══════════════════════════════════════════════════════');
+    console.log('🎯 handleAIAction CALLED');
+    console.log('🎯 Action name:', actionName);
+    console.log('🎯 Params:', params);
+    console.log('🎯 typeof handleSendEmail:', typeof handleSendEmail);
+    // Optional scope check
+    console.log('🔍 SCOPE CHECK:');
+    console.log('  - handleSendEmail available?', typeof handleSendEmail);
+    console.log('  - isSendingEmail available?', typeof isSendingEmail);
+    console.log('  - setIsSendingEmail available?', typeof setIsSendingEmail);
+    console.log('═══════════════════════════════════════════════════════');
+
+    try {
+      const a = (actionName || '').toLowerCase();
+      if (a === 'send_email' || a === 'send email' || a === 'send_email_report' || a === 'send email report' || a === 'email' || a === 'email_report') {
+        console.log('📧 MATCHED: send_email action');
+        console.log('📧 About to call handleSendEmail()...');
+        console.log('📧 handleSendEmail exists?', typeof handleSendEmail === 'function');
+
+        if (typeof handleSendEmail !== 'function') {
+          console.error('❌ CRITICAL: handleSendEmail is not a function!');
+          console.error('❌ handleSendEmail value:', handleSendEmail);
+          return;
+        }
+
+        console.log('📧 Calling handleSendEmail() NOW...');
+        const result = await handleSendEmail();
+        console.log('📧 handleSendEmail() returned:', result);
+        console.log('✅ Email send completed via AI');
+        return;
+      }
+      if (a === 'generate_summary' || a === 'generate closeout' || a === 'create summary') {
+        console.log('🧾 Generate summary action received (no-op)');
+        return;
+      }
+      console.warn('⚠️ Unknown AI action:', actionName);
+    } catch (error) {
+      console.error(`❌ EXCEPTION in handleAIAction for '${actionName}':`, error);
+      console.error('❌ Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown',
+        stack: error instanceof Error ? error.stack : 'N/A'
+      });
+    }
+
+    console.log('═══════════════════════════════════════════════════════');
   };
 
   return (
@@ -561,15 +766,10 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
       {/* AI Agent - Floating button always visible */}
       <AIAgent
-        screenContext={screenContext}
+        screenContext={buildScreenContext()}
         onFieldUpdate={handleFieldUpdate}
-        onAction={(action) => {
-          console.log('🎯 AIAgent action triggered:', action);
-          if (action === 'send_email_report' || action === 'send email report') {
-            handleSendEmail();
-          }
-        }}
-        position="bottom-center"
+        onAction={handleAIAction}
+        position="bottom-right"
         showDebugInfo={false}
       />
 

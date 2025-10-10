@@ -276,10 +276,43 @@ export default function AIAgent({
           break;
 
         case 'execute_action':
+          console.log('🔍 DEBUG: execute_action case triggered');
+          console.log('🔍 DEBUG: response.target =', response.target);
+          console.log('🔍 DEBUG: response.value =', response.value);
+          console.log('🔍 DEBUG: onAction exists?', !!onAction);
+          console.log('🔍 DEBUG: onAction type:', typeof onAction);
+
+          if (response.target && onAction) {
+            console.log(`⚡ Executing action: ${response.target}`);
+
+            try {
+              console.log('🔍 DEBUG: About to call onAction...');
+              await onAction(response.target, response.value);
+              console.log('🔍 DEBUG: onAction call completed');
+              console.log(`✅ Action '${response.target}' executed successfully`);
+            } catch (error) {
+              console.error(`❌ Action '${response.target}' failed:`, error);
+              console.error('🔍 DEBUG: Error stack:', error instanceof Error ? error.stack : 'N/A');
+            }
+          } else {
+            console.warn('⚠️ execute_action received but missing:', {
+              hasTarget: !!response.target,
+              target: response.target,
+              hasOnAction: !!onAction,
+              onActionType: typeof onAction
+            });
+          }
+          break;
         case 'generate_summary':
           if (response.target && onAction) {
-            onAction(response.target);
             console.log(`⚡ Executing action: ${response.target}`);
+            try {
+              await onAction(response.target, response.value);
+            } catch (e) {
+              console.warn('⚠️ generate_summary handler threw an error:', e);
+            }
+          } else {
+            console.warn('⚠️ generate_summary received but no onAction handler or target');
           }
           break;
 
