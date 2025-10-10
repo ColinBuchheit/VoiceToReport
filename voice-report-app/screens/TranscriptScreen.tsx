@@ -12,6 +12,7 @@ import {
   Alert,
   Animated,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
@@ -43,6 +44,9 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [progressPercent, setProgressPercent] = useState<number>(0);
   const progressInterval = useRef<NodeJS.Timeout | null>(null);
+  // UI animations for cooler progress screen
+  const shimmerAnim = useRef(new Animated.Value(0)).current;
+  const pulseAnim = useRef(new Animated.Value(0)).current;
   
   // Press and hold state for clear button
   const [isHoldingClear, setIsHoldingClear] = useState(false);
@@ -199,6 +203,41 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     }
   };
 
+  // Start/stop progress screen animations
+  useEffect(() => {
+    if (isProcessing) {
+      // Shimmer across the progress bar
+      Animated.loop(
+        Animated.timing(shimmerAnim, {
+          toValue: 1,
+          duration: 1400,
+          useNativeDriver: true,
+        }),
+      ).start();
+      // Soft pulse behind the icon
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 0, duration: 900, useNativeDriver: true }),
+        ]),
+      ).start();
+    } else {
+      shimmerAnim.stopAnimation();
+      pulseAnim.stopAnimation();
+      shimmerAnim.setValue(0);
+      pulseAnim.setValue(0);
+    }
+  }, [isProcessing]);
+
+  const formatETA = (estimate?: number | null, elapsed?: number) => {
+    if (!estimate || estimate <= 0) return '';
+    const remaining = Math.max(0, Math.round(estimate - (elapsed || 0)));
+    if (remaining <= 3) return 'A few seconds left';
+    const m = Math.floor(remaining / 60);
+    const s = remaining % 60;
+    return `${m > 0 ? `${m}m ` : ''}${s}s left`;
+  };
+
   // Press and hold handlers for clear button
   const handleClearPressIn = () => {
     setIsHoldingClear(true);
@@ -310,18 +349,75 @@ export default function TranscriptScreen({ navigation, route }: Props) {
       else phase = 'Finalizing';
     }
 
-    return (
-      <View style={{flex:1, justifyContent:'center', alignItems:'center', padding:20, backgroundColor: colors.background}}>
-        <View style={{width:'100%', backgroundColor: colors.surface, borderRadius:12, padding:20, alignItems:'center', elevation:2, borderWidth:1, borderColor: colors.border}}>
-          <Text style={{fontSize: scaled(18), fontWeight:'600', marginBottom:8, color: colors.textPrimary}}>Generating summary</Text>
-          <Text style={{color: colors.textSecondary, marginBottom:12, fontSize: scaled(14)}}>{phase}</Text>
+    const dotCount = Math.max(1, (Math.floor(elapsedSeconds) % 3) + 1);
+    const dots = '.'.repeat(dotCount);
+    const stepIndex = phase === 'Uploading & Transcribing' ? 0 : phase === 'Summarizing' ? 1 : 2;
+    const etaText = formatETA(estimateSeconds, elapsedSeconds);
 
-          {/* Progress bar background */}
-          <View style={{height:12, width:'100%', backgroundColor: colors.border, borderRadius:6, overflow:'hidden', marginBottom:8}}>
-            <View style={{height:'100%', width:`${progressPercent}%`, backgroundColor: colors.accent}} />
+    // Shimmer translateX from -30% to 100%
+    const shimmerTranslate = shimmerAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [-60, 260], // pixels across container; works for most widths
+    });
+    const pulseScale = pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
+    const pulseOpacity = pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.2] });
+
+    return (
+      <View style={{flex:1, justifyContent:'center', alignItems:'center', padding:24, backgroundColor: colors.background}}>
+        <View style={{width:'100%', maxWidth: 720, backgroundColor: colors.surface, borderRadius:16, padding:20, alignItems:'center', elevation:3, borderWidth:1, borderColor: colors.border}}>
+          {/* Icon with pulse */}
+          <View style={{marginBottom: 12}}>
+            <Animated.View style={{
+              position:'absolute',
+              top: -6,
+              left: -6,
+              right: -6,
+              bottom: -6,
+              borderRadius: 40,
+              backgroundColor: colors.accent,
+              opacity: pulseOpacity,
+              transform: [{ scale: pulseScale }],
+            }} />
+            <View style={{width:56, height:56, borderRadius:28, backgroundColor: isDark ? '#2a2d34' : '#fff7f2', alignItems:'center', justifyContent:'center', borderWidth:1, borderColor: isDark ? colors.border : '#ffd7c0'}}>
+              <Ionicons name={stepIndex === 0 ? 'cloud-upload-outline' : stepIndex === 1 ? 'document-text-outline' : 'checkmark-done-outline'} size={scaled(28)} color={colors.accent} />
+            </View>
           </View>
 
-          <Text style={{fontSize: scaled(14), fontWeight:'600', marginBottom:4, color: colors.textPrimary}}>{progressPercent}%</Text>
+          <Text style={{fontSize: scaled(18), fontWeight:'700', marginBottom:4, color: colors.textPrimary}}>Generating Closeout{dots}</Text>
+          <Text style={{color: colors.textSecondary, marginBottom:14, fontSize: scaled(14)}}>{phase}{etaText ? ` • ${etaText}` : ''}</Text>
+
+          {/* Step chips */}
+          <View style={{flexDirection:'row', alignItems:'center', marginBottom:14}}>
+            {[{label:'Upload', icon:'cloud-upload-outline'}, {label:'Summarize', icon:'document-text-outline'}, {label:'Finalize', icon:'checkmark-done-outline'}].map((s, i) => {
+              const active = i === stepIndex;
+              const done = i < stepIndex;
+              return (
+                <View key={s.label} style={{flexDirection:'row', alignItems:'center'}}>
+                  <View style={{flexDirection:'row', alignItems:'center', paddingVertical:6, paddingHorizontal:10, borderRadius:999, borderWidth:1, marginHorizontal:4,
+                    backgroundColor: active ? (isDark ? colors.accent : '#FFEDE5') : (done ? (isDark ? '#1f2a' : '#f4f6f8') : 'transparent'),
+                    borderColor: active ? colors.accent : colors.border}}
+                  >
+                    <Ionicons name={s.icon as any} size={scaled(14)} color={active ? (isDark ? colors.accentContrast : colors.accent) : (done ? colors.textSecondary : colors.textSecondary)} />
+                    <Text style={{marginLeft:6, fontSize: scaled(12), fontWeight: active ? '700' : '600', color: active ? (isDark ? colors.accentContrast : colors.textPrimary) : colors.textSecondary}}>{s.label}</Text>
+                  </View>
+                  {i < 2 && <View style={{width: 18, height: 1, backgroundColor: colors.border, marginHorizontal: 2}} />}
+                </View>
+              );
+            })}
+          </View>
+
+          {/* Progress bar with shimmer */}
+          <View style={{height:14, width:'100%', backgroundColor: isDark ? '#2b2f36' : '#f0f2f5', borderRadius:8, overflow:'hidden', marginBottom:10, borderWidth:1, borderColor: colors.border}}>
+            <View style={{height:'100%', width:`${progressPercent}%`, backgroundColor: colors.accent}} />
+            <Animated.View style={{
+              position:'absolute', top:0, bottom:0, width:90,
+              transform:[{ translateX: shimmerTranslate }, { skewX: '-12deg' }],
+              backgroundColor: 'rgba(255,255,255,0.25)'
+            }} />
+          </View>
+
+          <Text style={{fontSize: scaled(14), fontWeight:'700', marginBottom:2, color: colors.textPrimary}}>{progressPercent}%</Text>
+          <Text style={{fontSize: scaled(12), color: colors.textSecondary}}>Please keep the app open while we prepare your closeout</Text>
         </View>
       </View>
     );
