@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Modal, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, TextInput, Alert } from 'react-native';
+import { View, Text, Modal, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, TextInput, Alert, Image, Keyboard, TouchableWithoutFeedback, KeyboardAvoidingView, Platform } from 'react-native';
+import * as MailComposer from 'expo-mail-composer';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
+import { Ionicons } from '@expo/vector-icons';
 import { useFontScale } from '../context/FontScaleContext';
 import userProfileService from '../services/userProfileService';
 import { useTheme, ThemeMode } from '../context/ThemeContext';
+import { submitBugReport } from '../services/api';
 
 interface SettingsModalProps {
   visible: boolean;
@@ -18,6 +23,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
   const [error, setError] = useState('');
   const { fontScale, setFontScale, scaled } = useFontScale();
   const { mode, setMode, colors, isDark } = useTheme();
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [attachments, setAttachments] = useState<string[]>([]);
+  // Removed success animation popup; will use simple alerts instead
+  const [sendingFeedback, setSendingFeedback] = useState(false);
   // Dynamic slider resolution with graceful fallback if dependency missing
   let SliderComp: any = null;
   try {
@@ -98,14 +108,122 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
     );
   };
 
+  const pickImages = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== 'granted') {
+        Alert.alert('Permission needed', 'Please allow photo library access to attach screenshots.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        quality: 1,
+        selectionLimit: 5,
+      });
+      if (!result.canceled) {
+        const uris = result.assets?.map(a => a.uri).filter(Boolean) ?? [];
+        // Normalize content:// URIs to file:// by copying to cache using new FileSystem API
+        const normalized: string[] = [];
+        for (const uri of uris) {
+          if (uri.startsWith('content://')) {
+            try {
+              const fileName = `feedback-${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
+              const src = new FileSystem.File(uri);
+              const dest = new FileSystem.File(FileSystem.Paths.cache, fileName);
+              src.copy(dest);
+              normalized.push(dest.uri);
+            } catch {
+              // If copy fails, skip this attachment
+            }
+          } else {
+            normalized.push(uri);
+          }
+        }
+        setAttachments(prev => Array.from(new Set([...prev, ...normalized])));
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Failed to open image library.');
+    }
+  };
+
+  const removeAttachment = (uri: string) => {
+    setAttachments(prev => prev.filter(u => u !== uri));
+  };
+
+  const sendFeedback = async () => {
+    const message = feedbackText?.trim();
+    if (!message) {
+      Alert.alert('Describe the issue', 'Please include a short description of the bug.');
+      return;
+    }
+    setSendingFeedback(true);
+    try {
+      // Use backend submission so it works in production without relying on a mail app
+      const profile = await userProfileService.getProfile();
+      const reporterEmail = profile?.workEmail || undefined;
+      const res = await submitBugReport({ description: message, reporterEmail, imageUris: attachments });
+      if (res && (res.success === true || res.success === undefined)) {
+        // On success: clear form, show success popup, then close feedback modal
+        setFeedbackText('');
+        setAttachments([]);
+        Alert.alert('Thanks!', 'Your bug report was sent.');
+        setFeedbackOpen(false);
+        return;
+      }
+      // fallback to mail composer if backend returns failure
+      const available = await MailComposer.isAvailableAsync();
+      if (available) {
+        await MailComposer.composeAsync({
+          recipients: ['colin.buchheit@beartechs.com'],
+          subject: 'Bug Report / Recommendation',
+          body: message,
+          attachments,
+          isHtml: false,
+        });
+  setFeedbackText('');
+  setAttachments([]);
+  Alert.alert('Thanks!', 'Your bug report was sent.');
+  setFeedbackOpen(false);
+      } else {
+        Alert.alert('Error', 'Could not send bug report. Please email colin.buchheit@beartechs.com.');
+      }
+    } catch (e) {
+      // If backend call fails, offer email composer fallback
+      try {
+        const available = await MailComposer.isAvailableAsync();
+        if (available) {
+          await MailComposer.composeAsync({
+            recipients: ['colin.buchheit@beartechs.com'],
+            subject: 'Bug Report / Recommendation',
+            body: message,
+            attachments,
+            isHtml: false,
+          });
+          setFeedbackText('');
+          setAttachments([]);
+          Alert.alert('Thanks!', 'Your bug report was sent.');
+          setFeedbackOpen(false);
+        } else {
+          Alert.alert('Error', 'Failed to send bug report. Please email colin.buchheit@beartechs.com.');
+        }
+      } catch {
+        Alert.alert('Error', 'Failed to start email composer.');
+      }
+    } finally {
+      setSendingFeedback(false);
+    }
+  };
+
   return (
+    <>
     <Modal
       visible={visible}
       transparent
       animationType="slide"
       onRequestClose={onClose}
     >
-      <View style={[styles.settingsOverlay, { backgroundColor: colors.overlay }]}>
+  <View style={[styles.settingsOverlay, { backgroundColor: colors.overlay }]}>
         <TouchableOpacity
           style={styles.settingsBackdrop}
           activeOpacity={1}
@@ -221,18 +339,104 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
                 )}
                 <Text style={{ fontSize: scaled(12), color: colors.textSecondary, marginTop: 4 }}>Adjust overall text size across the app.</Text>
               </View>
+              {/* Feedback section - placed between Accessibility and About */}
+              <View style={styles.settingsSection}>
+                <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13), color: colors.textSecondary }]}>Feedback</Text>
+                <TouchableOpacity
+                  style={[styles.feedbackButton, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
+                  onPress={() => setFeedbackOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Report a bug"
+                >
+                  <View style={styles.feedbackButtonContent}>
+                    <Ionicons name="bug-outline" size={20} color={colors.accent} />
+                    <Text style={[styles.feedbackButtonText, { fontSize: scaled(16), color: colors.textPrimary }]}>Report a Bug</Text>
+                    <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+                  </View>
+                </TouchableOpacity>
+                <Text style={{ fontSize: scaled(12), color: colors.textSecondary, marginTop: 6 }}>
+                  Help us improve by reporting issues you encounter
+                </Text>
+              </View>
               <View style={styles.settingsSection}>
                 <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13), color: colors.textSecondary }]}>About</Text>
                 <View style={[styles.settingsItem, { borderBottomColor: colors.border }]}>
                   <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), color: colors.textPrimary }]}>Version</Text>
-                  <Text style={[styles.settingsItemValue, { fontSize: scaled(16), color: colors.textSecondary }]}>1.0.0</Text>
+                  <Text style={[styles.settingsItemValue, { fontSize: scaled(16), color: colors.textSecondary }]}>2.0.0</Text>
                 </View>
               </View>
             </ScrollView>
           )}
+          {/* Feedback entry point consolidated in Feedback section above */}
+          {/* Feedback Popup */}
+          <Modal
+            visible={feedbackOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setFeedbackOpen(false)}
+          >
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+            <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+            <View style={[styles.fbOverlay, { backgroundColor: colors.overlay }]}> 
+              <View style={[styles.fbCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+                <View style={styles.fbHeader}>
+                  <Text style={[styles.fbTitle, { color: colors.textPrimary, fontSize: scaled(18) }]}>Report a Bug</Text>
+                  <TouchableOpacity onPress={() => setFeedbackOpen(false)}>
+                    <Text style={{ color: colors.textSecondary, fontSize: scaled(18) }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+                <TextInput
+                  style={[styles.fbInput, { color: colors.textPrimary, backgroundColor: colors.surfaceAlt, borderColor: colors.border, fontSize: scaled(14) }]}
+                  placeholder="Describe the bug or recommendation..."
+                  placeholderTextColor={colors.textSecondary}
+                  value={feedbackText}
+                  onChangeText={setFeedbackText}
+                  multiline
+                  numberOfLines={5}
+                  textAlignVertical="top"
+                />
+                {attachments.length > 0 && (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }} keyboardShouldPersistTaps="handled">
+                    {attachments.map(uri => (
+                      <View key={uri} style={styles.attachmentItem}>
+                        <Image source={{ uri }} style={styles.attachmentThumb} />
+                        <TouchableOpacity style={styles.attachmentRemove} onPress={() => removeAttachment(uri)}>
+                          <Text style={styles.attachmentRemoveText}>×</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </ScrollView>
+                )}
+                <View style={styles.fbActionsRow}>
+                  <TouchableOpacity
+                    onPress={pickImages}
+                    style={[styles.fbActionBtn, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}
+                  >
+                    <Text style={[styles.fbActionText, { color: colors.textPrimary }]}>Add Screenshots</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={sendFeedback}
+                    disabled={sendingFeedback}
+                    style={[
+                      styles.fbSendBtn,
+                      { backgroundColor: colors.accent },
+                      sendingFeedback && { opacity: 0.7 }
+                    ]}
+                  >
+                    <Text style={[styles.fbSendText, { color: colors.accentContrast }]}>
+                      {sendingFeedback ? 'Sending…' : 'Send Report'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+            </TouchableWithoutFeedback>
+            </KeyboardAvoidingView>
+          </Modal>
         </View>
       </View>
     </Modal>
+    </>
   );
 };
 
@@ -293,7 +497,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   settingsScroll: { flexGrow: 0 },
-  settingsScrollContent: { paddingBottom: 40 },
+  settingsScrollContent: { paddingBottom: 120 },
   settingsLoadingContainer: { padding: 32, alignItems: 'center', justifyContent: 'center' },
   settingsLoadingText: { marginTop: 12, color: '#6B7280', fontSize: 14, fontWeight: '500' },
   settingsSection: { paddingHorizontal: 24, paddingVertical: 16 },
@@ -353,4 +557,97 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Feedback section button styles
+  feedbackButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 4,
+  },
+  feedbackButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  feedbackButtonText: {
+    flex: 1,
+    fontWeight: '500',
+  },
+  feedbackInlineBtn: {
+    // removed (legacy inline bug button under About)
+  },
+  feedbackInlineText: {
+    // removed
+  },
+  // settingsFooter & primary feedback button removed to avoid duplication
+  fbOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  fbCard: {
+    width: '100%',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+  },
+  fbHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  fbTitle: {
+    fontWeight: '700',
+  },
+  fbInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    minHeight: 120,
+  },
+  fbActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+  },
+  fbActionBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  fbActionText: { fontWeight: '600' },
+  fbSendBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+  },
+  fbSendText: { fontWeight: '700' },
+  attachmentItem: {
+    marginRight: 8,
+    width: 64,
+    height: 64,
+    borderRadius: 8,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  attachmentThumb: { width: '100%', height: '100%' },
+  attachmentRemove: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#000000AA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachmentRemoveText: { color: '#FFFFFF', fontWeight: '700', lineHeight: 20 },
 });
