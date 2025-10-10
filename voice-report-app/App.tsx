@@ -28,6 +28,8 @@ export type RootStackParamList = {
     summary: CloseoutSummary;
   /** When true, Summary screen will automatically trigger email send on mount */
   autoSendEmail?: boolean;
+  /** When present, Summary edits refer to an existing draft to be updated (upsert) */
+  draftId?: string;
   };
 };
 

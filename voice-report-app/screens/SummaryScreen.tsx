@@ -14,8 +14,10 @@ import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
 import { sendCloseoutEmail } from '../services/api';
 import emailHistoryService from '../services/emailHistoryService';
+import draftService from '../services/draftService';
 import AIAgent from '../components/AIAgent';
 import EmailSuccessPopup from '../components/EmailSuccessPopup';
+import DraftSavedPopup from '../components/DraftSavedPopup';
 import { CloseoutSummary, ScreenContext } from '../types/aiAgent';
 import { useFontScale } from '../context/FontScaleContext';
 import userProfileService from '../services/userProfileService';
@@ -161,6 +163,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const [editableTranscription, setEditableTranscription] = useState(route.params.transcription);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const [showDraftSaved, setShowDraftSaved] = useState(false);
   const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [hasAutoSent, setHasAutoSent] = useState(false);
@@ -408,6 +411,16 @@ export default function SummaryScreen({ navigation, route }: Props) {
       setEmailRecipients(emailResponse.recipients);
       setShowSuccessPopup(true);
 
+      // If this Summary originated from a draft, remove the draft once successfully sent
+      try {
+        const did = route.params?.draftId;
+        if (did) {
+          await draftService.deleteDraft(did);
+        }
+      } catch (e) {
+        console.warn('Failed to delete draft after send', e);
+      }
+
       // Persist to local email history (non-blocking)
       (async () => {
         try {
@@ -443,6 +456,21 @@ export default function SummaryScreen({ navigation, route }: Props) {
     setShowSuccessPopup(false);
     // Navigate to Home after popup closes
     navigation.navigate('Home');
+  };
+
+  const handleSaveDraft = async () => {
+    try {
+      await draftService.addDraft({
+        id: route.params?.draftId,
+        workOrder: editableSummary.work_order,
+        location: editableSummary.location,
+        transcription: editableTranscription,
+        summary: editableSummary,
+      });
+  setShowDraftSaved(true);
+    } catch (e) {
+  alert('Failed to save draft');
+    }
   };
 
   // Auto-send email if requested by navigation param
@@ -756,18 +784,25 @@ export default function SummaryScreen({ navigation, route }: Props) {
           </View>
         </View>
 
-        {/* SEND EMAIL BUTTON */}
+        {/* SEND/SAVE BUTTONS */}
         <View style={styles.actionButtons}>
           <TouchableOpacity
-            style={[styles.emailButton, { backgroundColor: colors.accent }, isSendingEmail && styles.emailButtonDisabled]}
+            style={[styles.primaryButton, { backgroundColor: colors.accent }, isSendingEmail && styles.buttonDisabled]}
             onPress={handleSendEmail}
             disabled={isSendingEmail}
           >
             {isSendingEmail ? (
-              <ActivityIndicator color="white" size="small" />
+              <ActivityIndicator color={colors.accentContrast || '#fff'} size="small" />
             ) : (
-              <Text style={[styles.emailButtonText, { fontSize: scaled(16), color: colors.accentContrast }]}>Send Email Report</Text>
+              <Text style={[styles.buttonText, { fontSize: scaled(16), color: colors.accentContrast || '#fff' }]}>Send Email Report</Text>
             )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.secondaryButton, { backgroundColor: colors.accent }]}
+            onPress={handleSaveDraft}
+            disabled={isSendingEmail}
+          >
+            <Text style={[styles.buttonText, { fontSize: scaled(16), color: colors.accentContrast || '#fff' }]}>Save Draft</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -779,12 +814,19 @@ export default function SummaryScreen({ navigation, route }: Props) {
         onComplete={handleSuccessComplete}
       />
 
+      {/* Draft Saved Popup */}
+      <DraftSavedPopup
+        visible={showDraftSaved}
+        workOrder={editableSummary.work_order}
+        onComplete={() => setShowDraftSaved(false)}
+      />
+
       {/* AI Agent - Floating button always visible */}
       <AIAgent
         screenContext={buildScreenContext()}
         onFieldUpdate={handleFieldUpdate}
         onAction={handleAIAction}
-        position="bottom-right"
+        position="bottom-center"
         showDebugInfo={false}
       />
 
@@ -879,33 +921,32 @@ const styles = StyleSheet.create({
   },
   actionButtons: {
     flexDirection: 'row',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingBottom: 30,
     marginTop: 10,
   },
-  emailButton: {
-    backgroundColor: '#FF6B35',
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    borderRadius: 12,
+  primaryButton: {
+    flex: 1,
+    paddingVertical: 15,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginRight: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 200,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
   },
-  emailButtonDisabled: {
-    backgroundColor: '#bdc3c7',
+  secondaryButton: {
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 100,
   },
-  emailButtonText: {
-    color: 'white',
+  buttonDisabled: {
+    opacity: 0.7,
+  },
+  buttonText: {
     fontSize: 16,
     fontWeight: '600',
   },

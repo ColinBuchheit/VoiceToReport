@@ -329,9 +329,11 @@ function HomeScreenInner({ navigation }: Props) {
   const handleEmailSelect = (email: EmailHistoryItem) => {
     console.log('📧 Selected email transcription length:', email.transcription?.length || 0);
     console.log('📧 Transcription preview:', email.transcription ? email.transcription.slice(0, 100) : 'EMPTY');
+    const draftId = (email as any)?._draftId as string | undefined;
     navigation.navigate('Summary', {
       transcription: email.transcription || '',
       summary: email.summary,
+      ...(draftId ? { draftId } : {}),
     });
     // Close sidebar after initiating navigation so Summary shows without being covered
     setShowHistorySidebar(false);
