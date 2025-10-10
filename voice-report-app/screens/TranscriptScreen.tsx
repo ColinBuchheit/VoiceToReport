@@ -11,6 +11,7 @@ import {
   Platform,
   Alert,
   Animated,
+  SafeAreaView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -363,7 +364,8 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     const pulseOpacity = pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.2] });
 
     return (
-      <View style={{flex:1, justifyContent:'center', alignItems:'center', padding:24, backgroundColor: colors.background}}>
+      <SafeAreaView style={{flex:1, backgroundColor: colors.background}}>
+        <ScrollView contentContainerStyle={{flexGrow:1, justifyContent:'center', alignItems:'center', padding:24}}>
         <View style={{width:'100%', maxWidth: 720, backgroundColor: colors.surface, borderRadius:16, padding:20, alignItems:'center', elevation:3, borderWidth:1, borderColor: colors.border}}>
           {/* Icon with pulse */}
           <View style={{marginBottom: 12}}>
@@ -383,11 +385,11 @@ export default function TranscriptScreen({ navigation, route }: Props) {
             </View>
           </View>
 
-          <Text style={{fontSize: scaled(18), fontWeight:'700', marginBottom:4, color: colors.textPrimary}}>Generating Closeout{dots}</Text>
-          <Text style={{color: colors.textSecondary, marginBottom:14, fontSize: scaled(14)}}>{phase}{etaText ? ` • ${etaText}` : ''}</Text>
+          <Text style={{fontSize: scaled(18), fontWeight:'700', marginBottom:4, color: colors.textPrimary, textAlign: 'center'}}>Generating Closeout{dots}</Text>
+          <Text style={{color: colors.textSecondary, marginBottom:14, fontSize: scaled(14), textAlign: 'center'}}>{phase}{etaText ? ` • ${etaText}` : ''}</Text>
 
           {/* Step chips */}
-          <View style={{flexDirection:'row', alignItems:'center', marginBottom:14}}>
+          <View style={{flexDirection:'row', alignItems:'center', marginBottom:14, flexWrap:'wrap', justifyContent:'center'}}>
             {[{label:'Upload', icon:'cloud-upload-outline'}, {label:'Summarize', icon:'document-text-outline'}, {label:'Finalize', icon:'checkmark-done-outline'}].map((s, i) => {
               const active = i === stepIndex;
               const done = i < stepIndex;
@@ -417,9 +419,10 @@ export default function TranscriptScreen({ navigation, route }: Props) {
           </View>
 
           <Text style={{fontSize: scaled(14), fontWeight:'700', marginBottom:2, color: colors.textPrimary}}>{progressPercent}%</Text>
-          <Text style={{fontSize: scaled(12), color: colors.textSecondary}}>Please keep the app open while we prepare your closeout</Text>
+          <Text style={{fontSize: scaled(12), color: colors.textSecondary, textAlign:'center'}}>Please keep the app open while we prepare your closeout</Text>
         </View>
-      </View>
+        </ScrollView>
+      </SafeAreaView>
     );
   }
 

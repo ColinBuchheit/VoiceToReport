@@ -47,5 +47,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#000000', // Black text
     fontWeight: '500',
+    textAlign: 'center',
+    maxWidth: 320,
+    flexShrink: 1,
   },
 });
