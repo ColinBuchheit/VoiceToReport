@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     smtp_server: str = "smtp.gmail.com"
     smtp_port: str = "587"
     
+    # Bug report recipient
+    bug_report_recipient: str = "colin.buchheit@beartechs.com"
+    
     @field_validator('allowed_origins', mode='before')
     @classmethod
     def parse_allowed_origins(cls, v):

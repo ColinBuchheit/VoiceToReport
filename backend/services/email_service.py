@@ -7,6 +7,8 @@ import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.image import MIMEImage
+from email.mime.base import MIMEBase
+from email import encoders
 from typing import List, Dict, Any, Union
 from datetime import datetime
 from email.utils import format_datetime
@@ -559,3 +561,65 @@ class EmailService:
                 "status": "error",
                 "message": f"Email connection test failed: {str(e)}"
             }
+
+    def send_bug_report(self, description: str, reporter_email: str | None = None, images: List[Dict[str, str]] | None = None) -> Dict[str, Any]:
+        """Send a bug report email to the configured bug report recipient.
+
+        images: list of dicts with keys {filename: str, content_type: str, data_base64: str}
+        """
+        try:
+            if not self.email_user or not self.email_password:
+                return {"success": False, "message": "Email credentials not configured"}
+
+            to_addr = getattr(settings, 'bug_report_recipient', None) or 'colin.buchheit@beartechs.com'
+
+            subject = "VoiceToReport - Bug Report"
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+            reporter_line = f"Reporter: {reporter_email}\n" if reporter_email else ""
+            text_body = f"A new bug report was submitted.\n\n{reporter_line}Time: {timestamp}\n\nDescription:\n{description or '(no description)'}\n"
+
+            msg = MIMEMultipart()
+            msg['From'] = self.email_user
+            msg['To'] = to_addr
+            msg['Subject'] = subject
+            msg.attach(MIMEText(text_body, 'plain'))
+
+            # Attach images if provided
+            for idx, img in enumerate(images or []):
+                try:
+                    filename = img.get('filename') or f'screenshot-{idx+1}.jpg'
+                    content_type = img.get('content_type') or 'image/jpeg'
+                    data_b64 = img.get('data_base64') or ''
+                    raw = base64.b64decode(data_b64)
+
+                    maintype, subtype = content_type.split('/', 1) if '/' in content_type else ('image', 'jpeg')
+                    if maintype == 'image':
+                        part = MIMEImage(raw, _subtype=subtype)
+                    else:
+                        part = MIMEBase(maintype, subtype)
+                        part.set_payload(raw)
+                        encoders.encode_base64(part)
+                    part.add_header('Content-Disposition', 'attachment', filename=filename)
+                    msg.attach(part)
+                except Exception as e:
+                    logger.warning(f"Failed to attach image {idx}: {e}")
+
+            # Send email
+            context = ssl.create_default_context()
+            if str(self.smtp_port) == '465':
+                with smtplib.SMTP_SSL(self.smtp_server, int(self.smtp_port), timeout=20, context=context) as server:
+                    server.ehlo()
+                    server.login(self.email_user, self.email_password)
+                    server.send_message(msg)
+            else:
+                with smtplib.SMTP(self.smtp_server, int(self.smtp_port), timeout=20) as server:
+                    server.ehlo()
+                    server.starttls(context=context)
+                    server.ehlo()
+                    server.login(self.email_user, self.email_password)
+                    server.send_message(msg)
+
+            return {"success": True, "message": "Bug report sent"}
+        except Exception as e:
+            logger.error(f"Failed to send bug report: {e}")
+            return {"success": False, "message": f"Failed to send bug report: {str(e)}"}

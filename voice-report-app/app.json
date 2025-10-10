@@ -20,7 +20,8 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Allow Voice Report App to access the microphone to record voice notes and generate summaries."
+  "NSMicrophoneUsageDescription": "Allow Voice Report App to access the microphone to record voice notes and generate summaries.",
+  "NSPhotoLibraryUsageDescription": "Allow Voice Report App to access your photo library to attach screenshots to feedback emails."
       }
     },
     "android": {
@@ -37,7 +38,7 @@
         "backgroundColor": "#101214",
         "barStyle": "light-content"
       },
-      "permissions": ["RECORD_AUDIO"]
+  "permissions": ["RECORD_AUDIO", "READ_MEDIA_IMAGES"]
     },
     "web": {
       "favicon": "./assets/favicon.png"
