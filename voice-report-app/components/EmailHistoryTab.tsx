@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Platform,
 } from 'react-native';
+import { useFontScale } from '../context/FontScaleContext';
 
 interface Props {
   onPress: () => void;
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export default function EmailHistoryTab({ onPress, emailCount = 0 }: Props): JSX.Element {
+  const { scaled } = useFontScale();
   return (
     <TouchableOpacity
       style={styles.tabContainer}
@@ -22,18 +24,18 @@ export default function EmailHistoryTab({ onPress, emailCount = 0 }: Props): JSX
     >
       <View style={styles.tabContent}>
         <View style={styles.iconContainer}>
-          <Text style={styles.icon}>📧</Text>
+          <Text style={[styles.icon, { fontSize: scaled(20) }]}>📧</Text>
         </View>
         <View style={styles.textContainer}>
-          <Text style={styles.tabText}>History</Text>
+          <Text style={[styles.tabText, { fontSize: scaled(15) }]}>History</Text>
           {emailCount > 0 && (
             <View style={styles.badge}>
-              <Text style={styles.badgeText}>{emailCount}</Text>
+              <Text style={[styles.badgeText, { fontSize: scaled(11) }]}>{emailCount}</Text>
             </View>
           )}
         </View>
         <View style={styles.arrow}>
-          <Text style={styles.arrowText}>›</Text>
+          <Text style={[styles.arrowText, { fontSize: scaled(24) }]}>›</Text>
         </View>
       </View>
     </TouchableOpacity>

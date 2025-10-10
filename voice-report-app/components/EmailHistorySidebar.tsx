@@ -23,6 +23,7 @@ import { EmailHistoryItem } from '../services/emailHistoryService';
 import emailHistoryService from '../services/emailHistoryService';
 import draftService, { DraftItem } from '../services/draftService';
 import { useTheme } from '../context/ThemeContext';
+import { useFontScale } from '../context/FontScaleContext';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -43,6 +44,7 @@ export default function EmailHistorySidebar({
   onSelectEmail,
 }: EmailHistorySidebarProps) {
   const { colors, isDark } = useTheme();
+  const { scaled } = useFontScale();
   const [history, setHistory] = useState<EmailHistoryItem[]>([]);
   const [grouped, setGrouped] = useState<{
     key: string;
@@ -457,9 +459,9 @@ export default function EmailHistorySidebar({
         >
           {/* Header */}
           <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-            <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>History</Text>
+            <Text style={[styles.headerTitle, { color: colors.textPrimary, fontSize: scaled(24) }]}>History</Text>
             <TouchableOpacity onPress={onClose} style={[styles.closeButton, { backgroundColor: colors.surfaceAlt }]}>
-              <Ionicons name="close" size={20} color={colors.textSecondary} />
+              <Ionicons name="close" size={scaled(20)} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
@@ -486,9 +488,10 @@ export default function EmailHistorySidebar({
                   ]}
                   onPress={() => setMode('sent')}
                 >
-                  <Text
+          <Text
                     style={[
-                      styles.segmentText,
+            styles.segmentText,
+            { fontSize: scaled(13) },
                       mode === 'sent' && (isDark ? { color: colors.accentContrast } : styles.segmentTextActive),
                     ]}
                   >
@@ -504,9 +507,10 @@ export default function EmailHistorySidebar({
                   ]}
                   onPress={() => setMode('drafts')}
                 >
-                  <Text
+          <Text
                     style={[
-                      styles.segmentText,
+            styles.segmentText,
+            { fontSize: scaled(13) },
                       mode === 'drafts' && (isDark ? { color: colors.accentContrast } : styles.segmentTextActive),
                     ]}
                   >
@@ -529,9 +533,10 @@ export default function EmailHistorySidebar({
                   ]}
                   onPress={() => setTimeRange('recent')}
                 >
-                  <Text
+          <Text
                     style={[
-                      styles.segmentTextSmall,
+            styles.segmentTextSmall,
+            { fontSize: scaled(12) },
                       timeRange === 'recent' && (isDark ? { color: colors.accentContrast } : styles.segmentTextSmallActive),
                     ]}
                   >
@@ -547,9 +552,10 @@ export default function EmailHistorySidebar({
                   ]}
                   onPress={() => setTimeRange('week')}
                 >
-                  <Text
+          <Text
                     style={[
-                      styles.segmentTextSmall,
+            styles.segmentTextSmall,
+            { fontSize: scaled(12) },
                       timeRange === 'week' && (isDark ? { color: colors.accentContrast } : styles.segmentTextSmallActive),
                     ]}
                   >
@@ -568,6 +574,7 @@ export default function EmailHistorySidebar({
                   <Text
                     style={[
                       styles.segmentTextSmall,
+                      { fontSize: scaled(12) },
                       timeRange === 'all' && (isDark ? { color: colors.accentContrast } : styles.segmentTextSmallActive),
                     ]}
                   >
@@ -583,9 +590,9 @@ export default function EmailHistorySidebar({
                   { backgroundColor: isDark ? colors.surfaceAlt : '#F1F2F4', borderColor: colors.border },
                 ]}
               >
-                <Ionicons name="search" size={16} color={colors.textSecondary} style={{ marginRight: 6 }} />
+                <Ionicons name="search" size={scaled(16)} color={colors.textSecondary} style={{ marginRight: 6 }} />
                 <TextInput
-                  style={styles.searchInput}
+                  style={[styles.searchInput, { fontSize: scaled(14), color: colors.textPrimary }]}
                   placeholder="Search WO, location, recipient"
                   placeholderTextColor={colors.textSecondary}
                   value={search}
@@ -609,6 +616,7 @@ export default function EmailHistorySidebar({
                 <Text
                   style={[
                     styles.compactToggleText,
+                    { fontSize: scaled(13) },
                     compact && isDark ? { color: colors.accentContrast } : { color: colors.textPrimary },
                   ]}
                 >
@@ -619,12 +627,12 @@ export default function EmailHistorySidebar({
             {(mode === 'sent' ? history.length === 0 : drafts.length === 0) ? (
               <View style={styles.emptyState}>
                 <View style={styles.emptyIconCircle}>
-                  <Ionicons name="mail-open" size={36} color={colors.textSecondary} />
+                  <Ionicons name="mail-open" size={scaled(36)} color={colors.textSecondary} />
                 </View>
-                <Text style={[styles.emptyText, { color: colors.textPrimary }]}>
+                <Text style={[styles.emptyText, { color: colors.textPrimary, fontSize: scaled(18) }]}> 
                   {mode === 'sent' ? 'No Emails Sent Yet' : 'No Drafts'}
                 </Text>
-                <Text style={[styles.emptySubtext, { color: colors.textSecondary }] }>
+                <Text style={[styles.emptySubtext, { color: colors.textSecondary, fontSize: scaled(14) }] }>
                   {mode === 'sent' ? 'Your sent closeout reports will appear here for easy access' : 'Save drafts from the Summary screen to finish later'}
                 </Text>
               </View>
@@ -739,10 +747,10 @@ export default function EmailHistorySidebar({
                         <View key={draft.id} style={styles.swipeContainer}>
                           <Animated.View style={[styles.swipeUnderlay, { opacity: deleteProgress }]}>
                             <Animated.View style={[styles.deleteIconContainer, { transform: [{ scale: deleteIconScale }], opacity: deleteIconOpacity }]}>
-                              <Text style={styles.deleteIcon}>✕</Text>
+                              <Text style={[styles.deleteIcon, { fontSize: scaled(22) }]}>✕</Text>
                             </Animated.View>
                             <Animated.View style={{ opacity: deleteProgress }}>
-                              <Text style={styles.swipeUnderlayText}>Release to Delete</Text>
+                              <Text style={[styles.swipeUnderlayText, { fontSize: scaled(16) }]}>Release to Delete</Text>
                             </Animated.View>
                           </Animated.View>
 
@@ -778,10 +786,10 @@ export default function EmailHistorySidebar({
                                 } as any); } catch {}
                               }}
                             >
-                              <Text style={[styles.rowTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+                              <Text style={[styles.rowTitle, { color: colors.textPrimary, fontSize: scaled(14) }]} numberOfLines={1}>
                                 {draft.location || 'Unknown Location'} • WO {draft.workOrder || 'N/A'}
                               </Text>
-                              <Text style={[styles.rowMeta, { color: colors.textSecondary }]} numberOfLines={1}>
+                              <Text style={[styles.rowMeta, { color: colors.textSecondary, fontSize: scaled(12) }]} numberOfLines={1}>
                                 Draft • {formatDateTime(draft.timestamp)}
                               </Text>
                             </TouchableOpacity>
@@ -806,10 +814,10 @@ export default function EmailHistorySidebar({
                       onPress={() => setCollapsedGroups(prev => ({ ...prev, [group.key]: !prev[group.key] }))}
                       activeOpacity={0.8}
                     >
-                      <Text style={[styles.groupTitle, { color: colors.textPrimary }]}>{group.title}</Text>
+                      <Text style={[styles.groupTitle, { color: colors.textPrimary, fontSize: scaled(14) }]}>{group.title}</Text>
                       <View style={styles.groupRight}>
-                        <Text style={[styles.groupCount, { color: colors.textSecondary }]}>{group.items.length}</Text>
-                        <Ionicons name={collapsedGroups[group.key] ? 'chevron-forward' : 'chevron-down'} size={16} color={colors.textSecondary} />
+                        <Text style={[styles.groupCount, { color: colors.textSecondary, fontSize: scaled(12) }]}>{group.items.length}</Text>
+                        <Ionicons name={collapsedGroups[group.key] ? 'chevron-forward' : 'chevron-down'} size={scaled(16)} color={colors.textSecondary} />
                       </View>
                     </TouchableOpacity>
                     {!collapsedGroups[group.key] && group.items
@@ -934,10 +942,10 @@ export default function EmailHistorySidebar({
                             { transform: [{ scale: deleteIconScale }], opacity: deleteIconOpacity },
                           ]}
                         >
-                          <Text style={styles.deleteIcon}>✕</Text>
+                          <Text style={[styles.deleteIcon, { fontSize: scaled(22) }]}>✕</Text>
                         </Animated.View>
                         <Animated.View style={{ opacity: deleteProgress }}>
-                          <Text style={styles.swipeUnderlayText}>Release to Delete</Text>
+                          <Text style={[styles.swipeUnderlayText, { fontSize: scaled(16) }]}>Release to Delete</Text>
                         </Animated.View>
                       </Animated.View>
                       <Animated.View
@@ -964,12 +972,12 @@ export default function EmailHistorySidebar({
                             <Text style={[styles.avatarText, { color: colors.accentContrast }]}>{initials}</Text>
                           </View>
                           <View style={styles.rowMain}>
-                            <Text style={[styles.rowTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+                            <Text style={[styles.rowTitle, { color: colors.textPrimary, fontSize: scaled(14) }]} numberOfLines={1}>
                               {location} • WO {email.workOrder || 'N/A'}
                             </Text>
-                            <Text style={[styles.rowMeta, { color: colors.textSecondary }]} numberOfLines={1}>{timestamp}</Text>
+                            <Text style={[styles.rowMeta, { color: colors.textSecondary, fontSize: scaled(12) }]} numberOfLines={1}>{timestamp}</Text>
                           </View>
-                          <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={18} color={colors.textSecondary} />
+          <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={scaled(18)} color={colors.textSecondary} />
                         </TouchableOpacity>
                         {isExpanded && (
                           <TouchableOpacity
@@ -980,18 +988,18 @@ export default function EmailHistorySidebar({
                           >
                             <View style={styles.rowExpandedSection}>
                               <View style={styles.recipientsRowCompact}>
-                                <Text style={[styles.recipientsLabel, { color: colors.textSecondary }]}>To:</Text>
-                                <Text style={[styles.recipientsText, { color: colors.textPrimary }]} numberOfLines={1}>
+            <Text style={[styles.recipientsLabel, { color: colors.textSecondary, fontSize: scaled(14) }]}>To:</Text>
+            <Text style={[styles.recipientsText, { color: colors.textPrimary, fontSize: scaled(14) }]} numberOfLines={1}>
                                   {email.recipients.join(', ')}
                                 </Text>
                               </View>
                               {email.summary.work_completed && (
-                                <Text style={[styles.previewTextCompact, { color: colors.textSecondary }]} numberOfLines={3}>
+            <Text style={[styles.previewTextCompact, { color: colors.textSecondary, fontSize: scaled(13), lineHeight: scaled(19) }]} numberOfLines={3}>
                                   {email.summary.work_completed}
                                 </Text>
                               )}
                               <View style={styles.actionRowCompact}>
-                                <Text style={[styles.actionTextCompact, { color: colors.textSecondary }]}>Swipe right to delete • Tap for details</Text>
+            <Text style={[styles.actionTextCompact, { color: colors.textSecondary, fontSize: scaled(11) }]}>Swipe right to delete • Tap for details</Text>
                               </View>
                             </View>
                           </TouchableOpacity>
@@ -1011,13 +1019,13 @@ export default function EmailHistorySidebar({
           {(recentlyDeleted || recentlyDeletedDraft) && (
             <View style={[styles.undoBar, { backgroundColor: colors.surfaceAlt, borderColor: colors.accent }]}>
               <TouchableOpacity onPress={recentlyDeleted ? handleUndo : handleUndoDraft} style={styles.undoButton}>
-                <Ionicons name="return-down-back" size={24} color={colors.accent} style={{ marginRight: 12 }} />
-                <Text style={[styles.undoText, { color: colors.textPrimary }]}>
+                <Ionicons name="return-down-back" size={scaled(24)} color={colors.accent} style={{ marginRight: 12 }} />
+                <Text style={[styles.undoText, { color: colors.textPrimary, fontSize: scaled(15) }]}>
                   {recentlyDeleted ? 'Restore deleted email' : 'Restore deleted draft'}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => { setRecentlyDeleted(null); setRecentlyDeletedDraft(null); }} style={[styles.undoDismiss, { backgroundColor: colors.surface }] }>
-                <Text style={[styles.undoDismissText, { color: colors.textSecondary }]}>Dismiss</Text>
+                <Text style={[styles.undoDismissText, { color: colors.textSecondary, fontSize: scaled(18) }]}>Dismiss</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -1482,7 +1490,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 12,
-    gap: 10,
+  gap: 10,
+  flexWrap: 'wrap',
   },
   segment: {
     flexDirection: 'row',
@@ -1490,6 +1499,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 4,
     gap: 6,
+  flexShrink: 1,
+  minWidth: 0,
   },
   segmentBtn: {
     paddingVertical: 6,
@@ -1516,11 +1527,14 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 4,
     gap: 4,
+  flexShrink: 1,
+  minWidth: 0,
   },
   segmentBtnSmall: {
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 8,
+  flexShrink: 1,
   },
   segmentBtnSmallActive: {
     backgroundColor: '#FFEDE5',
@@ -1544,6 +1558,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#E5E7EB',
+  minWidth: 160,
   },
   searchIcon: { fontSize: 16, marginRight: 6 },
   searchInput: {
@@ -1561,6 +1576,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFEDE5',
+  flexShrink: 0,
+  minWidth: 110,
   },
   compactToggleActive: {
     backgroundColor: '#FFDECC',
