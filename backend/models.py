@@ -81,3 +81,18 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     services: Dict[str, str]
+
+# Bug report models
+class BugImage(BaseModel):
+    filename: Optional[str] = None
+    content_type: Optional[str] = None
+    data_base64: str
+
+class BugReportRequest(BaseModel):
+    description: str
+    reporter_email: Optional[str] = None
+    images: Optional[List[BugImage]] = []
+
+class BugReportResponse(BaseModel):
+    success: bool
+    message: str

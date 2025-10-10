@@ -3,7 +3,7 @@ import axios, { AxiosError } from 'axios';
 import { File } from 'expo-file-system';
 import * as FileSystemLegacy from 'expo-file-system/legacy';
 import { API_CONFIG } from './api-config';
-import { TranscriptionResponse, SummaryResponse, EmailResponse, CloseoutSummary, ApiError } from '../types/api';
+import { TranscriptionResponse, SummaryResponse, EmailResponse, CloseoutSummary, ApiError, BugReportRequest, BugReportResponse, BugImagePayload } from '../types/api';
 
 // =============================================================================
 // BACKEND CONNECTION MANAGEMENT
@@ -311,4 +311,47 @@ export async function sendEmailLegacy(
   technicianName: string
 ): Promise<EmailResponse> {
   return sendCloseoutEmail({ summary, transcription });
+}
+
+// =============================================================================
+// BUG REPORT API
+// =============================================================================
+
+async function fileUriToBase64(uri: string): Promise<{ data: string; filename: string; contentType: string } | null> {
+  try {
+    // Heuristic filename & content type
+    const pathParts = uri.split(/[\/]/).pop() || 'screenshot.jpg';
+    const ext = (pathParts.split('.').pop() || 'jpg').toLowerCase();
+    const contentType = ext === 'png' ? 'image/png' : ext === 'heic' ? 'image/heic' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+    const base64 = await FileSystemLegacy.readAsStringAsync(uri, { encoding: FileSystemLegacy.EncodingType.Base64 });
+    return { data: base64, filename: pathParts, contentType };
+  } catch (e) {
+    console.warn('Failed to read file for bug report', e);
+    return null;
+  }
+}
+
+export async function submitBugReport(payload: { description: string; reporterEmail?: string; imageUris?: string[] }): Promise<BugReportResponse> {
+  const workingBackendUrl = await getWorkingBackend();
+  try {
+    const images: BugImagePayload[] = [];
+    for (const uri of payload.imageUris || []) {
+      const info = await fileUriToBase64(uri);
+      if (info) {
+        images.push({ filename: info.filename, content_type: info.contentType, data_base64: info.data });
+      }
+    }
+    const response = await axios.post(
+      `${workingBackendUrl}/bug-report`,
+      {
+        description: payload.description,
+        reporter_email: payload.reporterEmail,
+        images,
+      } as BugReportRequest,
+      createRequestConfig(30000)
+    );
+    return response.data as BugReportResponse;
+  } catch (error) {
+    throw handleApiError(error, 'submit bug report');
+  }
 }

@@ -51,3 +51,20 @@ export interface ApiError {
   message?: string;
   status?: number;
 }
+
+export interface BugImagePayload {
+  filename?: string;
+  content_type?: string;
+  data_base64: string;
+}
+
+export interface BugReportRequest {
+  description: string;
+  reporter_email?: string;
+  images?: BugImagePayload[];
+}
+
+export interface BugReportResponse {
+  success: boolean;
+  message: string;
+}

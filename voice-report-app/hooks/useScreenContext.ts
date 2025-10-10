@@ -6,7 +6,9 @@ import { ScreenContext, FieldInfo, CloseoutSummary } from '../types/aiAgent';
 export const useSummaryScreenContext = (
   editableSummary: CloseoutSummary,
   isPreviewMode: boolean, // Keep parameter for compatibility but always treat as false
-  editableTranscription: string
+  editableTranscription: string,
+  history?: Record<string, { previous?: string; current: string }>,
+  historyMeta?: Record<string, number>
 ): ScreenContext => {
   return useMemo(() => {
     const fields: FieldInfo[] = [
@@ -89,7 +91,15 @@ export const useSummaryScreenContext = (
         isEditable: true, // Always editable
         synonyms: ['work order', 'order number', 'wo', 'work order number']
       },
-      // (Removed) location, datetime, technician_name - not exposed in UI anymore
+      {
+        name: 'location',
+        label: 'Location / Site',
+        currentValue: editableSummary.location || '',
+        type: 'text',
+        isEditable: true,
+        synonyms: ['location', 'site', 'store', 'facility', 'building', 'where']
+      },
+      // (Removed) datetime, technician_name - still optional for voice
       
       // LEGACY FIELDS FOR COMPATIBILITY
       {
@@ -139,6 +149,8 @@ export const useSummaryScreenContext = (
         'email_sending'
       ],
       timestamp: new Date().toISOString(),
+      history: history || {},
+      history_meta: historyMeta || {}
     };
-  }, [editableSummary, editableTranscription]); // Removed isPreviewMode dependency
+  }, [editableSummary, editableTranscription, history, historyMeta]); // Removed isPreviewMode dependency
 };

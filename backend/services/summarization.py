@@ -36,7 +36,7 @@ class SummarizationService:
             
             # Log final results
             populated = sum(1 for v in final_summary.values() if v != "Not mentioned")
-            logger.info(f"Final extraction complete: {populated}/16 fields populated")
+            logger.info(f"Final extraction complete: {populated}/{len(final_summary)} fields populated")
             for field, value in final_summary.items():
                 if value != "Not mentioned":
                     logger.info(f"  - {field}: {value[:50]}...")
@@ -54,9 +54,51 @@ class SummarizationService:
         """Extract fields using regex patterns - very fast and accurate for structured data"""
         result = self._get_empty_summary()
         text_lower = transcription.lower()
-        
-        # LOCATION extraction - FIXED to avoid "Site Delay"
-        # (Removed) location/datetime extraction — not required by current workflow
+
+        # LOCATION extraction (reintroduced & improved)
+        # Heuristics: capture site/store/location names while avoiding delay phrases.
+        # We try several targeted patterns and pick the first high-confidence match.
+        location = None
+        location_patterns = [
+            # Explicit labels
+            r'(?:location|site|store)\s*[:#-]\s*([A-Z0-9][A-Za-z0-9&@.\- ]{2,60})',
+            r'(?:at|arrived at|on site at|onsite at)\s+([A-Z][A-Za-z0-9&@.\- ]{2,60})',
+            # Store / site number alone
+            r'(?:store|site)\s+#?(\d{3,8})',
+        ]
+        exclusion_substrings = {'delay', 'delayed', 'waiting', 'waited'}
+        def _clean_location(raw: str) -> Optional[str]:
+            if not raw:
+                return None
+            raw = raw.strip()
+            # Stop at sentence/pause delimiters
+            raw = re.split(r'[\.;\n]', raw)[0]
+            # Trim trailing filler words
+            raw = re.sub(r'\b(today|yesterday|tonight|this morning)\b.*$', '', raw, flags=re.IGNORECASE).strip()
+            # Collapse multiple spaces
+            raw = re.sub(r'\s{2,}', ' ', raw)
+            # Exclude if contains exclusion terms
+            lowered = raw.lower()
+            if any(term in lowered for term in exclusion_substrings):
+                return None
+            # Avoid overly short / generic captures
+            if len(raw) < 3:
+                return None
+            # Normalize store / site number capture
+            if re.fullmatch(r'\d{3,8}', raw):
+                raw = f"Store {raw}"  # Add label for clarity
+            return raw.strip(' -:')
+        for pattern in location_patterns:
+            match = re.search(pattern, transcription, re.IGNORECASE)
+            if match:
+                candidate = match.group(1)
+                cleaned = _clean_location(candidate)
+                if cleaned:
+                    location = cleaned
+                    logger.info(f"Found location (pattern): {location}")
+                    break
+        if location:
+            result['location'] = location
         
         # ONSITE CONTACT - specific patterns
         contact_patterns = [
@@ -106,18 +148,21 @@ class SummarizationService:
                 logger.info(f"Found delays: {result['delays']}")
                 break
         
-        # RELEASE CODE - alphanumeric codes
-        code_patterns = [
-            r'(?:release\s+)?code[:\s]+([A-Z0-9]{3,})',
-            r'(?:ticket|reference|confirmation)\s*#?\s*([A-Z0-9]{4,})',
-        ]
-        
-        for pattern in code_patterns:
-            match = re.search(pattern, transcription, re.IGNORECASE)
-            if match:
-                result['release_code'] = match.group(1)
-                logger.info(f"Found release code: {result['release_code']}")
-                break
+        # RELEASE CODE - SKIP PATTERN MATCHING, LET GPT HANDLE IT
+        # 
+        # Why: Release codes have too many formats and are embedded in natural language.
+        # Pattern matching struggles with:
+        # - Variable formats (MC-2024-1587, 1927393, WM-AUTH-9847, etc.)
+        # - Filler words ("he gave me was 1927393")
+        # - Ambiguous boundaries
+        # 
+        # GPT extraction handles these cases much better with context understanding.
+        # Pattern matching is skipped for this field - GPT-only extraction.
+
+        logger.debug("Skipping pattern matching for release_code - relying on GPT extraction")
+
+        # Don't set result['release_code'] here - let GPT handle it entirely
+        # The merge logic will use GPT's result
         
         # PHOTOS
         photo_patterns = [
@@ -185,31 +230,87 @@ TRANSCRIPTION:
 
 IMPORTANT RULES:
 1. work_completed: List ONLY the actual work performed (installed, configured, verified, etc.). Do NOT include troubleshooting or diagnostic steps.
-2. troubleshooting_steps: List ONLY diagnostic and troubleshooting actions (tested, checked, tried different ports, etc.)
-3. location: Extract the actual location/site name, NOT delays or other information
-4. Keep each field distinct - do not mix content between fields
+2. troubleshooting_steps: List ONLY diagnostic and troubleshooting actions (tested, checked, tried different ports, etc.).
+3. location: Extract ONLY the actual site/location name (store, facility, company site). Do NOT include delay phrases or time info.
+4. Keep each field distinct - do not mix content between fields.
+5. If a field is not clearly stated, return "Not mentioned" exactly.
 
 EXTRACT THESE FIELDS:
 
 1. onsite_contact: Name of person met at site (just the name)
 2. support_contact: Name of support/IT person (just the name)
-3. work_completed: Tasks actually completed (e.g., "Installed new AP, configured settings, verified connectivity")
-4. delays: Any delays and their causes
-5. troubleshooting_steps: Diagnostic steps taken (e.g., "Tested cable, checked power, tried different port")
-6. scope_completed: Was work finished? (Yes/No/Partially)
-7. released_by: Who signed off
-8. release_code: Any reference numbers
-9. return_tracking: Shipping/tracking info
-10. expenses: Money spent (parking, etc.)
-11. materials_used: Parts/equipment used
-12. out_of_scope_work: Extra work beyond original scope
-13. work_order: Work order number if mentioned
-16. photos_uploaded: Number of photos taken
+3. location: Actual site / store / facility name
+4. work_completed: Tasks actually completed (e.g., "Installed new AP, configured settings, verified connectivity")
+5. delays: Any delays and their causes
+6. troubleshooting_steps: Diagnostic steps taken (e.g., "Tested cable, checked power, tried different port")
+7. scope_completed: Was work finished? (Yes/No/Partially)
+8. released_by: Who signed off
+9. release_code: Authorization, confirmation, or reference code/number
+   
+    \u26a0\ufe0f CRITICAL - EXTRACTION RULES (Read Carefully):
+   
+    WHAT TO LOOK FOR:
+    - Phrases like: "confirmation code", "release code", "authorization code", "gave me [CODE]"
+    - The code is typically mentioned AFTER these trigger phrases
+    - May be just a number, or letters-numbers-hyphens combination
+   
+    WHAT TO EXTRACT:
+    - Extract ONLY the actual code value (the alphanumeric identifier)
+    - DO NOT include trigger words like: "code", "was", "is", "gave", "me", "the"
+    - DO NOT include English filler words: "he", "she", "and", "or"
+   
+    EXTRACTION EXAMPLES (Learn from these):
+   
+    Example 1:
+    Input: "he gave me was 1927393"
+    Correct extraction: "1927393"
+    Wrong extraction: "was-1927393" \u274c (don't include "was")
+   
+    Example 2:
+    Input: "confirmation code was MC-2024-1587"
+    Correct extraction: "MC-2024-1587"
+    Wrong extraction: "code-was-MC-2024-1587" \u274c (don't include "code" or "was")
+   
+    Example 3:
+    Input: "released by Robert Chen and the confirmation code he gave me was MC-2024-1587"
+    Correct extraction: "MC-2024-1587"
+    Wrong extraction: "he-gave-me-was-MC-2024-1587" \u274c (don't include context)
+   
+    Example 4:
+    Input: "authorization OG-2024-CH-17"
+    Correct extraction: "OG-2024-CH-17"
+   
+    Example 5:
+    Input: "ticket number E-04721"
+    Correct extraction: "E-04721"
+   
+    Example 6:
+    Input: "gave me code alpha seven niner two three"
+    Correct extraction: "ALPHA-7923" or "alpha seven niner two three"
+   
+    VALIDATION:
+    - Must be at least 3 characters long
+    - Should contain at least one number OR be 4+ uppercase letters
+    - May contain hyphens, letters, and numbers
+    - Should NOT be a common English word
+   
+    COMMON FORMATS YOU'LL SEE:
+    - All numbers: "1927393", "123456"
+    - Letter-number: "E-04721", "MC-2024-1587"
+    - Complex: "WM-AUTH-9847", "OG-2024-CH-17"
+    - Alphanumeric: "AUTH9847", "MC20241587"
+10. return_tracking: Shipping/tracking info
+11. expenses: Money spent (parking, etc.)
+12. materials_used: Parts/equipment used
+13. out_of_scope_work: Extra work beyond original scope
+14. work_order: Work order number if mentioned
+15. photos_uploaded: Number of photos taken
 
 Return ONLY this JSON (no markdown):
 {{
   "onsite_contact": "value or Not mentioned",
   "support_contact": "value or Not mentioned",
+    "location": "value or Not mentioned",
   "work_completed": "value or Not mentioned",
   "delays": "value or Not mentioned",
   "troubleshooting_steps": "value or Not mentioned",
@@ -280,21 +381,27 @@ Return ONLY this JSON (no markdown):
         for field in final.keys():
             gpt_val = gpt_results.get(field, "Not mentioned")
             pattern_val = pattern_results.get(field, "Not mentioned")
-            
-            # Prefer patterns for structured data (more accurate for these)
-            if field in ['release_code', 'photos_uploaded', 'expenses']:
+
+            # RELEASE_CODE: Always use GPT (no pattern matching)
+            if field == 'release_code':
+                final[field] = gpt_val
+                logger.info(f"Using GPT-only extraction for release_code: {gpt_val}")
+                continue
+
+            # Prefer patterns for structured data (photos, expenses, work_order)
+            if field in ['photos_uploaded', 'expenses', 'work_order']:
                 if pattern_val != "Not mentioned":
                     final[field] = pattern_val
                 elif gpt_val != "Not mentioned":
                     final[field] = gpt_val
-            
+
             # Prefer GPT for complex narrative fields
             elif field in ['work_completed', 'troubleshooting_steps', 'delays', 'out_of_scope_work']:
                 if gpt_val != "Not mentioned":
                     final[field] = gpt_val
                 elif pattern_val != "Not mentioned":
                     final[field] = pattern_val
-            
+
             # For names and other fields, prefer GPT but check both
             else:
                 if gpt_val != "Not mentioned":
@@ -309,6 +416,7 @@ Return ONLY this JSON (no markdown):
         return {
             "onsite_contact": "Not mentioned",
             "support_contact": "Not mentioned",
+            "location": "Not mentioned",
             "work_completed": "Not mentioned",
             "delays": "Not mentioned",
             "troubleshooting_steps": "Not mentioned",

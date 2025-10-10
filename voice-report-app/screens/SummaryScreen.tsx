@@ -14,10 +14,11 @@ import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
 import { sendCloseoutEmail } from '../services/api';
 import emailHistoryService from '../services/emailHistoryService';
+import draftService from '../services/draftService';
 import AIAgent from '../components/AIAgent';
 import EmailSuccessPopup from '../components/EmailSuccessPopup';
-import { useSummaryScreenContext } from '../hooks/useScreenContext';
-import { CloseoutSummary } from '../types/aiAgent';
+import DraftSavedPopup from '../components/DraftSavedPopup';
+import { CloseoutSummary, ScreenContext } from '../types/aiAgent';
 import { useFontScale } from '../context/FontScaleContext';
 import userProfileService from '../services/userProfileService';
 import { useTheme } from '../context/ThemeContext';
@@ -40,6 +41,8 @@ interface EditableFieldProps {
   isEditing: boolean;
   multiline?: boolean;
   placeholder?: string;
+  highlight?: boolean;
+  highlightBadge?: string;
 }
 
 const EditableField: React.FC<EditableFieldProps & { scaled:(n:number)=>number }> = ({
@@ -50,19 +53,41 @@ const EditableField: React.FC<EditableFieldProps & { scaled:(n:number)=>number }
   multiline = false,
   placeholder = '',
   scaled,
+  highlight = false,
+  highlightBadge = 'AI updated'
 }) => {
   const { colors, isDark } = useTheme();
+  const accent = colors.accent || '#FF6B35';
+  const fieldBorderColor = highlight ? accent : colors.border;
+  const fieldBg = isEditing
+    ? (isDark ? colors.surfaceAlt : '#fff')
+    : (isDark ? colors.surfaceAlt : '#ecf0f1');
+  const highlightGlow = highlight ? {
+    shadowColor: accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
+    elevation: 6,
+  } : {};
+
   return (
-    <View style={styles.fieldContainer}>
-      {!!label && <Text style={[styles.fieldLabel, { fontSize: scaled(14), color: colors.textSecondary }]}>{label}</Text>}
+    <View style={[styles.fieldContainer, highlight && styles.fieldContainerHighlighted]}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: label ? 8 : 0 }}>
+        {!!label && <Text style={[styles.fieldLabel, { fontSize: scaled(14), color: colors.textSecondary }]}>{label}</Text>}
+        {highlight && (
+          <View style={[styles.highlightPill, { backgroundColor: accent + '22', borderColor: accent }]}> 
+            <Text style={[styles.highlightPillText, { color: accent, fontSize: scaled(10) }]}>{highlightBadge}</Text>
+          </View>
+        )}
+      </View>
       {isEditing ? (
         <TextInput
           style={[styles.fieldInput, {
             fontSize: scaled(16),
-            backgroundColor: isDark ? colors.surfaceAlt : '#fff',
-            borderColor: colors.border,
+            backgroundColor: fieldBg,
+            borderColor: fieldBorderColor,
             color: colors.textPrimary,
-          }, multiline && styles.multilineInput]}
+          }, multiline && styles.multilineInput, highlightGlow]}
           value={value}
           onChangeText={onChangeText}
           multiline={multiline}
@@ -73,9 +98,11 @@ const EditableField: React.FC<EditableFieldProps & { scaled:(n:number)=>number }
       ) : (
         <Text style={[styles.fieldValue, {
           fontSize: scaled(16),
-          color: colors.textPrimary,
-          backgroundColor: isDark ? colors.surfaceAlt : '#ecf0f1',
-        }]}>
+            color: colors.textPrimary,
+            backgroundColor: fieldBg,
+            borderColor: fieldBorderColor,
+          }, highlightGlow]}
+        >
           {value || 'Not specified'}
         </Text>
       )}
@@ -129,14 +156,43 @@ export default function SummaryScreen({ navigation, route }: Props) {
     return result;
   };
 
-  const [editableSummary, setEditableSummary] = useState<CloseoutSummary>(
+  // One-time initializer prevents remount or hot-refresh from reusing stale route params
+  const [editableSummary, setEditableSummary] = useState<CloseoutSummary>(() =>
     initializeCloseoutSummary(route.params.summary)
   );
   const [editableTranscription, setEditableTranscription] = useState(route.params.transcription);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const [showDraftSaved, setShowDraftSaved] = useState(false);
   const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [hasAutoSent, setHasAutoSent] = useState(false);
+  // Track recent AI updates (field -> timestamp)
+  const [aiFieldUpdates, setAiFieldUpdates] = useState<Record<string, number>>({});
+  const [fieldHistory, setFieldHistory] = useState<Record<string, { previous?: string; current: string }>>({});
+  const [fieldHistoryMeta, setFieldHistoryMeta] = useState<Record<string, number>>({});
+
+  // Highlight window (ms)
+  const HIGHLIGHT_WINDOW_MS = 8000;
+  const shouldHighlight = (field: string) => {
+    const ts = aiFieldUpdates[field];
+    return !!ts && (Date.now() - ts) < HIGHLIGHT_WINDOW_MS;
+  };
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAiFieldUpdates(prev => {
+        const now = Date.now();
+        let changed = false;
+        const next: Record<string, number> = {};
+        for (const [k, v] of Object.entries(prev)) {
+            if (now - v < HIGHLIGHT_WINDOW_MS) next[k] = v; else changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Load technician profile for pre-fill
   useEffect(() => {
@@ -159,12 +215,171 @@ export default function SummaryScreen({ navigation, route }: Props) {
     })();
   }, []);
 
-  // Enhanced screen context for AI - always in edit mode
-  const screenContext = useSummaryScreenContext(
-    editableSummary,
-    false, // Always false (edit mode)
-    editableTranscription
-  );
+  // Build complete screen context for AI Agent
+  const buildScreenContext = (): ScreenContext => {
+    return {
+      screenName: 'summary',
+      mode: 'edit',
+      visibleFields: [
+        {
+          name: 'onsite_contact',
+          label: 'Who did you meet on-site?',
+          type: 'text',
+          currentValue: editableSummary.onsite_contact || '',
+          isEditable: true,
+          synonyms: ['onsite', 'contact', 'met with', 'onsite contact', 'site contact']
+        },
+        {
+          name: 'work_order',
+          label: 'Work Order #',
+          type: 'text',
+          currentValue: editableSummary.work_order || '',
+          isEditable: true,
+          synonyms: ['work order', 'wo', 'ticket number', 'job number', 'order number']
+        },
+        {
+          name: 'location',
+          label: 'Location',
+          type: 'text',
+          currentValue: editableSummary.location || '',
+          isEditable: true,
+          synonyms: ['location', 'site', 'store', 'facility', 'address', 'place']
+        },
+        {
+          name: 'technician_name',
+          label: 'Technician Name',
+          type: 'text',
+          currentValue: editableSummary.technician_name || '',
+          isEditable: true,
+          synonyms: ['technician', 'tech name', 'my name', 'installer', 'tech']
+        },
+        {
+          name: 'support_contact',
+          label: 'Who did you work with for support?',
+          type: 'text',
+          currentValue: editableSummary.support_contact || '',
+          isEditable: true,
+          synonyms: ['support', 'support contact', 'it contact', 'helped by', 'support person']
+        },
+        {
+          name: 'work_completed',
+          label: 'What work was completed?',
+          type: 'multiline',
+          currentValue: editableSummary.work_completed || '',
+          isEditable: true,
+          synonyms: ['work', 'completed', 'tasks', 'work done', 'installed', 'work completed']
+        },
+        {
+          name: 'delays',
+          label: 'Were there any delays?',
+          type: 'text',
+          currentValue: editableSummary.delays || '',
+          isEditable: true,
+          synonyms: ['delays', 'delay', 'delayed', 'hold ups', 'wait time']
+        },
+        {
+          name: 'troubleshooting_steps',
+          label: 'What troubleshooting steps did you take?',
+          type: 'multiline',
+          currentValue: editableSummary.troubleshooting_steps || '',
+          isEditable: true,
+          synonyms: ['troubleshooting', 'troubleshooting steps', 'diagnostic steps', 'diagnostics', 'troubleshoot', 'tested', 'checked']
+        },
+        {
+          name: 'scope_completed',
+          label: 'Was the scope completed successfully?',
+          type: 'text',
+          currentValue: editableSummary.scope_completed || '',
+          isEditable: true,
+          synonyms: ['scope', 'scope completed', 'finished', 'completed successfully', 'done', 'job complete']
+        },
+        {
+          name: 'released_by',
+          label: 'Who released you?',
+          type: 'text',
+          currentValue: editableSummary.released_by || '',
+          isEditable: true,
+          synonyms: ['released by', 'signed off by', 'released', 'approved by', 'release']
+        },
+        {
+          name: 'release_code',
+          label: 'Release Code',
+          type: 'text',
+          currentValue: editableSummary.release_code || '',
+          isEditable: true,
+          synonyms: ['release code', 'confirmation code', 'reference number', 'ticket', 'code']
+        },
+        {
+          name: 'return_tracking',
+          label: 'Return Tracking #',
+          type: 'text',
+          currentValue: editableSummary.return_tracking || '',
+          isEditable: true,
+          synonyms: ['return tracking', 'tracking number', 'shipping', 'rma', 'tracking']
+        },
+        {
+          name: 'expenses',
+          label: 'Expenses',
+          type: 'text',
+          currentValue: editableSummary.expenses || '',
+          isEditable: true,
+          synonyms: ['expenses', 'costs', 'parking', 'tolls', 'spent', 'money']
+        },
+        {
+          name: 'materials_used',
+          label: 'Materials Used',
+          type: 'text',
+          currentValue: editableSummary.materials_used || '',
+          isEditable: true,
+          synonyms: ['materials', 'materials used', 'parts', 'equipment', 'supplies', 'used']
+        },
+        {
+          name: 'out_of_scope_work',
+          label: 'Out of Scope Work',
+          type: 'multiline',
+          currentValue: editableSummary.out_of_scope_work || '',
+          isEditable: true,
+          synonyms: ['out of scope', 'additional work', 'extra work', 'beyond scope', 'additional']
+        },
+        {
+          name: 'photos_uploaded',
+          label: 'Photos Uploaded',
+          type: 'text',
+          currentValue: editableSummary.photos_uploaded || '',
+          isEditable: true,
+          synonyms: ['photos', 'photos uploaded', 'pictures', 'images', 'pics', 'photo']
+        },
+        {
+          name: 'transcription',
+          label: 'Original Transcript',
+          type: 'multiline',
+          currentValue: editableTranscription || '',
+          isEditable: false,
+          synonyms: ['transcript', 'transcription', 'recording', 'original', 'original transcript']
+        }
+      ],
+      currentValues: {
+        onsite_contact: editableSummary.onsite_contact || '',
+        work_order: editableSummary.work_order || '',
+        location: editableSummary.location || '',
+        technician_name: editableSummary.technician_name || '',
+        support_contact: editableSummary.support_contact || '',
+        work_completed: editableSummary.work_completed || '',
+        delays: editableSummary.delays || '',
+        troubleshooting_steps: editableSummary.troubleshooting_steps || '',
+        scope_completed: editableSummary.scope_completed || '',
+        released_by: editableSummary.released_by || '',
+        release_code: editableSummary.release_code || '',
+        return_tracking: editableSummary.return_tracking || '',
+        expenses: editableSummary.expenses || '',
+        materials_used: editableSummary.materials_used || '',
+        out_of_scope_work: editableSummary.out_of_scope_work || '',
+        photos_uploaded: editableSummary.photos_uploaded || '',
+        transcription: editableTranscription || ''
+      },
+      availableActions: ['update_field', 'update_fields', 'execute_action']
+    };
+  };
 
   const updateSummaryField = (field: keyof CloseoutSummary, value: string) => {
     setEditableSummary(prev => ({
@@ -195,6 +410,16 @@ export default function SummaryScreen({ navigation, route }: Props) {
       // Show success popup instead of Alert
       setEmailRecipients(emailResponse.recipients);
       setShowSuccessPopup(true);
+
+      // If this Summary originated from a draft, remove the draft once successfully sent
+      try {
+        const did = route.params?.draftId;
+        if (did) {
+          await draftService.deleteDraft(did);
+        }
+      } catch (e) {
+        console.warn('Failed to delete draft after send', e);
+      }
 
       // Persist to local email history (non-blocking)
       (async () => {
@@ -233,17 +458,124 @@ export default function SummaryScreen({ navigation, route }: Props) {
     navigation.navigate('Home');
   };
 
-  const handleFieldUpdate = (fieldName: string, value: string) => {
-    if (fieldName in editableSummary) {
-      updateSummaryField(fieldName as keyof CloseoutSummary, value);
-    } else if (fieldName === 'transcription') {
-      setEditableTranscription(value);
+  const handleSaveDraft = async () => {
+    try {
+      await draftService.addDraft({
+        id: route.params?.draftId,
+        workOrder: editableSummary.work_order,
+        location: editableSummary.location,
+        transcription: editableTranscription,
+        summary: editableSummary,
+      });
+  setShowDraftSaved(true);
+    } catch (e) {
+  alert('Failed to save draft');
     }
+  };
+
+  // Auto-send email if requested by navigation param
+  useEffect(() => {
+    const shouldAutoSend = route.params?.autoSendEmail === true;
+    if (shouldAutoSend && !hasAutoSent && !isSendingEmail) {
+      setHasAutoSent(true);
+      // Defer slightly so UI mounts before sending
+      setTimeout(() => {
+        handleSendEmail().catch(err => {
+          console.warn('Auto-send email failed:', err);
+        });
+      }, 250);
+    }
+  }, [route.params?.autoSendEmail, hasAutoSent, isSendingEmail]);
+
+  const handleFieldUpdate = (fieldName: string, value: string) => {
+    setAiFieldUpdates(prev => ({ ...prev, [fieldName]: Date.now() }));
+    const now = Date.now();
+    if (fieldName === 'transcription') {
+      setFieldHistory(prev => ({
+        ...prev,
+        transcription: {
+          // If first time editing, previous should be the current editableTranscription before change
+          previous: prev.transcription ? (
+            prev.transcription.current !== value ? prev.transcription.current : prev.transcription.previous
+          ) : editableTranscription,
+          current: value
+        }
+      }));
+      setFieldHistoryMeta(prev => ({ ...prev, transcription: now }));
+      setEditableTranscription(value);
+      return;
+    }
+    if (fieldName in editableSummary) {
+      const currentVal = (editableSummary as any)[fieldName] || '';
+      if (currentVal !== value) {
+        setFieldHistory(prev => ({
+          ...prev,
+          [fieldName]: {
+            // If no history yet, capture the current value as the previous baseline
+            previous: prev[fieldName] ? (
+              prev[fieldName].current !== value ? prev[fieldName].current : prev[fieldName].previous
+            ) : currentVal,
+            current: value
+          }
+        }));
+        setFieldHistoryMeta(prev => ({ ...prev, [fieldName]: now }));
+      }
+      updateSummaryField(fieldName as keyof CloseoutSummary, value);
+    }
+  };
+
+  // AI Action handler for execute_action (with detailed diagnostics)
+  const handleAIAction = async (actionName: string, params?: any) => {
+    console.log('═══════════════════════════════════════════════════════');
+    console.log('🎯 handleAIAction CALLED');
+    console.log('🎯 Action name:', actionName);
+    console.log('🎯 Params:', params);
+    console.log('🎯 typeof handleSendEmail:', typeof handleSendEmail);
+    // Optional scope check
+    console.log('🔍 SCOPE CHECK:');
+    console.log('  - handleSendEmail available?', typeof handleSendEmail);
+    console.log('  - isSendingEmail available?', typeof isSendingEmail);
+    console.log('  - setIsSendingEmail available?', typeof setIsSendingEmail);
+    console.log('═══════════════════════════════════════════════════════');
+
+    try {
+      const a = (actionName || '').toLowerCase();
+      if (a === 'send_email' || a === 'send email' || a === 'send_email_report' || a === 'send email report' || a === 'email' || a === 'email_report') {
+        console.log('📧 MATCHED: send_email action');
+        console.log('📧 About to call handleSendEmail()...');
+        console.log('📧 handleSendEmail exists?', typeof handleSendEmail === 'function');
+
+        if (typeof handleSendEmail !== 'function') {
+          console.error('❌ CRITICAL: handleSendEmail is not a function!');
+          console.error('❌ handleSendEmail value:', handleSendEmail);
+          return;
+        }
+
+        console.log('📧 Calling handleSendEmail() NOW...');
+        const result = await handleSendEmail();
+        console.log('📧 handleSendEmail() returned:', result);
+        console.log('✅ Email send completed via AI');
+        return;
+      }
+      if (a === 'generate_summary' || a === 'generate closeout' || a === 'create summary') {
+        console.log('🧾 Generate summary action received (no-op)');
+        return;
+      }
+      console.warn('⚠️ Unknown AI action:', actionName);
+    } catch (error) {
+      console.error(`❌ EXCEPTION in handleAIAction for '${actionName}':`, error);
+      console.error('❌ Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown',
+        stack: error instanceof Error ? error.stack : 'N/A'
+      });
+    }
+
+    console.log('═══════════════════════════════════════════════════════');
   };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }] }>
-      <ScrollView style={styles.scrollContainer}>
+      <ScrollView style={styles.scrollContainer} contentContainerStyle={{ paddingBottom: 180 }}>
         {/* CLOSEOUT NOTES SECTION */}
         <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]} accessibilityRole="header">CLOSEOUT NOTES</Text>
@@ -255,6 +587,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Name and role of on-site contact person..."
             scaled={scaled}
+            highlight={shouldHighlight('onsite_contact')}
           />
 
           <EditableField
@@ -264,6 +597,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Enter the work order number..."
             scaled={scaled}
+            highlight={shouldHighlight('work_order')}
           />
 
           <EditableField
@@ -273,6 +607,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Enter the location / site name..."
             scaled={scaled}
+            highlight={shouldHighlight('location')}
           />
 
           <EditableField
@@ -282,6 +617,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Enter your name..."
             scaled={scaled}
+            highlight={shouldHighlight('technician_name')}
           />
 
           <EditableField
@@ -291,6 +627,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Support team members or remote assistance..."
             scaled={scaled}
+            highlight={shouldHighlight('support_contact')}
           />
 
           <EditableField
@@ -301,6 +638,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="Describe all tasks and work that was completed..."
             scaled={scaled}
+            highlight={shouldHighlight('work_completed')}
           />
 
           <EditableField
@@ -311,6 +649,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="Any delays encountered and reasons..."
             scaled={scaled}
+            highlight={shouldHighlight('delays')}
           />
 
           <EditableField
@@ -321,6 +660,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="Describe debugging or problem-solving steps..."
             scaled={scaled}
+            highlight={shouldHighlight('troubleshooting_steps')}
           />
 
           <EditableField
@@ -331,6 +671,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="Describe the outcome and completion status..."
             scaled={scaled}
+            highlight={shouldHighlight('scope_completed')}
           />
         </View>
 
@@ -347,6 +688,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Name of person who signed off..."
             scaled={scaled}
+            highlight={shouldHighlight('released_by')}
           />
 
           <EditableField
@@ -356,6 +698,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Enter release code if applicable..."
             scaled={scaled}
+            highlight={shouldHighlight('release_code')}
           />
 
           <EditableField
@@ -365,6 +708,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             isEditing={true}
             placeholder="Enter return tracking number..."
             scaled={scaled}
+            highlight={shouldHighlight('return_tracking')}
           />
         </View>
 
@@ -380,6 +724,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="List any expenses incurred..."
             scaled={scaled}
+            highlight={shouldHighlight('expenses')}
           />
 
           <EditableField
@@ -390,6 +735,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="List materials and parts used..."
             scaled={scaled}
+            highlight={shouldHighlight('materials_used')}
           />
         </View>
 
@@ -405,6 +751,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="Describe any work outside the original scope..."
             scaled={scaled}
+            highlight={shouldHighlight('out_of_scope_work')}
           />
 
           <EditableField
@@ -415,6 +762,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             multiline
             placeholder="List photos taken and uploaded..."
             scaled={scaled}
+            highlight={shouldHighlight('photos_uploaded')}
           />
         </View>
 
@@ -430,22 +778,31 @@ export default function SummaryScreen({ navigation, route }: Props) {
               multiline
               placeholder="Original voice transcription..."
               scaled={scaled}
+              highlight={shouldHighlight('transcription')}
+              highlightBadge="AI revised"
             />
           </View>
         </View>
 
-        {/* SEND EMAIL BUTTON */}
+        {/* SEND/SAVE BUTTONS */}
         <View style={styles.actionButtons}>
           <TouchableOpacity
-            style={[styles.emailButton, { backgroundColor: colors.accent }, isSendingEmail && styles.emailButtonDisabled]}
+            style={[styles.primaryButton, { backgroundColor: colors.accent }, isSendingEmail && styles.buttonDisabled]}
             onPress={handleSendEmail}
             disabled={isSendingEmail}
           >
             {isSendingEmail ? (
-              <ActivityIndicator color="white" size="small" />
+              <ActivityIndicator color={colors.accentContrast || '#fff'} size="small" />
             ) : (
-              <Text style={[styles.emailButtonText, { fontSize: scaled(16), color: colors.accentContrast }]}>Send Email Report</Text>
+              <Text style={[styles.buttonText, { fontSize: scaled(16), color: colors.accentContrast || '#fff' }]}>Send Email Report</Text>
             )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.secondaryButton, { backgroundColor: colors.accent }]}
+            onPress={handleSaveDraft}
+            disabled={isSendingEmail}
+          >
+            <Text style={[styles.buttonText, { fontSize: scaled(16), color: colors.accentContrast || '#fff' }]}>Save Draft</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -457,17 +814,19 @@ export default function SummaryScreen({ navigation, route }: Props) {
         onComplete={handleSuccessComplete}
       />
 
+      {/* Draft Saved Popup */}
+      <DraftSavedPopup
+        visible={showDraftSaved}
+        workOrder={editableSummary.work_order}
+        onComplete={() => setShowDraftSaved(false)}
+      />
+
       {/* AI Agent - Floating button always visible */}
       <AIAgent
-        screenContext={screenContext}
+        screenContext={buildScreenContext()}
         onFieldUpdate={handleFieldUpdate}
-        onAction={(action) => {
-          console.log('🎯 AIAgent action triggered:', action);
-          if (action === 'send_email_report' || action === 'send email report') {
-            handleSendEmail();
-          }
-        }}
-        position="bottom-right"
+        onAction={handleAIAction}
+        position="bottom-center"
         showDebugInfo={false}
       />
 
@@ -562,34 +921,48 @@ const styles = StyleSheet.create({
   },
   actionButtons: {
     flexDirection: 'row',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingBottom: 30,
     marginTop: 10,
   },
-  emailButton: {
-    backgroundColor: '#FF6B35',
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    borderRadius: 12,
+  primaryButton: {
+    flex: 1,
+    paddingVertical: 15,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginRight: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 200,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
   },
-  emailButtonDisabled: {
-    backgroundColor: '#bdc3c7',
+  secondaryButton: {
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 100,
   },
-  emailButtonText: {
-    color: 'white',
+  buttonDisabled: {
+    opacity: 0.7,
+  },
+  buttonText: {
     fontSize: 16,
     fontWeight: '600',
+  },
+  fieldContainerHighlighted: {
+    // container highlight wrapper if needed in future
+  },
+  highlightPill: {
+    marginLeft: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  highlightPillText: {
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase'
   },
 });

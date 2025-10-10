@@ -12,7 +12,7 @@ import Recorder from '../components/Recorder';
 import EmailHistorySidebar from '../components/EmailHistorySidebar';
 import { transcribeAudio } from '../services/api';
 import SettingsModal from '../components/SettingsModal'; // explicit import; TS should resolve .tsx
-import { EmailHistoryItem } from '../services/emailHistoryService';
+import emailHistoryService, { EmailHistoryItem } from '../services/emailHistoryService';
 import { useTheme } from '../context/ThemeContext';
 // Pre-require both logos so Metro bundles them and switching is instant
 const LIGHT_LOGO = require('../assets/bears&t.png');
@@ -54,6 +54,7 @@ function HomeScreenInner({ navigation }: Props) {
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>(persistedState.checkedItems);
   const [showChecklist, setShowChecklist] = useState(persistedState.showChecklist);
   const [showHistorySidebar, setShowHistorySidebar] = useState(false);
+  const [emailCount, setEmailCount] = useState(0);
   const [showSettings, setShowSettings] = useState(false); // Settings modal visibility
   
   // Shared recording state - always reset to clean state
@@ -104,6 +105,16 @@ function HomeScreenInner({ navigation }: Props) {
   // Handle navigation events - detect return from summary
   useFocusEffect(
     React.useCallback(() => {
+      // Refresh email count when screen is focused
+      (async () => {
+        try {
+          const emails = await emailHistoryService.getEmailHistory();
+          setEmailCount(Array.isArray(emails) ? emails.length : 0);
+        } catch (e) {
+          setEmailCount(0);
+        }
+      })();
+
       // Check if we should reset (coming back from summary screen)
       if (persistedState.shouldReset) {
         resetAllState();
@@ -125,6 +136,20 @@ function HomeScreenInner({ navigation }: Props) {
   );
 
   // Listen for navigation state changes to detect summary completion
+  useEffect(() => {
+    // When the sidebar closes, refresh the email count (in case of deletes/restores)
+    if (!showHistorySidebar) {
+      (async () => {
+        try {
+          const emails = await emailHistoryService.getEmailHistory();
+          setEmailCount(Array.isArray(emails) ? emails.length : 0);
+        } catch (e) {
+          setEmailCount(0);
+        }
+      })();
+    }
+  }, [showHistorySidebar]);
+
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       // Get the navigation state to check if we're coming from summary
@@ -304,9 +329,11 @@ function HomeScreenInner({ navigation }: Props) {
   const handleEmailSelect = (email: EmailHistoryItem) => {
     console.log('📧 Selected email transcription length:', email.transcription?.length || 0);
     console.log('📧 Transcription preview:', email.transcription ? email.transcription.slice(0, 100) : 'EMPTY');
+    const draftId = (email as any)?._draftId as string | undefined;
     navigation.navigate('Summary', {
       transcription: email.transcription || '',
       summary: email.summary,
+      ...(draftId ? { draftId } : {}),
     });
     // Close sidebar after initiating navigation so Summary shows without being covered
     setShowHistorySidebar(false);
@@ -461,6 +488,11 @@ function HomeScreenInner({ navigation }: Props) {
                   size={24}
                   color={showHistorySidebar ? colors.accentContrast : colors.accent}
                 />
+                {emailCount > 0 && (
+                  <View style={[styles.countBadge, { backgroundColor: colors.accent, borderColor: colors.surface }] }>
+                    <Text style={[styles.countBadgeText, { color: colors.accentContrast }]}>{emailCount}</Text>
+                  </View>
+                )}
               </View>
               <Text style={[styles.navLabel, { fontSize: scaled(12), color: showHistorySidebar ? colors.accent : colors.textSecondary } ]}>History</Text>
             </TouchableOpacity>
@@ -526,6 +558,11 @@ function HomeScreenInner({ navigation }: Props) {
                   size={30}
                   color={showHistorySidebar ? colors.accentContrast : colors.accent}
                 />
+                {emailCount > 0 && (
+                  <View style={[styles.countBadgeLarge, { backgroundColor: colors.accent, borderColor: colors.surface }] }>
+                    <Text style={[styles.countBadgeTextLarge, { color: colors.accentContrast }]}>{emailCount}</Text>
+                  </View>
+                )}
               </View>
               <Text style={[styles.navLabelLarge, { fontSize: scaled(14), color: showHistorySidebar ? colors.accent : colors.textSecondary }]}>History</Text>
             </TouchableOpacity>
@@ -831,6 +868,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 6,
     elevation: 3,
+    position: 'relative',
   },
   navIconContainerLarge: {
     width: 70,
@@ -847,6 +885,39 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     shadowRadius: 8,
     elevation: 4,
+    position: 'relative',
+  },
+  countBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  countBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  countBadgeLarge: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+  },
+  countBadgeTextLarge: {
+    fontSize: 11,
+    fontWeight: '800',
   },
   navIconContainerActive: {
     backgroundColor: '#FF6B35',

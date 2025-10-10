@@ -15,11 +15,15 @@ import {
   PanResponder,
   Easing,
   Platform,
+  TextInput,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { EmailHistoryItem } from '../services/emailHistoryService';
 // import emailHistoryService if it is the default export
 import emailHistoryService from '../services/emailHistoryService';
+import draftService, { DraftItem } from '../services/draftService';
 import { useTheme } from '../context/ThemeContext';
+import { useFontScale } from '../context/FontScaleContext';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -40,8 +44,22 @@ export default function EmailHistorySidebar({
   onSelectEmail,
 }: EmailHistorySidebarProps) {
   const { colors, isDark } = useTheme();
+  const { scaled } = useFontScale();
   const [history, setHistory] = useState<EmailHistoryItem[]>([]);
+  const [grouped, setGrouped] = useState<{
+    key: string;
+    title: string;
+    items: EmailHistoryItem[];
+  }[]>([]);
+  const [drafts, setDrafts] = useState<DraftItem[]>([]);
+  const [mode, setMode] = useState<'sent' | 'drafts'>('sent');
+  const [timeRange, setTimeRange] = useState<'recent' | 'week' | 'all'>('recent');
+  const [search, setSearch] = useState('');
+  const [compact, setCompact] = useState(true);
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   const [recentlyDeleted, setRecentlyDeleted] = useState<{ item: EmailHistoryItem; index: number } | null>(null);
+  const [recentlyDeletedDraft, setRecentlyDeletedDraft] = useState<{ item: DraftItem } | null>(null);
   const slideAnim = useRef(new Animated.Value(SCREEN_WIDTH)).current;
   // New animation values for smoother open/close UX
   const backdropOpacity = useRef(new Animated.Value(0)).current;
@@ -133,7 +151,10 @@ export default function EmailHistorySidebar({
 
   const loadHistory = async () => {
     try {
-      const emails = await emailHistoryService.getEmailHistory();
+      const [emails, draftList] = await Promise.all([
+        emailHistoryService.getEmailHistory(),
+        draftService.getDrafts(),
+      ]);
       // Deduplicate by id in case of accidental double insertion (e.g., dev double-render / strict mode)
       const seen = new Set<string>();
       const deduped: EmailHistoryItem[] = [];
@@ -146,8 +167,36 @@ export default function EmailHistorySidebar({
       if (deduped.length !== emails.length) {
         console.log(`[EmailHistory] Deduplicated ${emails.length - deduped.length} duplicate entries`);
       }
+      // Sort newest first
+      const sorted = [...deduped].sort((a, b) => {
+        const ta = new Date(a.timestamp).getTime();
+        const tb = new Date(b.timestamp).getTime();
+        return (isFinite(tb) ? tb : 0) - (isFinite(ta) ? ta : 0);
+      });
+
       // Force a new array reference so React always re-renders even if contents are identical
-      setHistory([...deduped]);
+  setHistory([...sorted]);
+  setDrafts(draftList || []);
+
+      // Build 'Recent' group (top 3) and exclude those from weekly buckets
+      const recent = sorted.slice(0, 3);
+      const recentIds = new Set(recent.map(r => r.id));
+      const remainder = sorted.filter(e => !recentIds.has(e.id));
+
+      const weekly = groupByWeekBuckets(remainder);
+  const groups = [
+        ...(recent.length ? [{ key: 'recent', title: 'Recent', items: recent }] : []),
+        ...weekly,
+      ];
+      setGrouped(groups);
+      // Initialize collapsed state for new keys
+      setCollapsedGroups(prev => {
+        const next = { ...prev };
+        for (const g of groups) {
+          if (next[g.key] === undefined) next[g.key] = false; // default expanded
+        }
+        return next;
+      });
     } catch (error) {
       console.error('Failed to load email history:', error);
     }
@@ -198,6 +247,70 @@ export default function EmailHistorySidebar({
       setRecentlyDeleted(null);
       undoTimeoutRef.current = null;
     }, 6000);
+  };
+
+  // Swipe-to-delete for Drafts
+  const deleteDraftDirect = async (draft: DraftItem) => {
+    try {
+      // Clear any lingering animation state for this draft so a restore is clean
+      if (animationMapRef.current[draft.id]) {
+        delete animationMapRef.current[draft.id];
+      }
+      if (hapticTriggeredMapRef.current[draft.id] !== undefined) {
+        delete hapticTriggeredMapRef.current[draft.id];
+      }
+      await draftService.deleteDraft(draft.id);
+      setRecentlyDeletedDraft({ item: draft });
+      await loadHistory();
+      if (undoTimeoutRef.current) {
+        clearTimeout(undoTimeoutRef.current);
+        undoTimeoutRef.current = null;
+      }
+      undoTimeoutRef.current = setTimeout(() => {
+        setRecentlyDeletedDraft(null);
+        undoTimeoutRef.current = null;
+      }, 6000);
+    } catch (e) {
+      console.warn('Failed to delete draft', e);
+    }
+  };
+
+  const handleUndoDraft = async () => {
+    if (!recentlyDeletedDraft) return;
+    if (undoTimeoutRef.current) {
+      clearTimeout(undoTimeoutRef.current);
+      undoTimeoutRef.current = null;
+    }
+    const d = recentlyDeletedDraft.item;
+    setRecentlyDeletedDraft(null);
+    try {
+      // Re-add the draft with same id/timestamp to restore
+      await draftService.addDraft({
+        id: d.id,
+        timestamp: d.timestamp,
+        workOrder: d.workOrder,
+        location: d.location,
+        transcription: d.transcription,
+        summary: d.summary,
+      });
+      await loadHistory();
+      // Ensure fresh animation values for this restored draft
+      setTimeout(() => {
+        if (!animationMapRef.current[d.id]) {
+          animationMapRef.current[d.id] = {
+            scale: new Animated.Value(1),
+            opacity: new Animated.Value(1),
+            swipeX: new Animated.Value(0),
+          };
+        } else {
+          animationMapRef.current[d.id].scale.setValue(1);
+          animationMapRef.current[d.id].opacity.setValue(1);
+          animationMapRef.current[d.id].swipeX.setValue(0);
+        }
+      }, 50);
+    } catch (e) {
+      console.warn('Failed to restore draft', e);
+    }
   };
 
   const handleUndo = async () => {
@@ -257,6 +370,72 @@ export default function EmailHistorySidebar({
     return (words[0][0] + words[words.length - 1][0]).toUpperCase();
   };
 
+  // Helpers for grouping by week buckets
+  const startOfWeek = (d: Date) => {
+    const date = new Date(d);
+    const day = date.getDay(); // 0 Sun - 6 Sat
+    const diff = (day === 0 ? -6 : 1) - day; // make Monday the start
+    date.setDate(date.getDate() + diff);
+    date.setHours(0, 0, 0, 0);
+    return date;
+  };
+
+  const sameWeek = (a: Date, b: Date) => startOfWeek(a).getTime() === startOfWeek(b).getTime();
+
+  const groupByWeekBuckets = (items: EmailHistoryItem[]) => {
+    const now = new Date();
+    const thisWeekStart = startOfWeek(now);
+    const lastWeekStart = new Date(thisWeekStart);
+    lastWeekStart.setDate(thisWeekStart.getDate() - 7);
+    const lastWeekEnd = new Date(thisWeekStart);
+    lastWeekEnd.setMilliseconds(-1); // end of last week
+
+    const buckets: Record<string, { title: string; items: EmailHistoryItem[] }> = {
+      this_week: { title: 'This Week', items: [] },
+      last_week: { title: 'Last Week', items: [] },
+      older: { title: 'Older', items: [] },
+    };
+
+    for (const item of items) {
+      const t = new Date(item.timestamp);
+      if (sameWeek(t, now)) buckets.this_week.items.push(item);
+      else if (t >= lastWeekStart && t <= lastWeekEnd) buckets.last_week.items.push(item);
+      else buckets.older.items.push(item);
+    }
+
+    // Remove empty groups, keep order
+    const out: { key: string; title: string; items: EmailHistoryItem[] }[] = [];
+    if (buckets.this_week.items.length) out.push({ key: 'this_week', title: 'This Week', items: buckets.this_week.items });
+    if (buckets.last_week.items.length) out.push({ key: 'last_week', title: 'Last Week', items: buckets.last_week.items });
+    if (buckets.older.items.length) out.push({ key: 'older', title: 'Older', items: buckets.older.items });
+    return out;
+  };
+
+  // Basic search filter for sent emails
+  const filterMatchEmail = (
+    email: EmailHistoryItem,
+    term: string,
+    _timeRange: 'recent' | 'week' | 'all'
+  ) => {
+    if (!term) return true;
+    const q = term.toLowerCase();
+    const loc = ((email.summary as any)?.location || (email.summary as any)?.work_order || '').toString().toLowerCase();
+    const wo = (email.workOrder || '').toString().toLowerCase();
+    const recips = (email.recipients || []).join(', ').toLowerCase();
+    const body = ((email.summary as any)?.work_completed || '').toString().toLowerCase();
+    return loc.includes(q) || wo.includes(q) || recips.includes(q) || body.includes(q);
+  };
+
+  // Basic search filter for drafts
+  const filterMatchDraft = (draft: DraftItem, term: string) => {
+    if (!term) return true;
+    const q = term.toLowerCase();
+    const loc = (draft.location || '').toLowerCase();
+    const wo = (draft.workOrder || '').toLowerCase();
+    const body = (draft.summary?.work_completed || draft.transcription || '').toLowerCase();
+    return loc.includes(q) || wo.includes(q) || body.includes(q);
+  };
+
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
@@ -280,9 +459,9 @@ export default function EmailHistorySidebar({
         >
           {/* Header */}
           <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-            <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Email History</Text>
+            <Text style={[styles.headerTitle, { color: colors.textPrimary, fontSize: scaled(24) }]}>History</Text>
             <TouchableOpacity onPress={onClose} style={[styles.closeButton, { backgroundColor: colors.surfaceAlt }]}>
-              <Text style={[styles.closeButtonText, { color: colors.textSecondary }]}>✕</Text>
+              <Ionicons name="close" size={scaled(20)} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
@@ -292,19 +471,358 @@ export default function EmailHistorySidebar({
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
-            {history.length === 0 ? (
+            {/* Controls: Mode, Range, Search, Compact */}
+            <View style={styles.controlsRow}>
+              <View
+                style={[
+                  styles.segment,
+                  { backgroundColor: isDark ? colors.surfaceAlt : '#F1F2F4', borderWidth: 1, borderColor: isDark ? colors.border : '#E5E7EB' },
+                ]}
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.segmentBtn,
+                    mode === 'sent' && (isDark
+                      ? { backgroundColor: colors.accent, borderWidth: 1, borderColor: colors.accent }
+                      : styles.segmentBtnActive),
+                  ]}
+                  onPress={() => setMode('sent')}
+                >
+          <Text
+                    style={[
+            styles.segmentText,
+            { fontSize: scaled(13) },
+                      mode === 'sent' && (isDark ? { color: colors.accentContrast } : styles.segmentTextActive),
+                    ]}
+                  >
+                    Sent
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.segmentBtn,
+                    mode === 'drafts' && (isDark
+                      ? { backgroundColor: colors.accent, borderWidth: 1, borderColor: colors.accent }
+                      : styles.segmentBtnActive),
+                  ]}
+                  onPress={() => setMode('drafts')}
+                >
+          <Text
+                    style={[
+            styles.segmentText,
+            { fontSize: scaled(13) },
+                      mode === 'drafts' && (isDark ? { color: colors.accentContrast } : styles.segmentTextActive),
+                    ]}
+                  >
+                    Drafts
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <View
+                style={[
+                  styles.segmentSmall,
+                  { backgroundColor: isDark ? colors.surfaceAlt : '#F1F2F4', borderWidth: 1, borderColor: isDark ? colors.border : '#E5E7EB' },
+                ]}
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.segmentBtnSmall,
+                    timeRange === 'recent' && (isDark
+                      ? { backgroundColor: colors.accent, borderWidth: 1, borderColor: colors.accent }
+                      : styles.segmentBtnSmallActive),
+                  ]}
+                  onPress={() => setTimeRange('recent')}
+                >
+          <Text
+                    style={[
+            styles.segmentTextSmall,
+            { fontSize: scaled(12) },
+                      timeRange === 'recent' && (isDark ? { color: colors.accentContrast } : styles.segmentTextSmallActive),
+                    ]}
+                  >
+                    Recent
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.segmentBtnSmall,
+                    timeRange === 'week' && (isDark
+                      ? { backgroundColor: colors.accent, borderWidth: 1, borderColor: colors.accent }
+                      : styles.segmentBtnSmallActive),
+                  ]}
+                  onPress={() => setTimeRange('week')}
+                >
+          <Text
+                    style={[
+            styles.segmentTextSmall,
+            { fontSize: scaled(12) },
+                      timeRange === 'week' && (isDark ? { color: colors.accentContrast } : styles.segmentTextSmallActive),
+                    ]}
+                  >
+                    This Week
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.segmentBtnSmall,
+                    timeRange === 'all' && (isDark
+                      ? { backgroundColor: colors.accent, borderWidth: 1, borderColor: colors.accent }
+                      : styles.segmentBtnSmallActive),
+                  ]}
+                  onPress={() => setTimeRange('all')}
+                >
+                  <Text
+                    style={[
+                      styles.segmentTextSmall,
+                      { fontSize: scaled(12) },
+                      timeRange === 'all' && (isDark ? { color: colors.accentContrast } : styles.segmentTextSmallActive),
+                    ]}
+                  >
+                    All
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View style={styles.controlsRow}>
+              <View
+                style={[
+                  styles.searchBox,
+                  { backgroundColor: isDark ? colors.surfaceAlt : '#F1F2F4', borderColor: colors.border },
+                ]}
+              >
+                <Ionicons name="search" size={scaled(16)} color={colors.textSecondary} style={{ marginRight: 6 }} />
+                <TextInput
+                  style={[styles.searchInput, { fontSize: scaled(14), color: colors.textPrimary }]}
+                  placeholder="Search WO, location, recipient"
+                  placeholderTextColor={colors.textSecondary}
+                  value={search}
+                  onChangeText={setSearch}
+                />
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.compactToggle,
+                  isDark && { backgroundColor: colors.surfaceAlt, borderColor: colors.border },
+                  compact && (isDark ? { backgroundColor: colors.accent, borderColor: colors.accent } : styles.compactToggleActive),
+                ]}
+                onPress={() => {
+                  setCompact(prev => {
+                    const next = !prev;
+                    if (next) setExpandedRows({});
+                    return next;
+                  });
+                }}
+              >
+                <Text
+                  style={[
+                    styles.compactToggleText,
+                    { fontSize: scaled(13) },
+                    compact && isDark ? { color: colors.accentContrast } : { color: colors.textPrimary },
+                  ]}
+                >
+                  {compact ? 'Compact' : 'Expanded'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            {(mode === 'sent' ? history.length === 0 : drafts.length === 0) ? (
               <View style={styles.emptyState}>
                 <View style={styles.emptyIconCircle}>
-                  <Text style={styles.emptyIcon}>📭</Text>
+                  <Ionicons name="mail-open" size={scaled(36)} color={colors.textSecondary} />
                 </View>
-                <Text style={[styles.emptyText, { color: colors.textPrimary }]}>No Emails Sent Yet</Text>
-                <Text style={[styles.emptySubtext, { color: colors.textSecondary }] }>
-                  Your sent closeout reports will appear here for easy access
+                <Text style={[styles.emptyText, { color: colors.textPrimary, fontSize: scaled(18) }]}> 
+                  {mode === 'sent' ? 'No Emails Sent Yet' : 'No Drafts'}
+                </Text>
+                <Text style={[styles.emptySubtext, { color: colors.textSecondary, fontSize: scaled(14) }] }>
+                  {mode === 'sent' ? 'Your sent closeout reports will appear here for easy access' : 'Save drafts from the Summary screen to finish later'}
                 </Text>
               </View>
             ) : (
               <View style={styles.emailList}>
-                {history.map((email, index) => {
+                {mode === 'drafts' ? (
+                  drafts
+                    .filter(d => filterMatchDraft(d, search))
+                    .map((draft, index) => {
+                      // Ensure animation refs for this draft id
+                      if (!animationMapRef.current[draft.id]) {
+                        animationMapRef.current[draft.id] = {
+                          scale: new Animated.Value(1),
+                          opacity: new Animated.Value(1),
+                          swipeX: new Animated.Value(0),
+                        };
+                      }
+                      const { scale: scaleAnim, opacity: opacityAnim, swipeX } = animationMapRef.current[draft.id];
+                      const SWIPE_THRESHOLD = 50;
+                      const MIN_SWIPE_START = 8;
+
+                      if (hapticTriggeredMapRef.current[draft.id] === undefined) {
+                        hapticTriggeredMapRef.current[draft.id] = false;
+                      }
+
+                      const deleteProgress = swipeX.interpolate({
+                        inputRange: [-SCREEN_WIDTH * 0.5, -SWIPE_THRESHOLD, 0, SWIPE_THRESHOLD, SCREEN_WIDTH * 0.5],
+                        outputRange: [1, 0.7, 0, 0.7, 1],
+                        extrapolate: 'clamp',
+                      });
+                      const deleteIconScale = swipeX.interpolate({
+                        inputRange: [-SWIPE_THRESHOLD, -SWIPE_THRESHOLD * 0.5, 0, SWIPE_THRESHOLD * 0.5, SWIPE_THRESHOLD],
+                        outputRange: [1, 0.8, 0, 0.8, 1],
+                        extrapolate: 'clamp',
+                      });
+                      const deleteIconOpacity = swipeX.interpolate({
+                        inputRange: [-SWIPE_THRESHOLD, -SWIPE_THRESHOLD * 0.6, 0, SWIPE_THRESHOLD * 0.6, SWIPE_THRESHOLD],
+                        outputRange: [1, 0.5, 0, 0.5, 1],
+                        extrapolate: 'clamp',
+                      });
+
+                      const panResponder = PanResponder.create({
+                        onStartShouldSetPanResponder: () => false,
+                        onMoveShouldSetPanResponderCapture: (_evt, gesture) => {
+                          const { dx, dy } = gesture;
+                          const isHorizontal = Math.abs(dx) > Math.abs(dy) * 1.2;
+                          const exceedsMin = Math.abs(dx) > 3;
+                          return isHorizontal && exceedsMin;
+                        },
+                        onMoveShouldSetPanResponder: (_evt, gesture) => {
+                          const { dx, dy } = gesture;
+                          const isHorizontal = Math.abs(dx) > Math.abs(dy) * 1.2;
+                          const exceedsMin = Math.abs(dx) > 3;
+                          return isHorizontal && exceedsMin;
+                        },
+                        onPanResponderTerminationRequest: () => false,
+                        onPanResponderGrant: () => {
+                          hapticTriggeredMapRef.current[draft.id] = false;
+                        },
+                        onPanResponderMove: (_evt, gesture) => {
+                          const dir = Math.sign(gesture.dx || 0);
+                          if (dir !== 0) {
+                            const max = SCREEN_WIDTH * 0.5;
+                            const clampedValue = Math.max(-max, Math.min(gesture.dx, max));
+                            swipeX.setValue(clampedValue);
+                            if (Math.abs(gesture.dx) >= SWIPE_THRESHOLD && !hapticTriggeredMapRef.current[draft.id]) {
+                              hapticTriggeredMapRef.current[draft.id] = true;
+                              try {
+                                if (Platform.OS === 'ios' || Platform.OS === 'android') {
+                                  const Haptics = require('react-native').Vibration;
+                                  Haptics.vibrate(15);
+                                }
+                              } catch {}
+                            }
+                          }
+                        },
+                        onPanResponderRelease: (_evt, gesture) => {
+                          hapticTriggeredMapRef.current[draft.id] = false;
+                          const fastSwipe = Math.abs(gesture.vx) > 0.5;
+                          const exceededThreshold = Math.abs(gesture.dx) > SWIPE_THRESHOLD;
+                          const exceededMinimum = Math.abs(gesture.dx) > MIN_SWIPE_START;
+                          if ((exceededThreshold && exceededMinimum) || (fastSwipe && Math.abs(gesture.dx) > 30)) {
+                            const offscreen = (gesture.dx >= 0 ? SCREEN_WIDTH : -SCREEN_WIDTH) + (gesture.dx >= 0 ? 40 : -40);
+                            Animated.timing(swipeX, {
+                              toValue: offscreen,
+                              duration: 250,
+                              easing: Easing.out(Easing.cubic),
+                              useNativeDriver: true,
+                            }).start(() => deleteDraftDirect(draft));
+                          } else {
+                            Animated.spring(swipeX, {
+                              toValue: 0,
+                              useNativeDriver: true,
+                              tension: 180,
+                              friction: 22,
+                              velocity: -gesture.vx * 0.5,
+                            }).start();
+                          }
+                        },
+                        onPanResponderTerminate: () => {
+                          hapticTriggeredMapRef.current[draft.id] = false;
+                          Animated.spring(swipeX, {
+                            toValue: 0,
+                            useNativeDriver: true,
+                            tension: 180,
+                            friction: 22,
+                          }).start();
+                        },
+                      });
+
+                      return (
+                        <View key={draft.id} style={styles.swipeContainer}>
+                          <Animated.View style={[styles.swipeUnderlay, { opacity: deleteProgress }]}>
+                            <Animated.View style={[styles.deleteIconContainer, { transform: [{ scale: deleteIconScale }], opacity: deleteIconOpacity }]}>
+                              <Text style={[styles.deleteIcon, { fontSize: scaled(22) }]}>✕</Text>
+                            </Animated.View>
+                            <Animated.View style={{ opacity: deleteProgress }}>
+                              <Text style={[styles.swipeUnderlayText, { fontSize: scaled(16) }]}>Release to Delete</Text>
+                            </Animated.View>
+                          </Animated.View>
+
+                          <Animated.View
+                            {...panResponder.panHandlers}
+                            style={[
+                              styles.emailRow,
+                              index === 0 && styles.emailRowFirst,
+                              { backgroundColor: colors.surface, borderColor: colors.border },
+                              {
+                                transform: [
+                                  { translateX: swipeX },
+                                  { scale: scaleAnim },
+                                ],
+                                opacity: opacityAnim,
+                              },
+                            ]}
+                          >
+                            <TouchableOpacity
+                              activeOpacity={0.85}
+                              onPress={() => {
+                                // Open as Summary with draft payload
+                                try { (onEmailSelect || onSelectEmail)?.({
+                                  id: draft.id,
+                                  timestamp: draft.timestamp,
+                                  recipients: [],
+                                  workOrder: draft.workOrder,
+                                  transcription: draft.transcription,
+                                  summary: draft.summary as any,
+                                  rawBody: undefined,
+                                  _isDraft: true,
+                                  _draftId: draft.id,
+                                } as any); } catch {}
+                              }}
+                            >
+                              <Text style={[styles.rowTitle, { color: colors.textPrimary, fontSize: scaled(14) }]} numberOfLines={1}>
+                                {draft.location || 'Unknown Location'} • WO {draft.workOrder || 'N/A'}
+                              </Text>
+                              <Text style={[styles.rowMeta, { color: colors.textSecondary, fontSize: scaled(12) }]} numberOfLines={1}>
+                                Draft • {formatDateTime(draft.timestamp)}
+                              </Text>
+                            </TouchableOpacity>
+                          </Animated.View>
+                        </View>
+                      );
+                    })
+                ) : (
+                  // Filter groups by selected timeRange
+                  grouped
+                    .filter(g =>
+                      timeRange === 'all'
+                        ? true
+                        : timeRange === 'recent'
+                        ? g.key === 'recent'
+                        : (g.key === 'this_week' || g.key === 'recent')
+                    )
+                    .map((group) => (
+                  <View key={group.key} style={styles.groupSection}>
+                    <TouchableOpacity
+                      style={[styles.groupHeader, { borderBottomColor: colors.border }]}
+                      onPress={() => setCollapsedGroups(prev => ({ ...prev, [group.key]: !prev[group.key] }))}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.groupTitle, { color: colors.textPrimary, fontSize: scaled(14) }]}>{group.title}</Text>
+                      <View style={styles.groupRight}>
+                        <Text style={[styles.groupCount, { color: colors.textSecondary, fontSize: scaled(12) }]}>{group.items.length}</Text>
+                        <Ionicons name={collapsedGroups[group.key] ? 'chevron-forward' : 'chevron-down'} size={scaled(16)} color={colors.textSecondary} />
+                      </View>
+                    </TouchableOpacity>
+                    {!collapsedGroups[group.key] && group.items
+                      .filter(email => filterMatchEmail(email, search, timeRange))
+                      .map((email, index) => {
                   // Diagnostic: log each render of a history card (remove after debugging)
                   try { console.log('[EmailHistory] render card', email.id); } catch {}
                   const timestamp = formatDateTime(email.timestamp);
@@ -328,23 +846,29 @@ export default function EmailHistorySidebar({
                   }
 
                   const deleteProgress = swipeX.interpolate({
-                    inputRange: [0, SWIPE_THRESHOLD, SCREEN_WIDTH * 0.5],
-                    outputRange: [0, 0.7, 1],
+                    inputRange: [-SCREEN_WIDTH * 0.5, -SWIPE_THRESHOLD, 0, SWIPE_THRESHOLD, SCREEN_WIDTH * 0.5],
+                    outputRange: [1, 0.7, 0, 0.7, 1],
                     extrapolate: 'clamp',
                   });
                   const deleteIconScale = swipeX.interpolate({
-                    inputRange: [0, SWIPE_THRESHOLD * 0.5, SWIPE_THRESHOLD],
-                    outputRange: [0, 0.8, 1],
+                    inputRange: [-SWIPE_THRESHOLD, -SWIPE_THRESHOLD * 0.5, 0, SWIPE_THRESHOLD * 0.5, SWIPE_THRESHOLD],
+                    outputRange: [1, 0.8, 0, 0.8, 1],
                     extrapolate: 'clamp',
                   });
                   const deleteIconOpacity = swipeX.interpolate({
-                    inputRange: [0, SWIPE_THRESHOLD * 0.6, SWIPE_THRESHOLD],
-                    outputRange: [0, 0.5, 1],
+                    inputRange: [-SWIPE_THRESHOLD, -SWIPE_THRESHOLD * 0.6, 0, SWIPE_THRESHOLD * 0.6, SWIPE_THRESHOLD],
+                    outputRange: [1, 0.5, 0, 0.5, 1],
                     extrapolate: 'clamp',
                   });
 
                   const panResponder = PanResponder.create({
                     onStartShouldSetPanResponder: () => false,
+                    onMoveShouldSetPanResponderCapture: (_evt, gesture) => {
+                      const { dx, dy } = gesture;
+                      const isHorizontal = Math.abs(dx) > Math.abs(dy) * 1.2; // more forgiving ratio
+                      const exceedsMin = Math.abs(dx) > 3; // lower activation distance
+                      return isHorizontal && exceedsMin;
+                    },
                     onMoveShouldSetPanResponder: (_evt, gesture) => {
                       const { dx, dy } = gesture;
                       const isHorizontal = Math.abs(dx) > Math.abs(dy) * 1.2; // more forgiving ratio
@@ -356,10 +880,12 @@ export default function EmailHistorySidebar({
                       hapticTriggeredMapRef.current[email.id] = false;
                     },
                     onPanResponderMove: (_evt, gesture) => {
-                      if (gesture.dx > 0) {
-                        const clampedValue = Math.min(gesture.dx, SCREEN_WIDTH * 0.5);
+                      const dir = Math.sign(gesture.dx || 0);
+                      if (dir !== 0) {
+                        const max = SCREEN_WIDTH * 0.5;
+                        const clampedValue = Math.max(-max, Math.min(gesture.dx, max));
                         swipeX.setValue(clampedValue);
-                        if (gesture.dx >= SWIPE_THRESHOLD && !hapticTriggeredMapRef.current[email.id]) {
+                        if (Math.abs(gesture.dx) >= SWIPE_THRESHOLD && !hapticTriggeredMapRef.current[email.id]) {
                           hapticTriggeredMapRef.current[email.id] = true;
                           try {
                             if (Platform.OS === 'ios' || Platform.OS === 'android') {
@@ -373,11 +899,12 @@ export default function EmailHistorySidebar({
                     onPanResponderRelease: (_evt, gesture) => {
                       hapticTriggeredMapRef.current[email.id] = false;
                       const fastSwipe = Math.abs(gesture.vx) > 0.5;
-                      const exceededThreshold = gesture.dx > SWIPE_THRESHOLD;
-                      const exceededMinimum = gesture.dx > MIN_SWIPE_START;
-                      if ((exceededThreshold && exceededMinimum) || (fastSwipe && gesture.dx > 30)) {
+                      const exceededThreshold = Math.abs(gesture.dx) > SWIPE_THRESHOLD;
+                      const exceededMinimum = Math.abs(gesture.dx) > MIN_SWIPE_START;
+                      if ((exceededThreshold && exceededMinimum) || (fastSwipe && Math.abs(gesture.dx) > 30)) {
+                        const offscreen = (gesture.dx >= 0 ? SCREEN_WIDTH : -SCREEN_WIDTH) + (gesture.dx >= 0 ? 40 : -40);
                         Animated.timing(swipeX, {
-                          toValue: SCREEN_WIDTH + 40,
+                          toValue: offscreen,
                           duration: 250,
                           easing: Easing.out(Easing.cubic),
                           useNativeDriver: true,
@@ -403,6 +930,7 @@ export default function EmailHistorySidebar({
                     },
                   });
 
+                  const isExpanded = !!expandedRows[email.id] || !compact;
                   return (
                     <View key={email.id} style={styles.swipeContainer}>
                       <Animated.View
@@ -414,17 +942,17 @@ export default function EmailHistorySidebar({
                             { transform: [{ scale: deleteIconScale }], opacity: deleteIconOpacity },
                           ]}
                         >
-                          <Text style={styles.deleteIcon}>✕</Text>
+                          <Text style={[styles.deleteIcon, { fontSize: scaled(22) }]}>✕</Text>
                         </Animated.View>
                         <Animated.View style={{ opacity: deleteProgress }}>
-                          <Text style={styles.swipeUnderlayText}>Release to Delete</Text>
+                          <Text style={[styles.swipeUnderlayText, { fontSize: scaled(16) }]}>Release to Delete</Text>
                         </Animated.View>
                       </Animated.View>
                       <Animated.View
                         {...panResponder.panHandlers}
                         style={[
-                          styles.emailCardCompact,
-                          index === 0 && styles.emailCardFirst,
+                          styles.emailRow,
+                          index === 0 && styles.emailRowFirst,
                           { backgroundColor: colors.surface, borderColor: colors.border },
                           {
                             transform: [
@@ -435,55 +963,69 @@ export default function EmailHistorySidebar({
                           },
                         ]}
                       >
-                        <View style={styles.cardHeaderCompact}>
+                        <TouchableOpacity
+                          style={styles.rowTop}
+                          activeOpacity={0.7}
+                          onPress={() => setExpandedRows(prev => ({ ...prev, [email.id]: !prev[email.id] }))}
+                        >
                           <View style={[styles.avatarSmall, { backgroundColor: colors.accent }]}>
                             <Text style={[styles.avatarText, { color: colors.accentContrast }]}>{initials}</Text>
                           </View>
-                          <View style={styles.headerTextCompact}>
-                            <Text style={[styles.inlineTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+                          <View style={styles.rowMain}>
+                            <Text style={[styles.rowTitle, { color: colors.textPrimary, fontSize: scaled(14) }]} numberOfLines={1}>
                               {location} • WO {email.workOrder || 'N/A'}
                             </Text>
-                            <Text style={[styles.timestamp, { color: colors.textSecondary }]}>{timestamp}</Text>
+                            <Text style={[styles.rowMeta, { color: colors.textSecondary, fontSize: scaled(12) }]} numberOfLines={1}>{timestamp}</Text>
                           </View>
-                        </View>
-                        <TouchableOpacity
-                          onPress={() => {
-                            try { (onEmailSelect || onSelectEmail)?.(email); } catch (e) { console.warn('Email select failed', e); }
-                          }}
-                          activeOpacity={0.8}
-                        >
-                          <View style={styles.recipientsRowCompact}>
-                            <Text style={[styles.recipientsLabel, { color: colors.textSecondary }]}>To:</Text>
-                            <Text style={[styles.recipientsText, { color: colors.textPrimary }]} numberOfLines={1}>
-                              {email.recipients.join(', ')}
-                            </Text>
-                          </View>
-                          {email.summary.work_completed && (
-                            <Text style={[styles.previewTextCompact, { color: colors.textSecondary }]} numberOfLines={2}>
-                              {email.summary.work_completed}
-                            </Text>
-                          )}
-                          <View style={styles.actionRowCompact}>
-                            <Text style={[styles.actionTextCompact, { color: colors.textSecondary }]}>Swipe right to delete • Tap to open</Text>
-                          </View>
+          <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={scaled(18)} color={colors.textSecondary} />
                         </TouchableOpacity>
+                        {isExpanded && (
+                          <TouchableOpacity
+                            onPress={() => {
+                              try { (onEmailSelect || onSelectEmail)?.(email); } catch (e) { console.warn('Email select failed', e); }
+                            }}
+                            activeOpacity={0.85}
+                          >
+                            <View style={styles.rowExpandedSection}>
+                              <View style={styles.recipientsRowCompact}>
+            <Text style={[styles.recipientsLabel, { color: colors.textSecondary, fontSize: scaled(14) }]}>To:</Text>
+            <Text style={[styles.recipientsText, { color: colors.textPrimary, fontSize: scaled(14) }]} numberOfLines={1}>
+                                  {email.recipients.join(', ')}
+                                </Text>
+                              </View>
+                              {email.summary.work_completed && (
+            <Text style={[styles.previewTextCompact, { color: colors.textSecondary, fontSize: scaled(13), lineHeight: scaled(19) }]} numberOfLines={3}>
+                                  {email.summary.work_completed}
+                                </Text>
+                              )}
+                              <View style={styles.actionRowCompact}>
+            <Text style={[styles.actionTextCompact, { color: colors.textSecondary, fontSize: scaled(11) }]}>Swipe right to delete • Tap for details</Text>
+                              </View>
+                            </View>
+                          </TouchableOpacity>
+                        )}
                       </Animated.View>
                     </View>
                   );
                 })}
+                  </View>
+                ))
+                )}
               </View>
             )}
           </Animated.ScrollView>
 
-          {/* Undo Bar - Now more prominent and always on top */}
-          {recentlyDeleted && (
+          {/* Undo Bar - Shows for sent deletions or draft deletions */}
+          {(recentlyDeleted || recentlyDeletedDraft) && (
             <View style={[styles.undoBar, { backgroundColor: colors.surfaceAlt, borderColor: colors.accent }]}>
-              <TouchableOpacity onPress={handleUndo} style={styles.undoButton}>
-                <Text style={[styles.undoArrow, { color: colors.accent }]}>↩</Text>
-                <Text style={[styles.undoText, { color: colors.textPrimary }]}>Restore deleted email</Text>
+              <TouchableOpacity onPress={recentlyDeleted ? handleUndo : handleUndoDraft} style={styles.undoButton}>
+                <Ionicons name="return-down-back" size={scaled(24)} color={colors.accent} style={{ marginRight: 12 }} />
+                <Text style={[styles.undoText, { color: colors.textPrimary, fontSize: scaled(15) }]}>
+                  {recentlyDeleted ? 'Restore deleted email' : 'Restore deleted draft'}
+                </Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setRecentlyDeleted(null)} style={[styles.undoDismiss, { backgroundColor: colors.surface }] }>
-                <Text style={[styles.undoDismissText, { color: colors.textSecondary }]}>Dismiss</Text>
+              <TouchableOpacity onPress={() => { setRecentlyDeleted(null); setRecentlyDeletedDraft(null); }} style={[styles.undoDismiss, { backgroundColor: colors.surface }] }>
+                <Text style={[styles.undoDismissText, { color: colors.textSecondary, fontSize: scaled(18) }]}>Dismiss</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -875,4 +1417,171 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
+  // New compact grouping + row styles
+  groupSection: {
+    marginBottom: 10,
+  },
+  groupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    borderBottomWidth: 1,
+  },
+  groupTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  groupRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  groupCount: {
+    fontSize: 12,
+    marginRight: 8,
+  },
+  groupChevron: {
+    fontSize: 16,
+  },
+  emailRow: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    marginBottom: 10,
+  },
+  emailRowFirst: {
+    // subtle accent for first item
+    borderLeftWidth: 3,
+    borderLeftColor: '#FF6B35',
+  },
+  rowTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  rowMain: {
+    flex: 1,
+    marginLeft: 10,
+  },
+  rowTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  rowMeta: {
+    fontSize: 12,
+  },
+  expandIcon: {
+    fontSize: 18,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
+  rowExpandedSection: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#EEE',
+  },
+  // Controls
+  controlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  gap: 10,
+  flexWrap: 'wrap',
+  },
+  segment: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F2F4',
+    borderRadius: 10,
+    padding: 4,
+    gap: 6,
+  flexShrink: 1,
+  minWidth: 0,
+  },
+  segmentBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: 'transparent',
+  },
+  segmentBtnActive: {
+    backgroundColor: '#FFEDE5',
+    borderWidth: 1,
+    borderColor: '#FFDBC9',
+  },
+  segmentText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#4B5563',
+  },
+  segmentTextActive: {
+    color: '#111827',
+  },
+  segmentSmall: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F2F4',
+    borderRadius: 10,
+    padding: 4,
+    gap: 4,
+  flexShrink: 1,
+  minWidth: 0,
+  },
+  segmentBtnSmall: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  flexShrink: 1,
+  },
+  segmentBtnSmallActive: {
+    backgroundColor: '#FFEDE5',
+    borderWidth: 1,
+    borderColor: '#FFDBC9',
+  },
+  segmentTextSmall: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4B5563',
+  },
+  segmentTextSmallActive: {
+    color: '#7A2E0E',
+  },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    backgroundColor: '#F1F2F4',
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  minWidth: 160,
+  },
+  searchIcon: { fontSize: 16, marginRight: 6 },
+  searchInput: {
+    flex: 1,
+    height: 36,
+    fontSize: 14,
+  },
+  compactToggle: {
+    marginLeft: 10,
+    height: 36,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFDBC9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFEDE5',
+  flexShrink: 0,
+  minWidth: 110,
+  },
+  compactToggleActive: {
+    backgroundColor: '#FFDECC',
+    borderColor: '#FFCBB0',
+  },
+  compactToggleText: { fontSize: 13, fontWeight: '600' },
 });

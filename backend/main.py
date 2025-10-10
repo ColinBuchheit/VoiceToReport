@@ -18,7 +18,8 @@ from models import (
     SummarizeRequest, SummaryResponse, 
     SendEmailRequest, EmailResponse,
     VoiceCommandRequest, VoiceCommandResponse,
-    HealthResponse
+    HealthResponse,
+    BugReportRequest, BugReportResponse
 )
 from services.transcription import TranscriptionService
 from services.summarization import SummarizationService
@@ -377,7 +378,9 @@ async def send_email_endpoint(request: SendEmailRequest):
                 recipients=result.get("recipients", [])
             )
         else:
-            raise HTTPException(status_code=500, detail="Failed to send email - check email configuration")
+            detail_msg = result.get("message", "Failed to send email - check email configuration")
+            logger.error(f"Email send reported failure: {detail_msg}")
+            raise HTTPException(status_code=500, detail=detail_msg)
             
     except HTTPException:
         raise
@@ -428,6 +431,27 @@ async def options_handler(path: str):
             "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, ngrok-skip-browser-warning",
         }
     )
+
+@app.post("/bug-report", response_model=BugReportResponse)
+async def bug_report_endpoint(request: BugReportRequest):
+    """Accept a bug report with optional image attachments and email it to support."""
+    if not email_service:
+        raise HTTPException(status_code=503, detail="Email service unavailable")
+    try:
+        logger.info("📨 Received bug report submission")
+        result = email_service.send_bug_report(
+            description=request.description,
+            reporter_email=request.reporter_email,
+            images=[img.dict() for img in (request.images or [])]
+        )
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("message", "Failed to send bug report"))
+        return BugReportResponse(success=True, message="Bug report sent")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Bug report failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Bug report failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

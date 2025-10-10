@@ -1,11 +1,14 @@
 # backend/services/email_service.py - SLEEK PROFESSIONAL DESIGN
 import logging
 import smtplib
+import ssl
 import base64
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.image import MIMEImage
+from email.mime.base import MIMEBase
+from email import encoders
 from typing import List, Dict, Any, Union
 from datetime import datetime
 from email.utils import format_datetime
@@ -460,13 +463,33 @@ class EmailService:
                 logger.warning(f"⚠️ Failed to attach inline logo: {e}")
             
             # Send email
-            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
-                server.set_debuglevel(1)
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
-                server.login(self.email_user, self.email_password)
-                server.send_message(msg)
+            context = ssl.create_default_context()
+            # Support explicit TLS (587) and implicit TLS/SSL (465)
+            if str(self.smtp_port) == '465':
+                with smtplib.SMTP_SSL(self.smtp_server, int(self.smtp_port), timeout=20, context=context) as server:
+                    server.set_debuglevel(1)
+                    logger.info(f"📧 Connecting via SMTPS (SSL) {self.smtp_server}:{self.smtp_port} ...")
+                    code, banner = server.ehlo()
+                    logger.info(f"📧 EHLO (SSL): {code} {banner}")
+                    logger.info("🔑 Logging in to SMTP server (SSL)...")
+                    server.login(self.email_user, self.email_password)
+                    logger.info("📤 Sending email message via SMTPS...")
+                    server.send_message(msg)
+            else:
+                # STARTTLS flow (typically port 587)
+                with smtplib.SMTP(self.smtp_server, int(self.smtp_port), timeout=20) as server:
+                    server.set_debuglevel(1)
+                    logger.info(f"📧 Connecting to SMTP {self.smtp_server}:{self.smtp_port} ...")
+                    code, banner = server.ehlo()
+                    logger.info(f"📧 EHLO: {code} {banner}")
+                    code, tls_resp = server.starttls(context=context)
+                    logger.info(f"🔐 STARTTLS: {code} {tls_resp}")
+                    code, post_ehlo = server.ehlo()
+                    logger.info(f"📧 EHLO (post-TLS): {code} {post_ehlo}")
+                    logger.info("🔑 Logging in to SMTP server...")
+                    server.login(self.email_user, self.email_password)
+                    logger.info("📤 Sending email message via SMTP...")
+                    server.send_message(msg)
                 logger.info(f"✅ Email sent successfully to {len(final_recipients)} recipients (including technician CC if provided)")
             
             return {
@@ -475,6 +498,29 @@ class EmailService:
                 "recipients": final_recipients
             }
             
+        except smtplib.SMTPAuthenticationError as e:
+            logger.error(f"SMTP auth failed: {e}")
+            hint = ("Authentication failed. If using Gmail, enable 'App Passwords' with 2FA and use that password, "
+                    "or ensure 'Less secure app access' (deprecated) is not required.")
+            return {
+                "success": False,
+                "message": f"SMTP authentication failed: {str(e)}. {hint}",
+                "recipients": []
+            }
+        except smtplib.SMTPServerDisconnected as e:
+            logger.error(f"SMTP server disconnected unexpectedly: {e}")
+            return {
+                "success": False,
+                "message": "SMTP server disconnected unexpectedly during send (STARTTLS or idle timeout).",
+                "recipients": []
+            }
+        except (smtplib.SMTPConnectError, smtplib.SMTPHeloError, smtplib.SMTPException, TimeoutError) as e:
+            logger.error(f"SMTP error: {e}")
+            return {
+                "success": False,
+                "message": f"SMTP error while sending email: {str(e)}",
+                "recipients": []
+            }
         except Exception as e:
             logger.error(f"Failed to send email: {e}")
             return {
@@ -491,13 +537,17 @@ class EmailService:
                     "status": "error",
                     "message": "Email credentials not configured"
                 }
-            
-            with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=10) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
+
+            context = ssl.create_default_context()
+            with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=15) as server:
+                code, banner = server.ehlo()
+                logger.info(f"📧 Test EHLO: {code} {banner}")
+                code, tls_resp = server.starttls(context=context)
+                logger.info(f"🔐 Test STARTTLS: {code} {tls_resp}")
+                code, post = server.ehlo()
+                logger.info(f"📧 Test EHLO (post-TLS): {code} {post}")
                 server.login(self.email_user, self.email_password)
-            
+
             return {
                 "status": "success",
                 "message": "Email configuration is valid",
@@ -511,3 +561,65 @@ class EmailService:
                 "status": "error",
                 "message": f"Email connection test failed: {str(e)}"
             }
+
+    def send_bug_report(self, description: str, reporter_email: str | None = None, images: List[Dict[str, str]] | None = None) -> Dict[str, Any]:
+        """Send a bug report email to the configured bug report recipient.
+
+        images: list of dicts with keys {filename: str, content_type: str, data_base64: str}
+        """
+        try:
+            if not self.email_user or not self.email_password:
+                return {"success": False, "message": "Email credentials not configured"}
+
+            to_addr = getattr(settings, 'bug_report_recipient', None) or 'colin.buchheit@beartechs.com'
+
+            subject = "VoiceToReport - Bug Report"
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+            reporter_line = f"Reporter: {reporter_email}\n" if reporter_email else ""
+            text_body = f"A new bug report was submitted.\n\n{reporter_line}Time: {timestamp}\n\nDescription:\n{description or '(no description)'}\n"
+
+            msg = MIMEMultipart()
+            msg['From'] = self.email_user
+            msg['To'] = to_addr
+            msg['Subject'] = subject
+            msg.attach(MIMEText(text_body, 'plain'))
+
+            # Attach images if provided
+            for idx, img in enumerate(images or []):
+                try:
+                    filename = img.get('filename') or f'screenshot-{idx+1}.jpg'
+                    content_type = img.get('content_type') or 'image/jpeg'
+                    data_b64 = img.get('data_base64') or ''
+                    raw = base64.b64decode(data_b64)
+
+                    maintype, subtype = content_type.split('/', 1) if '/' in content_type else ('image', 'jpeg')
+                    if maintype == 'image':
+                        part = MIMEImage(raw, _subtype=subtype)
+                    else:
+                        part = MIMEBase(maintype, subtype)
+                        part.set_payload(raw)
+                        encoders.encode_base64(part)
+                    part.add_header('Content-Disposition', 'attachment', filename=filename)
+                    msg.attach(part)
+                except Exception as e:
+                    logger.warning(f"Failed to attach image {idx}: {e}")
+
+            # Send email
+            context = ssl.create_default_context()
+            if str(self.smtp_port) == '465':
+                with smtplib.SMTP_SSL(self.smtp_server, int(self.smtp_port), timeout=20, context=context) as server:
+                    server.ehlo()
+                    server.login(self.email_user, self.email_password)
+                    server.send_message(msg)
+            else:
+                with smtplib.SMTP(self.smtp_server, int(self.smtp_port), timeout=20) as server:
+                    server.ehlo()
+                    server.starttls(context=context)
+                    server.ehlo()
+                    server.login(self.email_user, self.email_password)
+                    server.send_message(msg)
+
+            return {"success": True, "message": "Bug report sent"}
+        except Exception as e:
+            logger.error(f"Failed to send bug report: {e}")
+            return {"success": False, "message": f"Failed to send bug report: {str(e)}"}
