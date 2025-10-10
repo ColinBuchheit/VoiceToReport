@@ -955,7 +955,11 @@ export default function EmailHistorySidebar({
                           },
                         ]}
                       >
-                        <View style={styles.rowTop}>
+                        <TouchableOpacity
+                          style={styles.rowTop}
+                          activeOpacity={0.7}
+                          onPress={() => setExpandedRows(prev => ({ ...prev, [email.id]: !prev[email.id] }))}
+                        >
                           <View style={[styles.avatarSmall, { backgroundColor: colors.accent }]}>
                             <Text style={[styles.avatarText, { color: colors.accentContrast }]}>{initials}</Text>
                           </View>
@@ -965,10 +969,8 @@ export default function EmailHistorySidebar({
                             </Text>
                             <Text style={[styles.rowMeta, { color: colors.textSecondary }]} numberOfLines={1}>{timestamp}</Text>
                           </View>
-                          <TouchableOpacity onPress={() => setExpandedRows(prev => ({ ...prev, [email.id]: !prev[email.id] }))}>
-                            <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={18} color={colors.textSecondary} />
-                          </TouchableOpacity>
-                        </View>
+                          <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={18} color={colors.textSecondary} />
+                        </TouchableOpacity>
                         {isExpanded && (
                           <TouchableOpacity
                             onPress={() => {
