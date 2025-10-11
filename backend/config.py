@@ -1,14 +1,15 @@
-# backend/config.py - UPDATED VERSION (keeping your structure, fixing CORS)
+# backend/config.py - UPDATED VERSION (keeping your structure, fixing CORS and OPENAI key handling)
 import os
-from typing import List, Union
-from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from typing import List, Union, Optional
+from pydantic import field_validator, Field, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     """Application configuration using Pydantic settings"""
     
     # OpenAI Configuration
-    openai_api_key: str
+    # Map to env var OPENAI_API_KEY, make optional to avoid import crashes when not set
+    openai_api_key: Optional[SecretStr] = Field(default=None, alias="OPENAI_API_KEY")
     
     # Server Configuration
     port: int = 8000
@@ -88,10 +89,13 @@ class Settings(BaseSettings):
         # Use dynamic CORS if no specific origins are configured
         return len(self.get_allowed_origins_list()) == 0
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+    # Pydantic v2 settings config
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        populate_by_name=True,
+        extra="ignore",
+    )
 
 # Global settings instance
 settings = Settings()

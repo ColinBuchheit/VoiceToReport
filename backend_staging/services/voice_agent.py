@@ -2,6 +2,7 @@
 import json
 import logging
 import re
+import os
 from typing import Dict, Any, List, Optional
 from openai import OpenAI
 from datetime import datetime
@@ -15,10 +16,16 @@ class VoiceAgentService:
     
     def __init__(self):
         try:
-            if not settings.openai_api_key:
+            key = None
+            if getattr(settings, "openai_api_key", None):
+                val = settings.openai_api_key
+                key = val.get_secret_value() if hasattr(val, "get_secret_value") else val
+            if not key:
+                key = os.getenv("OPENAI_API_KEY")
+            if not key:
                 raise Exception("OpenAI API key not configured")
-            
-            self.client = OpenAI(api_key=settings.openai_api_key)
+
+            self.client = OpenAI(api_key=key)
             logger.info("VoiceAgentService initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize VoiceAgentService: {e}")

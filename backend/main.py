@@ -143,15 +143,31 @@ async def cors_middleware(request: Request, call_next):
     return response
 
 # Initialize OpenAI client using settings
-openai_client = None
-if settings.openai_api_key:
+def _get_openai_api_key() -> str | None:
+    """Extract OpenAI API key as a plain string from settings or environment."""
+    val = getattr(settings, "openai_api_key", None)
     try:
-        openai_client = OpenAI(api_key=settings.openai_api_key)
+        # Support SecretStr from pydantic
+        if val is not None and hasattr(val, "get_secret_value"):
+            val = val.get_secret_value()
+    except Exception:
+        pass
+    # Normalize blanks
+    if isinstance(val, str) and not val.strip():
+        val = None
+    # Fallback to environment
+    return val or os.getenv("OPENAI_API_KEY")
+
+openai_client = None
+_api_key = _get_openai_api_key()
+if _api_key:
+    try:
+        openai_client = OpenAI(api_key=_api_key)
         logger.info("OpenAI client initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize OpenAI client: {e}")
 else:
-    logger.warning("OpenAI API key not found")
+    logger.warning("OpenAI API key not found (OPENAI_API_KEY)")
 
 # Initialize services with proper error handling
 try:
