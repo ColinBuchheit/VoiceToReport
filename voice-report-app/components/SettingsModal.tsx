@@ -159,60 +159,57 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
     }
     setSendingFeedback(true);
     try {
-      // Get user profile for reporter email
+      // Use backend submission so it works in production without relying on a mail app
       const profile = await userProfileService.getProfile();
       const reporterEmail = profile?.workEmail || undefined;
-
-      console.log('📧 Submitting bug report to backend...');
-
-      // Submit to backend
       const res = await submitBugReport({ description: message, reporterEmail, imageUris: attachments });
-
-      console.log('📧 Bug report response:', res);
-
-      // If backend succeeded, clear and exit (do NOT fall through to mail composer)
-      if (res && res.success === true) {
-        console.log('✅ Bug report sent via backend');
+      if (res && (res.success === true || res.success === undefined)) {
+        // On success: clear form, show success popup, then close feedback modal
         setFeedbackText('');
         setAttachments([]);
-        Alert.alert('Thanks!', 'Your bug report was sent successfully.');
+        Alert.alert('Thanks!', 'Your bug report was sent.');
         setFeedbackOpen(false);
         return;
       }
-
-      // Otherwise, backend failed -> trigger fallback
-      console.warn('⚠️ Backend bug report failed, falling back to mail composer');
-      throw new Error('Backend submission failed');
-
-    } catch (backendError) {
-      // Backend call failed - try mail composer as fallback
-      console.warn('Backend error:', backendError);
-      console.log('📧 Attempting mail composer fallback...');
-
+      // fallback to mail composer if backend returns failure
       const available = await MailComposer.isAvailableAsync();
-      if (!available) {
-        Alert.alert(
-          'Error',
-          'Could not send bug report. Please email colin.buchheit@beartechs.com directly.'
-        );
-        return;
+      if (available) {
+        await MailComposer.composeAsync({
+          recipients: ['colin.buchheit@beartechs.com'],
+          subject: 'Bug Report / Recommendation',
+          body: message,
+          attachments,
+          isHtml: false,
+        });
+  setFeedbackText('');
+  setAttachments([]);
+  Alert.alert('Thanks!', 'Your bug report was sent.');
+  setFeedbackOpen(false);
+      } else {
+        Alert.alert('Error', 'Could not send bug report. Please email colin.buchheit@beartechs.com.');
       }
-
-      // Open mail composer
-      await MailComposer.composeAsync({
-        recipients: ['colin.buchheit@beartechs.com'],
-        subject: 'Bug Report / Recommendation',
-        body: message,
-        attachments,
-        isHtml: false,
-      });
-
-      // User has now sent via their mail app, clear the form
-      setFeedbackText('');
-      setAttachments([]);
-      Alert.alert('Thanks!', 'Your bug report was sent.');
-      setFeedbackOpen(false);
-
+    } catch (e) {
+      // If backend call fails, offer email composer fallback
+      try {
+        const available = await MailComposer.isAvailableAsync();
+        if (available) {
+          await MailComposer.composeAsync({
+            recipients: ['colin.buchheit@beartechs.com'],
+            subject: 'Bug Report / Recommendation',
+            body: message,
+            attachments,
+            isHtml: false,
+          });
+          setFeedbackText('');
+          setAttachments([]);
+          Alert.alert('Thanks!', 'Your bug report was sent.');
+          setFeedbackOpen(false);
+        } else {
+          Alert.alert('Error', 'Failed to send bug report. Please email colin.buchheit@beartechs.com.');
+        }
+      } catch {
+        Alert.alert('Error', 'Failed to start email composer.');
+      }
     } finally {
       setSendingFeedback(false);
     }
