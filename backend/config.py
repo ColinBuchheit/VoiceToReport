@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     smtp_server: str = "smtp.mail.yahoo.com"
     smtp_port: str = "587"
     smtp_ca_bundle: Optional[str] = None
+    smtp_tls_insecure: bool = False
     
     # Bug report recipient
     bug_report_recipient: str = "colin.buchheit@beartechs.com"

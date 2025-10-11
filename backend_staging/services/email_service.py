@@ -2,6 +2,7 @@
 import logging
 import smtplib
 import ssl
+import certifi
 import base64
 import os
 from email.mime.text import MIMEText
@@ -463,7 +464,41 @@ class EmailService:
                 logger.warning(f"⚠️ Failed to attach inline logo: {e}")
             
             # Send email
-            context = ssl.create_default_context()
+            context = ssl.create_default_context(cafile=certifi.where())
+            # Optionally load additional CA bundle (corp proxy)
+            try:
+                ca_bundle = getattr(settings, 'smtp_ca_bundle', None)
+                # Auto-detect a default CA path on Azure if none provided
+                if not ca_bundle:
+                    default_ca = '/home/site/wwwroot/certs/smtp-ca.pem'
+                    if os.path.exists(default_ca):
+                        ca_bundle = default_ca
+                if ca_bundle:
+                    context.load_verify_locations(cafile=ca_bundle)
+                    logger.info(f"Loaded custom CA bundle: {ca_bundle}")
+            except Exception as ca_err:
+                logger.warning(f"Could not load custom CA bundle: {ca_err}")
+            # Dev-only insecure toggle
+            try:
+                # Never allow insecure in production/Azure
+                is_prod = False
+                try:
+                    env = str(getattr(settings, 'environment', '')).lower()
+                    if env == 'production':
+                        is_prod = True
+                except Exception:
+                    pass
+                if os.getenv('WEBSITE_INSTANCE_ID'):
+                    is_prod = True
+
+                if getattr(settings, 'smtp_tls_insecure', False) and not is_prod:
+                    context.check_hostname = False
+                    context.verify_mode = ssl.CERT_NONE
+                    logger.warning("SMTP TLS verification DISABLED (smtp_tls_insecure=true)")
+                elif getattr(settings, 'smtp_tls_insecure', False) and is_prod:
+                    logger.warning("Ignoring smtp_tls_insecure in production environment")
+            except Exception:
+                pass
             # Support explicit TLS (587) and implicit TLS/SSL (465)
             if str(self.smtp_port) == '465':
                 with smtplib.SMTP_SSL(self.smtp_server, int(self.smtp_port), timeout=20, context=context) as server:
@@ -538,7 +573,37 @@ class EmailService:
                     "message": "Email credentials not configured"
                 }
 
-            context = ssl.create_default_context()
+            context = ssl.create_default_context(cafile=certifi.where())
+            try:
+                ca_bundle = getattr(settings, 'smtp_ca_bundle', None)
+                if not ca_bundle:
+                    default_ca = '/home/site/wwwroot/certs/smtp-ca.pem'
+                    if os.path.exists(default_ca):
+                        ca_bundle = default_ca
+                if ca_bundle:
+                    context.load_verify_locations(cafile=ca_bundle)
+                    logger.info(f"Loaded custom CA bundle: {ca_bundle}")
+            except Exception as ca_err:
+                logger.warning(f"Could not load custom CA bundle: {ca_err}")
+            try:
+                is_prod = False
+                try:
+                    env = str(getattr(settings, 'environment', '')).lower()
+                    if env == 'production':
+                        is_prod = True
+                except Exception:
+                    pass
+                if os.getenv('WEBSITE_INSTANCE_ID'):
+                    is_prod = True
+
+                if getattr(settings, 'smtp_tls_insecure', False) and not is_prod:
+                    context.check_hostname = False
+                    context.verify_mode = ssl.CERT_NONE
+                    logger.warning("SMTP TLS verification DISABLED (smtp_tls_insecure=true)")
+                elif getattr(settings, 'smtp_tls_insecure', False) and is_prod:
+                    logger.warning("Ignoring smtp_tls_insecure in production environment")
+            except Exception:
+                pass
             with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=15) as server:
                 code, banner = server.ehlo()
                 logger.info(f"📧 Test EHLO: {code} {banner}")
@@ -605,7 +670,7 @@ class EmailService:
                     logger.warning(f"Failed to attach image {idx}: {e}")
 
             # Send email
-            context = ssl.create_default_context()
+            context = ssl.create_default_context(cafile=certifi.where())
             if str(self.smtp_port) == '465':
                 with smtplib.SMTP_SSL(self.smtp_server, int(self.smtp_port), timeout=20, context=context) as server:
                     server.ehlo()

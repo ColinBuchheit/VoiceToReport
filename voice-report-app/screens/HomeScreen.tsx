@@ -102,9 +102,24 @@ function HomeScreenInner({ navigation }: Props) {
     }
   }, [showChecklist]);
 
-  // Handle navigation events - detect return from summary
+  // Handle navigation events - detect return from summary and clean up audio on blur
   useFocusEffect(
     React.useCallback(() => {
+      // Ensure audio mode is sane on focus (particularly after Android back)
+      (async () => {
+        try {
+          await Audio.setAudioModeAsync({
+            allowsRecordingIOS: false,
+            playsInSilentModeIOS: true,
+            shouldDuckAndroid: false,
+            playThroughEarpieceAndroid: false,
+            staysActiveInBackground: false,
+          });
+        } catch (e) {
+          console.warn('Audio mode set on focus failed (non-fatal):', e);
+        }
+      })();
+
       // Refresh email count when screen is focused
       (async () => {
         try {
@@ -118,21 +133,45 @@ function HomeScreenInner({ navigation }: Props) {
       // Check if we should reset (coming back from summary screen)
       if (persistedState.shouldReset) {
         resetAllState();
-        return;
+      } else {
+        // Otherwise, just clean up recording state (normal return from transcript)
+        setIsRecording(false);
+        setRecording(null);
+        setRecordingDuration(0);
+        setIsProcessing(false);
       }
-      
-      // Otherwise, just clean up recording state (normal return from transcript)
-      setIsRecording(false);
-      setRecording(null);
-      setRecordingDuration(0);
-      setIsProcessing(false);
       
       // Clear any running timers
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
-    }, [])
+
+      // Cleanup on blur: ensure mic is released and audio mode reset
+      return () => {
+        (async () => {
+          try {
+            if (recording) {
+              await recording.stopAndUnloadAsync();
+            }
+          } catch {}
+          setRecording(null);
+          setIsRecording(false);
+          setRecordingDuration(0);
+          try {
+            await Audio.setAudioModeAsync({
+              allowsRecordingIOS: false,
+              playsInSilentModeIOS: true,
+              shouldDuckAndroid: false,
+              playThroughEarpieceAndroid: false,
+              staysActiveInBackground: false,
+            });
+          } catch (e2) {
+            console.warn('Audio mode reset on blur failed (non-fatal):', e2);
+          }
+        })();
+      };
+    }, [recording])
   );
 
   // Listen for navigation state changes to detect summary completion

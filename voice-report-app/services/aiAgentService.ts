@@ -49,23 +49,54 @@ export class AIAgentService {
       throw new Error('Microphone permission is required for voice commands. Please enable it in your device settings.');
     }
 
-    // Set audio mode for recording
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-      shouldDuckAndroid: true,
-      playThroughEarpieceAndroid: false,
-    });
+    // Preflight: ensure no lingering recording/sound and set audio mode for recording
+    try {
+      if (this.recording) {
+        try { await this.recording.stopAndUnloadAsync(); } catch {}
+        this.recording = null;
+      }
+      if (this.sound) {
+        try { await this.sound.unloadAsync(); } catch {}
+        this.sound = null;
+      }
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+    } catch (e) {
+      console.warn('Audio preflight for startListening failed (non-fatal):', e);
+    }
 
-    // Use high quality recording for better transcription
-    const { recording } = await Audio.Recording.createAsync(
-      Audio.RecordingOptionsPresets.HIGH_QUALITY
-    );
+    // Use high quality recording for better transcription with one retry on failure
+    let recording: Audio.Recording | null = null;
+    try {
+      const created = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      recording = created.recording;
+    } catch (err) {
+      console.warn('First attempt to start recording failed, retrying after audio mode reset...', err);
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+        });
+      } catch {}
+      const createdRetry = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      recording = createdRetry.recording;
+    }
 
-    this.recording = recording;
+    this.recording = recording!;
     console.log('✅ AI Agent recording started with HIGH_QUALITY preset');
-    return recording;
+    return recording!;
   }
 
   async stopListening(): Promise<string | null> {
@@ -75,11 +106,18 @@ export class AIAgentService {
       await this.recording.stopAndUnloadAsync();
       const uri = this.recording.getURI();
       
-      // Reset audio mode
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-      });
+      // Reset audio mode and release mic (important on Android)
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+          shouldDuckAndroid: false,
+          playThroughEarpieceAndroid: false,
+        });
+      } catch (e) {
+        console.warn('Audio mode reset after stopListening failed (non-fatal):', e);
+      }
 
       console.log('✅ AI Agent recording stopped successfully');
       console.log('📁 Audio URI:', uri);
@@ -403,6 +441,19 @@ export class AIAgentService {
       if (this.sound) {
         await this.sound.unloadAsync();
         this.sound = null;
+      }
+
+      // Reset audio mode to a neutral state so mic is free across screens
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+          shouldDuckAndroid: false,
+          playThroughEarpieceAndroid: false,
+        });
+      } catch (e) {
+        console.warn('Audio mode reset in cleanup failed (non-fatal):', e);
       }
 
       console.log('✅ AI Agent cleanup completed');

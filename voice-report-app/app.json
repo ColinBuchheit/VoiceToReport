@@ -4,8 +4,8 @@
     "slug": "voice-report-app",
     "version": "1.0.0",
     "orientation": "portrait",
-  "icon": "./assets/appicon.png",
-  "userInterfaceStyle": "automatic",
+    "icon": "./assets/appicon.png",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -20,8 +20,8 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-  "NSMicrophoneUsageDescription": "Allow Voice Report App to access the microphone to record voice notes and generate summaries.",
-  "NSPhotoLibraryUsageDescription": "Allow Voice Report App to access your photo library to attach screenshots to feedback emails."
+        "NSMicrophoneUsageDescription": "Allow Voice Report App to access the microphone to record voice notes and generate summaries.",
+        "NSPhotoLibraryUsageDescription": "Allow Voice Report App to access your photo library to attach screenshots to feedback emails."
       }
     },
     "android": {
@@ -29,6 +29,7 @@
         "foregroundImage": "./assets/appicon.png",
         "backgroundColor": "#ffffff"
       },
+      "package": "com.beartechs.voicereport",
       "edgeToEdgeEnabled": true,
       "statusBar": {
         "backgroundColor": "#101214",
@@ -38,10 +39,18 @@
         "backgroundColor": "#101214",
         "barStyle": "light-content"
       },
-  "permissions": ["RECORD_AUDIO", "READ_MEDIA_IMAGES"]
+      "permissions": [
+        "RECORD_AUDIO",
+        "READ_MEDIA_IMAGES"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "d494af9e-4a50-40f5-8022-434a11074f11"
+      }
     }
   }
 }

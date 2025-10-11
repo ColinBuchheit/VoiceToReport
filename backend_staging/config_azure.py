@@ -18,8 +18,10 @@ class Settings(BaseSettings):
     email_user: str = ""
     email_password: str = ""
     email_recipients: str = "colbol42@gmail.com"
-    smtp_server: str = "smtp.gmail.com"
+    smtp_server: str = "smtp.mail.yahoo.com"
     smtp_port: str = "587"
+    smtp_ca_bundle: Optional[str] = None
+    smtp_tls_insecure: bool = False
     bug_report_recipient: str = "colin.buchheit@beartechs.com"
 
     # GPT settings

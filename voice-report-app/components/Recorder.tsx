@@ -358,6 +358,18 @@ export default function Recorder({
         }
         setIsRecording(false);
         setRecordingDuration(0);
+          // Reset audio mode so mic releases cleanly (important on Android when navigating back)
+          try {
+            await Audio.setAudioModeAsync({
+              allowsRecordingIOS: false,
+              playsInSilentModeIOS: false,
+              shouldDuckAndroid: false,
+              playThroughEarpieceAndroid: false,
+              staysActiveInBackground: false,
+            });
+          } catch (e) {
+            console.warn('Audio mode reset failed (non-fatal):', e);
+          }
       } catch (error) {
         console.error('Failed to stop recording:', error);
         Alert.alert('Error', 'Failed to stop recording');
@@ -371,10 +383,15 @@ export default function Recorder({
           return;
         }
 
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-        });
+          // Configure audio mode for recording (cross-platform safe; adds Android flags)
+          await Audio.setAudioModeAsync({
+            allowsRecordingIOS: true,
+            playsInSilentModeIOS: true,
+            // Android-specific stability flags
+            shouldDuckAndroid: true,
+            playThroughEarpieceAndroid: false,
+            staysActiveInBackground: false,
+          });
 
         const newRecording = new Audio.Recording();
         await newRecording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);

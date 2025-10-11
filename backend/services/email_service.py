@@ -210,6 +210,14 @@ This report was automatically generated from voice input using the Bear Technolo
                     ctx.load_verify_locations(cafile=ca_bundle)
             except Exception as ca_err:
                 logger.warning(f"Could not load custom CA bundle: {ca_err}")
+            # Dev-only insecure toggle (local testing when corp proxy breaks TLS)
+            try:
+                if getattr(settings, "smtp_tls_insecure", False):
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    logger.warning("SMTP TLS verification DISABLED for local testing (smtp_tls_insecure=true)")
+            except Exception:
+                pass
             with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=30) as server:
                 server.ehlo()
                 server.starttls(context=ctx)
@@ -251,6 +259,14 @@ This report was automatically generated from voice input using the Bear Technolo
                     ctx.load_verify_locations(cafile=ca_bundle)
             except Exception as ca_err:
                 logger.warning(f"Could not load custom CA bundle: {ca_err}")
+            # Dev-only insecure toggle (local testing when corp proxy breaks TLS)
+            try:
+                if getattr(settings, "smtp_tls_insecure", False):
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    logger.warning("SMTP TLS verification DISABLED for local testing (smtp_tls_insecure=true)")
+            except Exception:
+                pass
             with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=30) as server:
                 server.ehlo()
                 server.starttls(context=ctx)
