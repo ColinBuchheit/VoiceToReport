@@ -2,7 +2,6 @@
 import { File, Paths } from 'expo-file-system'; // ✅ Modern API for file objects & paths
 import * as FileSystemLegacy from 'expo-file-system/legacy'; // ✅ Legacy API for base64 operations
 import { Audio, AVPlaybackStatus } from 'expo-av';
-import audioLockService from './audioLockService';
 import { VoiceCommand, VoiceCommandResponse, ScreenContext } from '../types/aiAgent';
 
 // Import the API configuration
@@ -101,92 +100,34 @@ export class AIAgentService {
   }
 
   async stopListening(): Promise<string | null> {
-    console.log('\n============================');
-    console.log('🛑 [DEBUG] stopListening() CALLED');
-    console.log('============================');
+    if (!this.recording) return null;
 
-    let uri: string | null = null;
     try {
-      // 1) Check recording existence
-      const hasRecording = !!this.recording;
-      console.log('🎛️ [DEBUG] this.recording exists:', hasRecording);
-      if (!this.recording) {
-        console.warn('⚠️ [DEBUG] No active recording instance found');
-        return null;
-      }
-
-      // 2) Log current recording status
+      await this.recording.stopAndUnloadAsync();
+      const uri = this.recording.getURI();
+      
+      // Reset audio mode and release mic (important on Android)
       try {
-        const status: any = await this.recording.getStatusAsync();
-        console.log('📊 [DEBUG] Recording status:', {
-          isRecording: status?.isRecording,
-          canRecord: status?.canRecord,
-          durationMillis: status?.durationMillis,
-          isDoneRecording: status?.isDoneRecording,
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+          shouldDuckAndroid: false,
+          playThroughEarpieceAndroid: false,
         });
       } catch (e) {
-        console.warn('⚠️ [DEBUG] Failed to get recording status:', e);
+        console.warn('Audio mode reset after stopListening failed (non-fatal):', e);
       }
 
-      // 3) Attempt to stop and unload
-      try {
-        await this.recording.stopAndUnloadAsync();
-        console.log('✅ [DEBUG] stopAndUnloadAsync() succeeded');
-      } catch (e) {
-        console.error('❌ [DEBUG] stopAndUnloadAsync() failed:', e);
-        return null;
-      }
-
-      // 4) Get URI
-      try {
-        uri = this.recording.getURI();
-        console.log('📁 [DEBUG] Recording URI:', uri);
-      } catch (e) {
-        console.error('❌ [DEBUG] getURI() failed:', e);
-        uri = null;
-      }
-
-      if (!uri) {
-        console.warn('⚠️ [DEBUG] No URI returned after stopping recording');
-        return null;
-      }
-
-      // 5) Verify file exists and has size > 0 using Legacy API
-      try {
-        const info = await FileSystemLegacy.getInfoAsync(uri);
-        console.log('🧾 [DEBUG] File info:', info);
-        if (!info || !info.exists) {
-          console.warn('⚠️ [DEBUG] File does not exist at URI');
-          return null;
-        }
-        const size = (info as any).size ?? 0;
-        if (!size || size <= 0) {
-          console.warn('⚠️ [DEBUG] File size is zero or missing');
-          return null;
-        }
-      } catch (e) {
-        console.error('❌ [DEBUG] getInfoAsync() failed:', e);
-        return null;
-      }
-
-      console.log('✅ [DEBUG] stopListening() checks passed, returning URI');
-      return uri;
-    } finally {
-      // Clear local recording ref
-      if (this.recording) {
-        try { await this.recording.getStatusAsync(); } catch {}
-      }
+      console.log('✅ AI Agent recording stopped successfully');
+      console.log('📁 Audio URI:', uri);
+      
       this.recording = null;
-
-      // Always release the audio lock for AI agent
-      try {
-        await audioLockService.releaseLock('ai-agent');
-      } catch (e) {
-        console.warn('⚠️ [DEBUG] Failed to release audio lock in stopListening:', e);
-      }
-
-      // Optionally reset audio mode is handled by audioLockService.releaseLock
-      console.log('============================\n');
+      return uri;
+    } catch (error) {
+      console.error('❌ Error stopping AI agent recording:', error);
+      this.recording = null;
+      throw new Error('Failed to stop recording. Please try again.');
     }
   }
 

@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RouteProp, useFocusEffect } from '@react-navigation/native';
+import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
 import { sendCloseoutEmail } from '../services/api';
 import emailHistoryService from '../services/emailHistoryService';
@@ -22,8 +22,6 @@ import { CloseoutSummary, ScreenContext } from '../types/aiAgent';
 import { useFontScale } from '../context/FontScaleContext';
 import userProfileService from '../services/userProfileService';
 import { useTheme } from '../context/ThemeContext';
-import { AIAgentService } from '../services/aiAgentService';
-import audioLockService from '../services/audioLockService';
 
 type SummaryScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -113,25 +111,6 @@ const EditableField: React.FC<EditableFieldProps & { scaled:(n:number)=>number }
 };
 
 export default function SummaryScreen({ navigation, route }: Props) {
-  // Cleanup mic/audio when leaving this screen
-  useFocusEffect(
-    React.useCallback(() => {
-      console.log('🟢 SummaryScreen focused');
-      return () => {
-        console.log('🧹 SummaryScreen blur cleanup queued');
-        Promise.resolve().then(async () => {
-          try {
-            const aiService = AIAgentService.getInstance();
-            await aiService.cleanup();
-            await audioLockService.forceRelease();
-            console.log('✅ SummaryScreen cleanup complete');
-          } catch (e) {
-            console.warn('⚠️ SummaryScreen cleanup error:', e);
-          }
-        });
-      };
-    }, [])
-  );
   const { scaled } = useFontScale();
   const { colors } = useTheme();
   // Initialize CloseoutSummary with proper field mapping
