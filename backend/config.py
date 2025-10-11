@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     email_recipients: str = "colbol42@gmail.com"  # Your existing email
     smtp_server: str = "smtp.gmail.com"
     smtp_port: str = "587"
+    # TLS/SSL behavior for SMTP. If true, certificate verification is disabled (NOT recommended for production)
+    smtp_tls_insecure: bool = False
     
     # Bug report recipient
     bug_report_recipient: str = "colin.buchheit@beartechs.com"

@@ -463,7 +463,12 @@ class EmailService:
                 logger.warning(f"⚠️ Failed to attach inline logo: {e}")
             
             # Send email
-            context = ssl.create_default_context()
+            # TLS context setup
+            if getattr(settings, 'smtp_tls_insecure', False):
+                context = ssl._create_unverified_context()
+                logger.warning("⚠️ SMTP TLS verification is DISABLED (smtp_tls_insecure=true). Do not use in production.")
+            else:
+                context = ssl.create_default_context()
             # Support explicit TLS (587) and implicit TLS/SSL (465)
             if str(self.smtp_port) == '465':
                 with smtplib.SMTP_SSL(self.smtp_server, int(self.smtp_port), timeout=20, context=context) as server:
@@ -538,7 +543,12 @@ class EmailService:
                     "message": "Email credentials not configured"
                 }
 
-            context = ssl.create_default_context()
+            # TLS context setup for bug reports as well
+            if getattr(settings, 'smtp_tls_insecure', False):
+                context = ssl._create_unverified_context()
+                logger.warning("⚠️ SMTP TLS verification is DISABLED (smtp_tls_insecure=true) for bug reports.")
+            else:
+                context = ssl.create_default_context()
             with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=15) as server:
                 code, banner = server.ehlo()
                 logger.info(f"📧 Test EHLO: {code} {banner}")
