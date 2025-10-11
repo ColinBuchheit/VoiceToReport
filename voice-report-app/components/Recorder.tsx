@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
+import { validateAudioFile, logAudioDiagnostics } from '../utils/audioDiagnostics';
 
 interface RecorderProps {
   onRecordingComplete: (uri: string) => void;
@@ -349,27 +350,62 @@ export default function Recorder({
       // Stop recording
       try {
         if (recording) {
+          console.log('⏹️ Stopping recording...');
           await recording.stopAndUnloadAsync();
+
+          // Buffer flush delay: emulator I/O can be slow
+          if (Platform.OS === 'android') {
+            console.log('⏳ Waiting for Android to flush audio buffer (500ms)...');
+            await new Promise(resolve => setTimeout(resolve, 500));
+          } else {
+            console.log('⏳ Waiting for iOS to flush audio buffer (100ms)...');
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+
           const uri = recording.getURI();
           if (uri) {
-            onRecordingComplete(uri);
+            try {
+              const validation = await validateAudioFile(uri);
+              logAudioDiagnostics(validation.diagnostics);
+              if (validation.valid) {
+                console.log(`✅ Valid recording: ${validation.diagnostics.readableSize}`);
+                onRecordingComplete(uri);
+              } else {
+                console.error(`❌ Invalid recording: ${validation.error}`);
+                Alert.alert(
+                  'Recording Error',
+                  `${validation.error}\n\n` +
+                  `Platform: ${validation.diagnostics.platform} ${validation.diagnostics.isEmulator ? '(Emulator)' : '(Device)'}\n` +
+                  `Size: ${validation.diagnostics.readableSize}\n\n` +
+                  'Please try recording again.'
+                );
+              }
+            } catch (e) {
+              console.warn('Could not verify file info:', e);
+              onRecordingComplete(uri);
+            }
+          } else {
+            console.warn('⚠️ No URI returned from recording');
+            Alert.alert('Recording Error', 'Failed to save recording. Please try again.');
           }
+
           setRecording(null);
         }
+
         setIsRecording(false);
         setRecordingDuration(0);
-          // Reset audio mode so mic releases cleanly (important on Android when navigating back)
-          try {
-            await Audio.setAudioModeAsync({
-              allowsRecordingIOS: false,
-              playsInSilentModeIOS: false,
-              shouldDuckAndroid: false,
-              playThroughEarpieceAndroid: false,
-              staysActiveInBackground: false,
-            });
-          } catch (e) {
-            console.warn('Audio mode reset failed (non-fatal):', e);
-          }
+        // Reset audio mode so mic releases cleanly (important on Android when navigating back)
+        try {
+          await Audio.setAudioModeAsync({
+            allowsRecordingIOS: false,
+            playsInSilentModeIOS: false,
+            shouldDuckAndroid: false,
+            playThroughEarpieceAndroid: false,
+            staysActiveInBackground: false,
+          });
+        } catch (e) {
+          console.warn('Audio mode reset failed (non-fatal):', e);
+        }
       } catch (error) {
         console.error('Failed to stop recording:', error);
         Alert.alert('Error', 'Failed to stop recording');
@@ -437,33 +473,26 @@ export default function Recorder({
       inputRange: [0, 1],
       outputRange: [0, 0.6],
     });
-
     return {
       position: 'absolute' as const,
-      width: buttonSize + 60,
-      height: buttonSize + 60,
-      borderRadius: (buttonSize + 60) / 2,
-      backgroundColor: 'transparent',
-      borderWidth: 3,
-      borderColor: COLORS.ORANGE,
+      width: buttonSize + 24,
+      height: buttonSize + 24,
+      borderRadius: (buttonSize + 24) / 2,
+      backgroundColor: COLORS.ORANGE,
       opacity: glowOpacity,
-      top: -30,
-      left: -30,
     };
   };
 
-  // Outer ring animation
+  // Outer ring animation style
   const getOuterRingStyle = () => {
     return {
       position: 'absolute' as const,
-      width: buttonSize + 20,
-      height: buttonSize + 20,
-      borderRadius: (buttonSize + 20) / 2,
-      backgroundColor: 'transparent',
+      width: buttonSize + 40,
+      height: buttonSize + 40,
+      borderRadius: (buttonSize + 40) / 2,
       borderWidth: 2,
-      borderColor: isRecording ? COLORS.ORANGE : 'transparent',
-      top: -10,
-      left: -10,
+      borderColor: COLORS.ORANGE,
+      opacity: isRecording ? 0.5 : 0,
       transform: [{ scale: outerRingAnim }],
     };
   };
