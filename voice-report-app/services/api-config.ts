@@ -4,6 +4,18 @@
 
 import { Platform } from 'react-native';
 
+// Allow EAS/Expo env overrides for production Azure backend
+// Use EXPO_PUBLIC_BACKEND_URL (single) or EXPO_PUBLIC_BACKEND_URLS (comma/space-separated)
+const ENV = (process as any)?.env ?? {};
+const ENV_URLS_RAW: string | undefined = ENV.EXPO_PUBLIC_BACKEND_URLS;
+const ENV_URL_SINGLE: string | undefined = ENV.EXPO_PUBLIC_BACKEND_URL;
+const RESOLVED_ENV_URLS: string[] | null = (() => {
+  const urls = (ENV_URLS_RAW?.split(/[\s,]+/)?.filter(Boolean) ?? []) as string[];
+  if (urls.length > 0) return urls;
+  if (ENV_URL_SINGLE && ENV_URL_SINGLE.trim().length > 0) return [ENV_URL_SINGLE.trim()];
+  return null;
+})();
+
 // API Configuration
 export const API_CONFIG = {
   // Backend URLs in order of preference
@@ -35,6 +47,17 @@ export const API_CONFIG = {
     DEFAULT_FORMAT: 'm4a',
   },
 };
+
+// If env overrides are provided, force those to the top (Azure or other prod URL)
+if (RESOLVED_ENV_URLS && RESOLVED_ENV_URLS.length > 0) {
+  // Normalize to ensure proper scheme and no trailing slashes
+  const normalized = RESOLVED_ENV_URLS.map((u) => u.replace(/\/$/, ''));
+  API_CONFIG.BACKEND_URLS = normalized;
+  // Null ngrok URL to avoid accidental use in prod
+  // @ts-ignore - keep type simple at runtime
+  API_CONFIG.NGROK_URL = null;
+  console.log('[api-config] Using backend URL(s) from env:', normalized);
+}
 
 // FIXED: Helper function with critical ngrok header
 export const testBackendConnection = async (url: string): Promise<boolean> => {

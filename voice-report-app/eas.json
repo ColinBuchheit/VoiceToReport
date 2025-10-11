@@ -4,12 +4,18 @@
   },
   "build": {
     "preview": {
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://speech-to-report-api.azurewebsites.net"
+      },
       "android": {
         "buildType": "apk"
       },
       "developmentClient": false
     },
     "production": {
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://speech-to-report-api.azurewebsites.net"
+      },
       "android": {
         "buildType": "app-bundle"
       }
