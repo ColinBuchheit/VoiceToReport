@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AIAgentService } from '../services/aiAgentService';
+import { runAIAgentMicDiagnostic, showMicDiagnostic } from '../services/aiAgentDiagnostics';
 import { 
   AIAgentProps, 
   AIAgentState, 
@@ -176,6 +177,15 @@ export default function AIAgent({
       console.log('🎤 AI Agent starting to listen...');
       setAgentState({ isListening: true, isProcessing: false, isPlayingResponse: false });
       startListeningAnimations();
+
+      // Check permissions early; in some release builds Android denies without a prompt
+      const perm = await (await import('expo-av')).Audio.getPermissionsAsync();
+      if (perm.status !== 'granted') {
+        const req = await (await import('expo-av')).Audio.requestPermissionsAsync();
+        if (req.status !== 'granted') {
+          throw new Error('Microphone permission is required. Please enable it in Settings.');
+        }
+      }
 
       const recording = await aiService.startListening();
       console.log('✅ Recording started successfully');
@@ -396,6 +406,18 @@ export default function AIAgent({
     }
   };
 
+  // Long-press to run diagnostics when debug flag is set
+  const handleLongPress = async () => {
+    const debug = process.env.EXPO_PUBLIC_AI_DEBUG === 'true';
+    if (!debug) return;
+    try {
+      const diag = await runAIAgentMicDiagnostic(1200);
+      showMicDiagnostic(diag);
+    } catch (e) {
+      console.warn('Mic diagnostic failed:', e);
+    }
+  };
+
   // Get button style based on state
   const getButtonStyle = () => {
     const baseStyle = {
@@ -483,6 +505,7 @@ export default function AIAgent({
         <TouchableOpacity
           style={getButtonStyle()}
           onPress={handlePress}
+          onLongPress={handleLongPress}
           disabled={disabled || agentState.isProcessing}
           activeOpacity={0.8}
         >

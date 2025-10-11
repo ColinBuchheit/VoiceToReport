@@ -91,12 +91,22 @@ class NgrokManager:
         # FIXED: Proper JavaScript array formatting with actual newlines
         backend_urls_formatted = ',\n    '.join(backend_urls)
         
-        # FIXED: Template with correct JavaScript syntax
+        # FIXED: Template with correct JavaScript syntax (with env overrides)
         config_content = f'''// Auto-generated API configuration
 // This file is automatically updated by ngrok_manager.py
 // Last updated: {time.strftime("%Y-%m-%d %H:%M:%S")}
 
 import {{ Platform }} from 'react-native';
+
+// Env override support for Azure/prod
+const ENV_URLS_RAW: string | undefined = process.env.EXPO_PUBLIC_BACKEND_URLS as any;
+const ENV_URL_SINGLE: string | undefined = process.env.EXPO_PUBLIC_BACKEND_URL as any;
+const RESOLVED_ENV_URLS: string[] | null = (() => {{
+  const urls = (ENV_URLS_RAW?.split(/[\s,]+/)?.filter(Boolean) ?? []) as string[];
+  if (urls.length > 0) return urls;
+  if (ENV_URL_SINGLE && ENV_URL_SINGLE.trim().length > 0) return [ENV_URL_SINGLE.trim()];
+  return null;
+}})();
 
 // API Configuration
 export const API_CONFIG = {{
@@ -126,6 +136,15 @@ export const API_CONFIG = {{
     DEFAULT_FORMAT: 'm4a',
   }},
 }};
+
+// If env overrides are provided, force those
+if (RESOLVED_ENV_URLS && RESOLVED_ENV_URLS.length > 0) {{
+  const normalized = RESOLVED_ENV_URLS.map((u) => u.replace(/\/$/, ''));
+  API_CONFIG.BACKEND_URLS = normalized;
+  // @ts-ignore
+  API_CONFIG.NGROK_URL = null;
+  console.log('[api-config] Using backend URL(s) from env:', normalized);
+}}
 
 // FIXED: Helper function with critical ngrok header
 export const testBackendConnection = async (url: string): Promise<boolean> => {{

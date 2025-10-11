@@ -109,6 +109,13 @@ export class AIAgentService {
     try {
       const created = await Audio.Recording.createAsync(options);
       recording = created.recording;
+      // Ensure recording is actually started (some Android release builds need explicit start)
+      try {
+        const st = await recording.getStatusAsync();
+        if (!st.isRecording && st.canRecord) {
+          await recording.startAsync();
+        }
+      } catch {}
     } catch (err) {
       console.warn('First attempt to start recording failed, retrying after audio mode reset...', err);
       try {
@@ -122,6 +129,12 @@ export class AIAgentService {
       } catch {}
       const createdRetry = await Audio.Recording.createAsync(options);
       recording = createdRetry.recording;
+      try {
+        const st = await recording.getStatusAsync();
+        if (!st.isRecording && st.canRecord) {
+          await recording.startAsync();
+        }
+      } catch {}
     }
 
     this.recording = recording!;
@@ -157,7 +170,13 @@ export class AIAgentService {
         console.warn('⚠️ [DEBUG] Failed to get recording status:', e);
       }
 
-      // 3) Attempt to stop and unload
+      // 3) Attempt to stop and unload (on Android, give a tiny buffer if recording was very short)
+      try {
+        const stBefore: any = await this.recording.getStatusAsync();
+        if (Platform.OS === 'android' && stBefore?.durationMillis != null && stBefore.durationMillis < 350) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+      } catch {}
       try {
         await this.recording.stopAndUnloadAsync();
         console.log('✅ [DEBUG] stopAndUnloadAsync() succeeded');
@@ -166,7 +185,10 @@ export class AIAgentService {
         return null;
       }
 
-      // 4) Get URI
+      // 4) Get URI (Android: allow flush time before reading URI)
+      if (Platform.OS === 'android') {
+        await new Promise((r) => setTimeout(r, 120));
+      }
       try {
         uri = this.recording.getURI();
         console.log('📁 [DEBUG] Recording URI:', uri);
@@ -176,8 +198,18 @@ export class AIAgentService {
       }
 
       if (!uri) {
-        console.warn('⚠️ [DEBUG] No URI returned after stopping recording');
-        return null;
+        // Retry once after a short delay on Android
+        if (Platform.OS === 'android') {
+          await new Promise((r) => setTimeout(r, 200));
+          try {
+            uri = this.recording.getURI();
+            console.log('📁 [DEBUG] Recording URI (retry):', uri);
+          } catch {}
+        }
+        if (!uri) {
+          console.warn('⚠️ [DEBUG] No URI returned after stopping recording');
+          return null;
+        }
       }
 
       // 5) (Relaxed) Best-effort verification. On some Android builds, URIs may be content:// and
