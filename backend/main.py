@@ -25,11 +25,12 @@ from services.transcription import TranscriptionService
 from services.summarization import SummarizationService
 from services.email_service import EmailService
 from services.voice_agent import VoiceAgentService
-# Try Azure config first, fall back to local config
+# Try Azure config first, fall back to local config on any failure
 try:
-    from config_azure import settings
+    import config_azure as _config_azure
+    settings = _config_azure.settings
     print("✅ Using Azure configuration")
-except ImportError:
+except Exception:
     from config import settings
     print("ℹ️ Using local configuration")
 

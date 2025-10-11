@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     """Application configuration using Pydantic settings"""
     
     # OpenAI Configuration
-    # Map to env var OPENAI_API_KEY, make optional to avoid import crashes when not set
+    # Keep optional to avoid startup crashes if missing locally; still treated as secret
     openai_api_key: Optional[SecretStr] = Field(default=None, alias="OPENAI_API_KEY")
     
     # Server Configuration
@@ -33,10 +33,11 @@ class Settings(BaseSettings):
     
     # Email Configuration
     email_user: str = ""
-    email_password: str = ""
+    email_password: Optional[SecretStr] = None
     email_recipients: str = "colbol42@gmail.com"  # Your existing email
-    smtp_server: str = "smtp.gmail.com"
+    smtp_server: str = "smtp.mail.yahoo.com"
     smtp_port: str = "587"
+    smtp_ca_bundle: Optional[str] = None
     
     # Bug report recipient
     bug_report_recipient: str = "colin.buchheit@beartechs.com"
@@ -94,6 +95,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         populate_by_name=True,
+        case_sensitive=False,
         extra="ignore",
     )
 

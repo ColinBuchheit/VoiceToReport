@@ -17,3 +17,4 @@ gunicorn==21.2.0
 # Other dependencies
 Pillow>=10.2.0
 requests>=2.31.0
+certifi>=2024.2.2
