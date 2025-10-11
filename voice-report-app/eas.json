@@ -5,7 +5,8 @@
   "build": {
     "preview": {
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://speech-to-report-api.azurewebsites.net"
+        "EXPO_PUBLIC_BACKEND_URL": "https://speech-to-report-api.azurewebsites.net",
+        "EXPO_PUBLIC_AI_DEBUG": "true"
       },
       "android": {
         "buildType": "apk"

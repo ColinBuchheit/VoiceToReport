@@ -64,11 +64,13 @@ async function probeHealth(url) {
     const easPath = path.join(appDir, 'eas.json');
     const apiConfigPath = path.join(appDir, 'services', 'api-config.ts');
     const eas = readJson(easPath);
-    const envUrls = getEnvUrlsFromEas(eas, profile);
+  const envUrls = getEnvUrlsFromEas(eas, profile);
+  const aiDebug = (eas.build && eas.build[profile] && eas.build[profile].env && eas.build[profile].env.EXPO_PUBLIC_AI_DEBUG) || '(not set)';
     const defaultUrls = extractBackendUrlsFromApiConfig(apiConfigPath);
 
     console.log('Profile:', profile);
     console.log('Env URLs (from EAS profile):', envUrls.length ? envUrls : '(none)');
+  console.log('AI debug flag (from EAS profile):', aiDebug);
     console.log('Default URLs (from api-config.ts):', defaultUrls);
 
     const effective = envUrls.length ? envUrls : defaultUrls;
