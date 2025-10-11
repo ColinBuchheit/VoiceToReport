@@ -440,6 +440,7 @@ class EmailService:
             except Exception:
                 msg['Date'] = datetime.now().strftime('%a, %d %b %Y %H:%M:%S')
             msg['Subject'] = subject
+            msg['X-Template-Version'] = 'v2-html-2025-10-11'
 
             # Attach HTML
             alternative = MIMEMultipart('alternative')
