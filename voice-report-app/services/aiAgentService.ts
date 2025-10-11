@@ -4,6 +4,7 @@ import * as FileSystemLegacy from 'expo-file-system/legacy'; // ✅ Legacy API f
 import { Audio, AVPlaybackStatus } from 'expo-av';
 import audioLockService from './audioLockService';
 import { VoiceCommand, VoiceCommandResponse, ScreenContext } from '../types/aiAgent';
+import { Platform } from 'react-native';
 
 // Import the API configuration
 let API_CONFIG: {
@@ -50,6 +51,12 @@ export class AIAgentService {
       throw new Error('Microphone permission is required for voice commands. Please enable it in your device settings.');
     }
 
+    // Acquire audio lock to prevent contention with other recorders
+    const gotLock = await audioLockService.acquireLock('ai-agent');
+    if (!gotLock) {
+      throw new Error('Microphone is currently in use by another part of the app. Please stop other recordings and try again.');
+    }
+
     // Preflight: ensure no lingering recording/sound and set audio mode for recording
     try {
       if (this.recording) {
@@ -71,12 +78,36 @@ export class AIAgentService {
       console.warn('Audio preflight for startListening failed (non-fatal):', e);
     }
 
+    // Recording options tuned for Android speech capture
+    // Build Android options with safe fallbacks for constants
+    const outputFormat = (Audio as any).RECORDING_OPTION_ANDROID_OUTPUT_FORMAT_MPEG_4 ?? 2;
+    const audioEncoder = (Audio as any).RECORDING_OPTION_ANDROID_AUDIO_ENCODER_AAC ?? 3;
+    const audioSource = (Audio as any).RECORDING_OPTION_ANDROID_AUDIO_SOURCE_VOICE_RECOGNITION
+      ?? (Audio as any).RECORDING_OPTION_ANDROID_AUDIO_SOURCE_MIC
+      ?? 6;
+    const ANDROID_RECORDING_OPTIONS: Audio.RecordingOptions = {
+      android: {
+        extension: '.m4a',
+        outputFormat,
+        audioEncoder,
+        sampleRate: 44100,
+        numberOfChannels: 1,
+        bitRate: 128000,
+        // Prefer VOICE_RECOGNITION source for clearer speech on Android
+        audioSource,
+      },
+      ios: Audio.RecordingOptionsPresets.HIGH_QUALITY.ios,
+      web: Audio.RecordingOptionsPresets.HIGH_QUALITY.web,
+      isMeteringEnabled: false,
+    } as Audio.RecordingOptions;
+
+    // Use robust options on Android; fall back to preset otherwise
+    const options = Platform.OS === 'android' ? ANDROID_RECORDING_OPTIONS : Audio.RecordingOptionsPresets.HIGH_QUALITY;
+
     // Use high quality recording for better transcription with one retry on failure
     let recording: Audio.Recording | null = null;
     try {
-      const created = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      const created = await Audio.Recording.createAsync(options);
       recording = created.recording;
     } catch (err) {
       console.warn('First attempt to start recording failed, retrying after audio mode reset...', err);
@@ -89,9 +120,7 @@ export class AIAgentService {
           playThroughEarpieceAndroid: false,
         });
       } catch {}
-      const createdRetry = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      const createdRetry = await Audio.Recording.createAsync(options);
       recording = createdRetry.recording;
     }
 
@@ -151,22 +180,22 @@ export class AIAgentService {
         return null;
       }
 
-      // 5) Verify file exists and has size > 0 using Legacy API
+      // 5) (Relaxed) Best-effort verification. On some Android builds, URIs may be content:// and
+      // getInfoAsync can fail even though the file is readable by expo-av. We'll try to stat, but
+      // if it fails we'll still return the URI and let downstream code read it.
       try {
         const info = await FileSystemLegacy.getInfoAsync(uri);
         console.log('🧾 [DEBUG] File info:', info);
-        if (!info || !info.exists) {
-          console.warn('⚠️ [DEBUG] File does not exist at URI');
-          return null;
+        // Only warn if clearly invalid; don't block the flow
+        const size = (info as any)?.size ?? 1; // assume non-zero if unknown
+        if (info && info.exists === false) {
+          console.warn('⚠️ [DEBUG] File not reported as existing, proceeding anyway with URI');
         }
-        const size = (info as any).size ?? 0;
-        if (!size || size <= 0) {
-          console.warn('⚠️ [DEBUG] File size is zero or missing');
-          return null;
+        if (size <= 0) {
+          console.warn('⚠️ [DEBUG] File size reported as 0, proceeding anyway with URI');
         }
       } catch (e) {
-        console.error('❌ [DEBUG] getInfoAsync() failed:', e);
-        return null;
+        console.warn('⚠️ [DEBUG] getInfoAsync() failed, proceeding with URI anyway:', e);
       }
 
       console.log('✅ [DEBUG] stopListening() checks passed, returning URI');

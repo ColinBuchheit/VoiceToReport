@@ -89,6 +89,11 @@ export default function AIAgent({
     isProcessing: false,
     isPlayingResponse: false,
   });
+  // Refs to avoid stale closures and manage timers
+  const agentStateRef = useRef(agentState);
+  useEffect(() => { agentStateRef.current = agentState; }, [agentState]);
+  const autoStopTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const autoStopSessionRef = useRef<number | null>(null);
 
   // Service and Animation Refs
   const aiService = AIAgentService.getInstance();
@@ -175,12 +180,18 @@ export default function AIAgent({
       const recording = await aiService.startListening();
       console.log('✅ Recording started successfully');
 
-      // Auto-stop after 30 seconds
-      setTimeout(() => {
-        if (agentState.isListening) {
+      // Auto-stop after 30 seconds (guarded against stale closures)
+      if (autoStopTimerRef.current) {
+        clearTimeout(autoStopTimerRef.current);
+        autoStopTimerRef.current = null;
+      }
+      const sessionId = Date.now();
+      autoStopSessionRef.current = sessionId;
+      autoStopTimerRef.current = setTimeout(() => {
+        if (autoStopSessionRef.current === sessionId && agentStateRef.current.isListening) {
           stopListening();
         }
-      }, 3000000);
+      }, 30000);
 
     } catch (error) {
       console.error('❌ Failed to start recording:', error);
@@ -198,6 +209,13 @@ export default function AIAgent({
       console.log('⏹️ Stopping recording...');
       stopAllAnimations();
       setAgentState({ isListening: false, isProcessing: true, isPlayingResponse: false });
+
+      // Clear any pending auto-stop timer for this session
+      if (autoStopTimerRef.current) {
+        clearTimeout(autoStopTimerRef.current);
+        autoStopTimerRef.current = null;
+      }
+      autoStopSessionRef.current = null;
 
       const audioFile = await aiService.stopListening();
 
@@ -228,6 +246,9 @@ export default function AIAgent({
 
       await executeCommand(response);
 
+      // Return to idle after successful processing
+      setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
+
     } catch (error) {
       console.error('❌ Voice processing failed:', error);
       setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
@@ -237,6 +258,10 @@ export default function AIAgent({
       );
     } finally {
       stopAllAnimations();
+      // Defensive: ensure we always return to idle a tick later
+      setTimeout(() => {
+        setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
+      }, 0);
     }
   };
 

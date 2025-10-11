@@ -383,10 +383,32 @@ export default function Recorder({
         staysActiveInBackground: false,
       });
 
-      // Create and start recording
-      const { recording: newRecording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      // Create and start recording — use Android speech-optimized options
+      const isAndroid = Platform.OS === 'android';
+      const outputFormat = (Audio as any).RECORDING_OPTION_ANDROID_OUTPUT_FORMAT_MPEG_4 ?? 2; // MPEG_4 fallback
+      const audioEncoder = (Audio as any).RECORDING_OPTION_ANDROID_AUDIO_ENCODER_AAC ?? 3; // AAC fallback
+      const audioSource = (Audio as any).RECORDING_OPTION_ANDROID_AUDIO_SOURCE_VOICE_RECOGNITION
+        ?? (Audio as any).RECORDING_OPTION_ANDROID_AUDIO_SOURCE_MIC
+        ?? 6; // VOICE_RECOGNITION (6) fallback
+
+      const ANDROID_OPTIONS: Audio.RecordingOptions = {
+        android: {
+          extension: '.m4a',
+          outputFormat,
+          audioEncoder,
+          sampleRate: 44100,
+          numberOfChannels: 1,
+          bitRate: 128000,
+          audioSource,
+        },
+        ios: Audio.RecordingOptionsPresets.HIGH_QUALITY.ios,
+        web: Audio.RecordingOptionsPresets.HIGH_QUALITY.web,
+        isMeteringEnabled: false,
+      } as Audio.RecordingOptions;
+
+      const options = isAndroid ? ANDROID_OPTIONS : Audio.RecordingOptionsPresets.HIGH_QUALITY;
+
+      const { recording: newRecording } = await Audio.Recording.createAsync(options);
 
       setRecording(newRecording);
       setIsRecording(true);

@@ -62,6 +62,38 @@ class EmailService:
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    def _value_for(self, data: Union[Dict[str, Any], object], key: str, default: str = 'Not specified') -> str:
+        """
+        Get a field value with sensible fallbacks for known synonyms.
+        - work_completed <= taskDescription
+        - scope_completed <= outcome
+        - notes <= additional_notes
+        - work_order <= workOrder/work_order_number
+        """
+        # Primary
+        v = self._safe_get(data, key, None)
+        if v and v != 'Not specified':
+            return v
+
+        # Fallbacks for specific fields
+        if key == 'work_completed':
+            v2 = self._safe_get(data, 'taskDescription', None)
+            return v2 if v2 else default
+        if key == 'scope_completed':
+            v2 = self._safe_get(data, 'outcome', None)
+            return v2 if v2 else default
+        if key == 'notes':
+            v2 = self._safe_get(data, 'additional_notes', None)
+            return v2 if v2 else default
+        if key == 'work_order':
+            for alt in ['workOrder', 'work_order_number']:
+                v2 = self._safe_get(data, alt, None)
+                if v2 and v2 != 'Not specified':
+                    return v2
+            return default
+
+        return default
     
     def get_recipients(self) -> List[str]:
         """Get current list of email recipients"""
@@ -116,7 +148,13 @@ class EmailService:
             technician_email = None
         logo_src = logo_src_override or self._get_logo_base64()
 
+        # Ensure all 17 fields appear in the structured sections
         field_groups = [
+            {"title": "Job Details", "fields": [
+                ("work_order", "Work Order #"),
+                ("location", "Location"),
+                ("technician_name", "Technician Name"),
+            ]},
             {"title": "Service Summary", "fields": [
                 ("onsite_contact", "On-Site Contact"),
                 ("support_contact", "Support Contact"),
@@ -139,7 +177,7 @@ class EmailService:
             ]},
             {"title": "Additional Notes", "fields": [
                 ("out_of_scope_work", "Out of Scope Work"),
-                ("additional_notes", "Notes"),
+                ("notes", "Notes"),
             ]},
         ]
 
@@ -148,7 +186,7 @@ class EmailService:
             group_html = ""
             has_content = False
             for field_name, _ in group["fields"]:
-                value = self._safe_get(closeout_data, field_name)
+                value = self._value_for(closeout_data, field_name)
                 if value and value != 'Not specified':
                     has_content = True
                     break
@@ -162,7 +200,7 @@ class EmailService:
             </tr>
             """
             for field_name, label in group["fields"]:
-                value = self._safe_get(closeout_data, field_name)
+                value = self._value_for(closeout_data, field_name)
                 if value and value != 'Not specified':
                     group_html += f"""
             <tr>
@@ -216,7 +254,7 @@ class EmailService:
             copy_lines.append(f"Work Order: {work_order}")
         for group in field_groups:
             for field_name, label in group["fields"]:
-                value = self._safe_get(closeout_data, field_name)
+                value = self._value_for(closeout_data, field_name)
                 if value and value != 'Not specified':
                     copy_lines.append(f"{label}: {value}")
         if transcription and str(transcription).strip() and transcription != 'Not specified':
