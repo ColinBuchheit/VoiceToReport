@@ -111,12 +111,22 @@ export default function AIAgent({
   // Cleanup on unmount - cancel any in-flight processing and cleanup audio
   useEffect(() => {
     return () => {
+      // Synchronous cleanup for abort controller
       if (processingController.current) {
-        try { processingController.current.abort(); } catch {}
+        try {
+          processingController.current.abort();
+        } catch {}
         processingController.current = null;
       }
-      // Ensure any audio playback/recording is cleaned up
-      try { aiService.cleanup(); } catch {}
+
+      // Async cleanup for audio: queue as a microtask after unmount to avoid Android mic race
+      Promise.resolve().then(async () => {
+        try {
+          await aiService.cleanup();
+        } catch (error) {
+          console.warn('AIAgent cleanup error:', error);
+        }
+      });
     };
   }, []);
 
@@ -188,9 +198,18 @@ export default function AIAgent({
       console.log('⏹️ Stopping recording...');
       stopAllAnimations();
       setAgentState({ isListening: false, isProcessing: true, isPlayingResponse: false });
+
       const audioFile = await aiService.stopListening();
+
+      // Better error handling - check if we actually got audio
       if (!audioFile) {
-        throw new Error('No audio recorded');
+        console.warn('⚠️ No audio file returned from recording');
+        setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
+        Alert.alert(
+          'No Audio Detected',
+          'No audio was recorded. Please try speaking again and ensure your microphone is working.'
+        );
+        return; // Don't throw, just return early
       }
 
       console.log('📤 Sending voice command to backend...');
@@ -200,19 +219,23 @@ export default function AIAgent({
       }
       processingController.current = new AbortController();
 
-      const response = await aiService.processVoiceCommand(audioFile, screenContext, processingController.current.signal);
+      const response = await aiService.processVoiceCommand(
+        audioFile,
+        screenContext,
+        processingController.current.signal
+      );
       console.log('📥 Received response:', response);
 
       await executeCommand(response);
 
     } catch (error) {
       console.error('❌ Voice processing failed:', error);
+      setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
       Alert.alert(
         'Processing Error',
         error instanceof Error ? error.message : 'Failed to process voice command'
       );
     } finally {
-      setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
       stopAllAnimations();
     }
   };

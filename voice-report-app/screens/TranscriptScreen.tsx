@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RouteProp } from '@react-navigation/native';
+import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
 import { useFontScale } from '../context/FontScaleContext';
 import Loader from '../components/Loader';
@@ -23,6 +23,8 @@ import { generateSummary } from '../services/api';
 import AIAgent from '../components/AIAgent';
 import { ScreenContext, FieldInfo, CloseoutSummary } from '../types/aiAgent';
 import { useTheme } from '../context/ThemeContext';
+import { AIAgentService } from '../services/aiAgentService';
+import audioLockService from '../services/audioLockService';
 
 type TranscriptScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -36,6 +38,25 @@ interface Props {
 }
 
 export default function TranscriptScreen({ navigation, route }: Props) {
+  // Cleanup mic/audio when leaving this screen
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('🟢 TranscriptScreen focused');
+      return () => {
+        console.log('🧹 TranscriptScreen blur cleanup queued');
+        Promise.resolve().then(async () => {
+          try {
+            const aiService = AIAgentService.getInstance();
+            await aiService.cleanup();
+            await audioLockService.forceRelease();
+            console.log('✅ TranscriptScreen cleanup complete');
+          } catch (e) {
+            console.warn('⚠️ TranscriptScreen cleanup error:', e);
+          }
+        });
+      };
+    }, [])
+  );
   const { scaled } = useFontScale();
   const { colors, isDark } = useTheme();
   const [transcription, setTranscription] = useState(route.params.transcription);

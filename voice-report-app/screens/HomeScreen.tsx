@@ -12,6 +12,7 @@ import Recorder from '../components/Recorder';
 import EmailHistorySidebar from '../components/EmailHistorySidebar';
 import { transcribeAudio } from '../services/api';
 import SettingsModal from '../components/SettingsModal'; // explicit import; TS should resolve .tsx
+import audioLockService from '../services/audioLockService';
 import emailHistoryService, { EmailHistoryItem } from '../services/emailHistoryService';
 import { useTheme } from '../context/ThemeContext';
 // Pre-require both logos so Metro bundles them and switching is instant
@@ -149,15 +150,24 @@ function HomeScreenInner({ navigation }: Props) {
 
       // Cleanup on blur: ensure mic is released and audio mode reset
       return () => {
-        (async () => {
+        // Capture the current recording to avoid stale closures and dependency reruns
+        const currentRecording = recording;
+
+        // Queue cleanup as a microtask so it runs after the screen fully blurs
+        Promise.resolve().then(async () => {
           try {
-            if (recording) {
-              await recording.stopAndUnloadAsync();
+            if (currentRecording) {
+              await currentRecording.stopAndUnloadAsync();
             }
-          } catch {}
+          } catch (e) {
+            console.warn('Failed to stop recording on blur:', e);
+          }
+
+          // Reset state synchronously
           setRecording(null);
           setIsRecording(false);
           setRecordingDuration(0);
+
           try {
             await Audio.setAudioModeAsync({
               allowsRecordingIOS: false,
@@ -169,9 +179,14 @@ function HomeScreenInner({ navigation }: Props) {
           } catch (e2) {
             console.warn('Audio mode reset on blur failed (non-fatal):', e2);
           }
-        })();
+
+          // Ensure any held audio lock is released when leaving the screen
+          try {
+            await audioLockService.forceRelease();
+          } catch {}
+        });
       };
-    }, [recording])
+    }, [])
   );
 
   // Listen for navigation state changes to detect summary completion
