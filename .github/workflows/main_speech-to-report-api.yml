@@ -1,0 +1,104 @@
+$workflowContent = @'
+name: Deploy speech-to-report-api
+
+on:
+  push:
+    branches: [ deployment-prod-branch ]
+    paths:
+      - 'backend_staging/**'
+      - '.github/workflows/main_speech-to-report-api.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_WEBAPP_NAME: speech-to-report-api
+
+defaults:
+  run:
+    working-directory: ./backend_staging
+    shell: bash
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies (requirements-azure.txt)
+        run: |
+          set -e
+          if [ -f requirements-azure.txt ]; then
+            echo "Using backend_staging/requirements-azure.txt"
+            pip install -r requirements-azure.txt
+          elif [ -f ../backend/requirements-azure.txt ]; then
+            echo "Using ../backend/requirements-azure.txt"
+            pip install -r ../backend/requirements-azure.txt
+          else
+            echo "requirements-azure.txt not found" >&2
+            exit 1
+          fi
+
+      - name: Verify services/ folder structure
+        run: |
+          set -e
+          echo "Verifying services/ directory in backend_staging..."
+          if [ ! -d services ]; then
+            echo "services/ directory is missing in backend_staging" >&2
+            exit 1
+          fi
+          echo "Listing Python files under services/:"
+          find services -maxdepth 2 -type f -name "*.py" -print
+          count=$(find services -type f -name "*.py" | wc -l | xargs)
+          if [ "$count" -lt 1 ]; then
+            echo "Expected at least 1 .py file inside services/" >&2
+            exit 1
+          fi
+          echo "services/ verification passed"
+
+      - name: Azure login (Federated OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          package: ${{ github.workspace }}/backend_staging
+
+      - name: Verify deployment
+        run: |
+          set -e
+          URL="https://${AZURE_WEBAPP_NAME}.azurewebsites.net/health"
+          echo "Checking health at $URL"
+          for i in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$URL" || true)
+            if [ "$code" = "200" ]; then
+              echo "App is healthy (HTTP 200)"
+              exit 0
+            fi
+            echo "Attempt $i/10: HTTP $code"
+            sleep 10
+          done
+          echo "Health check failed" >&2
+          exit 1
+'@
+
+# Write the content to the file
+Set-Content -Path ".github/workflows/main_speech-to-report-api.yml" -Value $workflowContent
+
+# Verify the content was written
+Write-Host "✅ File created successfully!"
+Get-Content ".github/workflows/main_speech-to-report-api.yml" | Select-Object -First 10
