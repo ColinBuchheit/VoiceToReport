@@ -209,42 +209,58 @@ class EmailService:
             </tr>
             """
         
-        # Build copy/paste consolidated summary (flat text)
-        # Iterate same field_groups used above to keep ordering consistent
+        # Build a simplified, ordered copy block for easy paste into emails or portals
         copy_lines = []
-        # Add technician details first
+        # Technician (optional)
         if tech_name or technician_email:
             if tech_name and technician_email:
-                copy_lines.append(f"Technician Info: {tech_name} ({technician_email})")
+                copy_lines.append(f"Technician - {tech_name} ({technician_email})")
             elif tech_name:
-                copy_lines.append(f"Technician Info: {tech_name}")
+                copy_lines.append(f"Technician - {tech_name}")
             else:
-                copy_lines.append(f"Technician Info: {technician_email}")
-        if location_name and location_name != 'Not specified':
-            copy_lines.append(f"Location: {location_name}")
-        if work_order and work_order != 'Not Specified':
-            copy_lines.append(f"Work Order: {work_order}")
-        for group in field_groups:
-            for field_name, label in group["fields"]:
-                value = self._safe_get(closeout_data, field_name)
-                if value and value != 'Not specified':
-                    copy_lines.append(f"{label}: {value}")
-        if transcription and transcription.strip() and transcription != 'Not specified':
-            copy_lines.append("Transcription: " + transcription.strip())
+                copy_lines.append(f"Technician - {technician_email}")
 
-        copy_block_text = ("\n".join(copy_lines)).replace('<', '⟨').replace('>', '⟩')  # avoid unintended HTML rendering
+        ordered_fields = [
+            ("location", "Location"),
+            ("work_order", "Work Order"),
+            ("onsite_contact", "On-Site Contact"),
+            ("support_contact", "Support Contact"),
+            ("work_completed", "Work Completed"),
+            ("scope_completed", "Scope Status"),
+            ("troubleshooting_steps", "Troubleshooting Steps"),
+            ("delays", "Delays & Issues"),
+            ("released_by", "Released By"),
+            ("release_code", "Release Code"),
+            ("return_tracking", "Return Tracking"),
+            ("photos_uploaded", "Photos Uploaded"),
+            ("expenses", "Expenses"),
+            ("materials_used", "Materials Used"),
+            ("out_of_scope_work", "Out of Scope Work"),
+            ("additional_notes", "Notes"),
+        ]
+
+        for field_name, label in ordered_fields:
+            value = self._safe_get(closeout_data, field_name)
+            if value and value != 'Not specified':
+                copy_lines.append(f"{label} - {value}")
+
+        if transcription and transcription.strip() and transcription != 'Not specified':
+            copy_lines.append("Transcription - " + transcription.strip())
+
+        # Add a blank line between entries for readability
+        copy_block_text = ("\n\n".join(copy_lines)).replace('<', '\u27e8').replace('>', '\u27e9')
 
         copy_paste_html = f"""
             <tr>
-                <td style="padding: 28px 0 12px 0;">
+                <td style=\"padding: 28px 0 12px 0;\"> 
                     <h2 class=\"section-title\" style=\"margin:0; font-size:12px; font-weight:700; color:#9CA3AF; text-transform:uppercase; letter-spacing:0.08em;\">Copy/Paste Summary</h2>
                 </td>
             </tr>
             <tr>
-                <td style=\"padding: 8px 0 16px 0;\">
-                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"background-color:#F7F7F8; border:1px solid #ECEFF1; border-radius:10px;\">
+                <td style=\"padding: 8px 0 16px 0;\"> 
+                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"background-color:#F7F7F8; border:1px solid #ECEFF1; border-radius:10px;\"> 
                         <tr>
-                            <td style=\"padding:14px 16px;\">
+                            <td style=\"padding:14px 16px;\"> 
                                 <div style=\"font-family:Menlo,Consolas,'Courier New',monospace; font-size:12px; line-height:1.55; white-space:pre-wrap; color:#374151;\">{copy_block_text}</div>
                             </td>
                         </tr>

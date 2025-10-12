@@ -243,27 +243,50 @@ class EmailService:
             </tr>
             """
 
+        # Build a simplified, ordered copy block for easy paste into emails or portals
         copy_lines: list[str] = []
+        # Technician line (optional)
         if tech_name or technician_email:
             if tech_name and technician_email:
-                copy_lines.append(f"Technician Info: {tech_name} ({technician_email})")
+                copy_lines.append(f"Technician - {tech_name} ({technician_email})")
             elif tech_name:
-                copy_lines.append(f"Technician Info: {tech_name}")
+                copy_lines.append(f"Technician - {tech_name}")
             else:
-                copy_lines.append(f"Technician Info: {technician_email}")
-        if location_name and location_name != 'Not specified':
-            copy_lines.append(f"Location: {location_name}")
-        if work_order and work_order != 'Not Specified':
-            copy_lines.append(f"Work Order: {work_order}")
-        for group in field_groups:
-            for field_name, label in group["fields"]:
-                value = self._value_for(closeout_data, field_name)
-                if value and value != 'Not specified':
-                    copy_lines.append(f"{label}: {value}")
-        if transcription and str(transcription).strip() and transcription != 'Not specified':
-            copy_lines.append("Transcription: " + str(transcription).strip())
+                copy_lines.append(f"Technician - {technician_email}")
 
-        copy_block_text = ("\n".join(copy_lines)).replace('<', '⟨').replace('>', '⟩')
+        # Canonical order and labels
+        ordered_fields: list[tuple[str, str]] = [
+            ("location", "Location"),
+            ("work_order", "Work Order"),
+            ("onsite_contact", "On-Site Contact"),
+            ("support_contact", "Support Contact"),
+            ("work_completed", "Work Completed"),
+            ("scope_completed", "Scope Status"),
+            ("troubleshooting_steps", "Troubleshooting Steps"),
+            ("delays", "Delays & Issues"),
+            ("released_by", "Released By"),
+            ("release_code", "Release Code"),
+            ("return_tracking", "Return Tracking"),
+            ("photos_uploaded", "Photos Uploaded"),
+            ("expenses", "Expenses"),
+            ("materials_used", "Materials Used"),
+            ("out_of_scope_work", "Out of Scope Work"),
+            ("notes", "Notes"),
+        ]
+
+        # Use _value_for to benefit from synonyms/fallbacks
+        for field_name, label in ordered_fields:
+            value = self._value_for(closeout_data, field_name)
+            if value and value != 'Not specified':
+                # Prefer dash formatting for quick paste
+                copy_lines.append(f"{label} - {value}")
+
+        # Append transcription at end if available
+        if transcription and str(transcription).strip() and transcription != 'Not specified':
+            copy_lines.append("Transcription - " + str(transcription).strip())
+
+        # Add a blank line between each entry for readability in email clients
+        copy_block_text = ("\n\n".join(copy_lines)).replace('<', '\u27e8').replace('>', '\u27e9')
         copy_paste_html = f"""
             <tr>
                 <td style=\"padding: 28px 0 12px 0;\">
