@@ -325,21 +325,49 @@ Return ONLY this JSON (no markdown):
   "photos_uploaded": "value or Not mentioned"
 }}"""
 
-            logger.info("Calling GPT for enhanced extraction...")
-            response = self.client.chat.completions.create(
-                model=settings.gpt_model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a precise data extractor. Extract information exactly as requested. Keep work_completed separate from troubleshooting_steps."
-                    },
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            
-            response_text = response.choices[0].message.content.strip()
+            logger.info("Calling GPT for enhanced extraction with fallback and JSON response...")
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a precise data extractor. Extract information exactly as requested. Keep work_completed separate from troubleshooting_steps."
+                },
+                {"role": "user", "content": prompt}
+            ]
+
+            # Preferred models in order: configured model or gpt-5, then gpt-4o as fallback
+            preferred_models: List[str] = []
+            if getattr(settings, 'gpt_model', None):
+                preferred_models.append(settings.gpt_model)
+            if 'gpt-5' not in preferred_models:
+                preferred_models.append('gpt-5')
+            if 'gpt-4o' not in preferred_models:
+                preferred_models.append('gpt-4o')
+
+            last_err: Optional[Exception] = None
+            response_text: Optional[str] = None
+            for model_name in preferred_models:
+                try:
+                    logger.info(f"🔁 Trying model: {model_name}")
+                    completion = self.client.chat.completions.create(
+                        model=model_name,
+                        messages=messages,
+                        temperature=getattr(settings, 'gpt_temperature', 0.3),
+                        response_format={"type": "json_object"},
+                    )
+                    candidate = (completion.choices[0].message.content or '').strip()
+                    if not candidate:
+                        raise ValueError("Empty completion content")
+                    response_text = candidate
+                    logger.info(f"✅ Model {model_name} produced {len(response_text)} chars")
+                    break
+                except Exception as e:
+                    last_err = e
+                    logger.warning(f"Model {model_name} failed, trying next if available: {e}")
+
+            if response_text is None:
+                raise last_err or RuntimeError("All model attempts failed")
             logger.info(f"GPT response length: {len(response_text)}")
-            
+
             # Parse response
             return self._parse_gpt_response(response_text)
             

@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     supported_audio_formats: Union[str, List[str]] = "m4a,mp4,wav,mp3,webm"
     
     # GPT Configuration
-    gpt_model: str = "gpt-4-turbo-preview"
+    gpt_model: str = "gpt-5"
     gpt_max_tokens: int = 500
     gpt_temperature: float = 0.3
     
