@@ -88,6 +88,7 @@ function HomeScreenInner({ navigation }: Props) {
     persistedState.checkedItems = {};
     persistedState.showChecklist = true;
     persistedState.shouldReset = false;
+    // (Removed) manual job detail persistence
   };
 
   // Save state to persistence when values change
@@ -102,6 +103,8 @@ function HomeScreenInner({ navigation }: Props) {
       persistedState.showChecklist = showChecklist;
     }
   }, [showChecklist]);
+
+  // (Removed) manual job details persistence effect
 
   // Handle navigation events - detect return from summary and clean up audio on blur
   useFocusEffect(
@@ -251,6 +254,18 @@ function HomeScreenInner({ navigation }: Props) {
       title: "Closeout Notes",
       color: "#000000",
       items: [
+        {
+          id: "work_order",
+          label: "What is the Work Order number?",
+          hint: "Say the work order number clearly",
+          required: true
+        },
+        {
+          id: "location",
+          label: "What is the location?",
+          hint: "Say the site, store, or address",
+          required: true
+        },
         {
           id: "onsite_contact",
           label: "Who did you meet with on-site?",
@@ -437,6 +452,7 @@ function HomeScreenInner({ navigation }: Props) {
 
       {/* Content Area */}
       <View style={[styles.contentContainer, { backgroundColor: colors.background }]}>
+
         <View style={styles.contentHeader}>
           <TouchableOpacity 
             style={[styles.toggleButton, { backgroundColor: isDark ? colors.surfaceAlt : '#F3F4F6' }]}
@@ -771,6 +787,7 @@ const styles = StyleSheet.create({
     // Slight top padding to visually balance status bubble offset
     paddingTop: 10,
   },
+  // (Removed) Job Details styles
   
   // Category Sections
   categorySection: {
