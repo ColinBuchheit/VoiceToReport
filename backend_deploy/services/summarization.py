@@ -351,12 +351,17 @@ Return ONLY this JSON (no markdown):
             for model_name in preferred_models:
                 try:
                     logger.info(f"🔁 Trying model: {model_name}")
-                    completion = self.client.chat.completions.create(
-                        model=model_name,
-                        messages=messages,
-                        temperature=getattr(settings, 'gpt_temperature', 0.3),
-                        response_format={"type": "json_object"},
-                    )
+                    # Some models (e.g., gpt-5) do not support overriding temperature. Omit it for those.
+                    create_kwargs = {
+                        "model": model_name,
+                        "messages": messages,
+                        "response_format": {"type": "json_object"},
+                    }
+                    # Include temperature only when supported (avoid for gpt-5 family)
+                    if not str(model_name).lower().startswith("gpt-5"):
+                        create_kwargs["temperature"] = getattr(settings, 'gpt_temperature', 0.3)
+
+                    completion = self.client.chat.completions.create(**create_kwargs)
                     candidate = (completion.choices[0].message.content or '').strip()
                     # Basic sanity check: must look like JSON
                     if not candidate:
