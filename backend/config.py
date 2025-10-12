@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # Email Configuration
     email_user: str = ""
     email_password: Optional[SecretStr] = None
-    email_recipients: str = "colbol42@gmail.com"  # Your existing email
+    email_recipients: str = ""  # Configure via EMAIL_RECIPIENTS env var (comma-separated)
     smtp_server: str = "smtp.mail.yahoo.com"
     smtp_port: str = "587"
     smtp_ca_bundle: Optional[str] = None

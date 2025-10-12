@@ -26,15 +26,18 @@ class EmailService:
         self.email_user = settings.email_user
         self.email_password = settings.email_password
         
-        # Parse recipients from environment variable with fallback
+        # Parse recipients strictly from environment/config (no hard-coded fallback)
         if settings.email_recipients:
             # Split by comma and clean up whitespace
             self.recipients = [email.strip() for email in settings.email_recipients.split(',') if email.strip()]
         else:
-            # Fallback to default recipient
-            self.recipients = ['colbol42@gmail.com']
+            # No recipients configured; leave empty and let send methods report an error
+            self.recipients = []
         
-        logger.info(f"Email service initialized with {len(self.recipients)} recipients: {', '.join(self.recipients)}")
+        if self.recipients:
+            logger.info(f"Email service initialized with {len(self.recipients)} recipients: {', '.join(self.recipients)}")
+        else:
+            logger.warning("Email service initialized with 0 recipients. Set EMAIL_RECIPIENTS in environment (comma-separated).")
     
     def _safe_get(self, data: Union[Dict[str, Any], object], key: str, default: str = 'Not specified') -> str:
         """

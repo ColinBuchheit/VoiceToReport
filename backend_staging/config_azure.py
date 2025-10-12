@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # Email settings (optional)
     email_user: str = ""
     email_password: str = ""
-    email_recipients: str = "colbol42@gmail.com"
+    email_recipients: str = ""
     smtp_server: str = "smtp.mail.yahoo.com"
     smtp_port: str = "587"
     smtp_ca_bundle: Optional[str] = None
@@ -49,8 +49,8 @@ class Settings(BaseSettings):
     def _load_from_azure_key_vault(self):
         """Load secrets from Azure Key Vault when running on Azure"""
         try:
-            from azure.identity import DefaultAzureCredential
-            from azure.keyvault.secrets import SecretClient
+            from azure.identity import DefaultAzureCredential  # type: ignore
+            from azure.keyvault.secrets import SecretClient  # type: ignore
 
             vault_url = os.getenv('KEY_VAULT_URL')
             if not vault_url:

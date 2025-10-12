@@ -28,7 +28,7 @@ class EmailService:
         if settings.email_recipients:
             self.recipients = [email.strip() for email in settings.email_recipients.split(',') if email.strip()]
         else:
-            self.recipients = ['colbol42@gmail.com']
+            self.recipients = []
         
         logger.info(f"Email service initialized with {len(self.recipients)} recipients: {', '.join(self.recipients)}")
     
