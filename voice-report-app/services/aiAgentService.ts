@@ -29,7 +29,6 @@ try {
 
 export class AIAgentService {
   private static instance: AIAgentService;
-  private recording: Audio.Recording | null = null;
   private sound: Audio.Sound | null = null;
   
   // Enhanced connection management
@@ -45,210 +44,11 @@ export class AIAgentService {
   }
 
   async startListening(): Promise<Audio.Recording> {
-    // Request permissions with better error handling
-    const { status } = await Audio.requestPermissionsAsync();
-    if (status !== 'granted') {
-      throw new Error('Microphone permission is required for voice commands. Please enable it in your device settings.');
-    }
-
-    // Acquire audio lock to prevent contention with other recorders
-    const gotLock = await audioLockService.acquireLock('ai-agent');
-    if (!gotLock) {
-      throw new Error('Microphone is currently in use by another part of the app. Please stop other recordings and try again.');
-    }
-
-    // Preflight: ensure no lingering recording/sound and set audio mode for recording
-    try {
-      if (this.recording) {
-        try { await this.recording.stopAndUnloadAsync(); } catch {}
-        this.recording = null;
-      }
-      if (this.sound) {
-        try { await this.sound.unloadAsync(); } catch {}
-        this.sound = null;
-      }
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
-    } catch (e) {
-      console.warn('Audio preflight for startListening failed (non-fatal):', e);
-    }
-
-    // Recording options tuned for Android speech capture
-    // Build Android options with safe fallbacks for constants
-    const outputFormat = (Audio as any).RECORDING_OPTION_ANDROID_OUTPUT_FORMAT_MPEG_4 ?? 2;
-    const audioEncoder = (Audio as any).RECORDING_OPTION_ANDROID_AUDIO_ENCODER_AAC ?? 3;
-    const audioSource = (Audio as any).RECORDING_OPTION_ANDROID_AUDIO_SOURCE_VOICE_RECOGNITION
-      ?? (Audio as any).RECORDING_OPTION_ANDROID_AUDIO_SOURCE_MIC
-      ?? 6;
-    const ANDROID_RECORDING_OPTIONS: Audio.RecordingOptions = {
-      android: {
-        extension: '.m4a',
-        outputFormat,
-        audioEncoder,
-        sampleRate: 44100,
-        numberOfChannels: 1,
-        bitRate: 128000,
-        // Prefer VOICE_RECOGNITION source for clearer speech on Android
-        audioSource,
-      },
-      ios: Audio.RecordingOptionsPresets.HIGH_QUALITY.ios,
-      web: Audio.RecordingOptionsPresets.HIGH_QUALITY.web,
-      isMeteringEnabled: false,
-    } as Audio.RecordingOptions;
-
-    // Use robust options on Android; fall back to preset otherwise
-    const options = Platform.OS === 'android' ? ANDROID_RECORDING_OPTIONS : Audio.RecordingOptionsPresets.HIGH_QUALITY;
-
-    // Use high quality recording for better transcription with one retry on failure
-    let recording: Audio.Recording | null = null;
-    try {
-      const created = await Audio.Recording.createAsync(options);
-      recording = created.recording;
-      // Ensure recording is actually started (some Android release builds need explicit start)
-      try {
-        const st = await recording.getStatusAsync();
-        if (!st.isRecording && st.canRecord) {
-          await recording.startAsync();
-        }
-      } catch {}
-    } catch (err) {
-      console.warn('First attempt to start recording failed, retrying after audio mode reset...', err);
-      try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-          staysActiveInBackground: false,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
-        });
-      } catch {}
-      const createdRetry = await Audio.Recording.createAsync(options);
-      recording = createdRetry.recording;
-      try {
-        const st = await recording.getStatusAsync();
-        if (!st.isRecording && st.canRecord) {
-          await recording.startAsync();
-        }
-      } catch {}
-    }
-
-    this.recording = recording!;
-    console.log('✅ AI Agent recording started with HIGH_QUALITY preset');
-    return recording!;
+    throw new Error('Recording is now handled directly in AIAgent component');
   }
 
   async stopListening(): Promise<string | null> {
-    console.log('\n============================');
-    console.log('🛑 [DEBUG] stopListening() CALLED');
-    console.log('============================');
-
-    let uri: string | null = null;
-    try {
-      // 1) Check recording existence
-      const hasRecording = !!this.recording;
-      console.log('🎛️ [DEBUG] this.recording exists:', hasRecording);
-      if (!this.recording) {
-        console.warn('⚠️ [DEBUG] No active recording instance found');
-        return null;
-      }
-
-      // 2) Log current recording status
-      try {
-        const status: any = await this.recording.getStatusAsync();
-        console.log('📊 [DEBUG] Recording status:', {
-          isRecording: status?.isRecording,
-          canRecord: status?.canRecord,
-          durationMillis: status?.durationMillis,
-          isDoneRecording: status?.isDoneRecording,
-        });
-      } catch (e) {
-        console.warn('⚠️ [DEBUG] Failed to get recording status:', e);
-      }
-
-      // 3) Attempt to stop and unload (on Android, give a tiny buffer if recording was very short)
-      try {
-        const stBefore: any = await this.recording.getStatusAsync();
-        if (Platform.OS === 'android' && stBefore?.durationMillis != null && stBefore.durationMillis < 350) {
-          await new Promise((r) => setTimeout(r, 200));
-        }
-      } catch {}
-      try {
-        await this.recording.stopAndUnloadAsync();
-        console.log('✅ [DEBUG] stopAndUnloadAsync() succeeded');
-      } catch (e) {
-        console.error('❌ [DEBUG] stopAndUnloadAsync() failed:', e);
-        return null;
-      }
-
-      // 4) Get URI (Android: allow flush time before reading URI)
-      if (Platform.OS === 'android') {
-        await new Promise((r) => setTimeout(r, 120));
-      }
-      try {
-        uri = this.recording.getURI();
-        console.log('📁 [DEBUG] Recording URI:', uri);
-      } catch (e) {
-        console.error('❌ [DEBUG] getURI() failed:', e);
-        uri = null;
-      }
-
-      if (!uri) {
-        // Retry once after a short delay on Android
-        if (Platform.OS === 'android') {
-          await new Promise((r) => setTimeout(r, 200));
-          try {
-            uri = this.recording.getURI();
-            console.log('📁 [DEBUG] Recording URI (retry):', uri);
-          } catch {}
-        }
-        if (!uri) {
-          console.warn('⚠️ [DEBUG] No URI returned after stopping recording');
-          return null;
-        }
-      }
-
-      // 5) (Relaxed) Best-effort verification. On some Android builds, URIs may be content:// and
-      // getInfoAsync can fail even though the file is readable by expo-av. We'll try to stat, but
-      // if it fails we'll still return the URI and let downstream code read it.
-      try {
-        const info = await FileSystemLegacy.getInfoAsync(uri);
-        console.log('🧾 [DEBUG] File info:', info);
-        // Only warn if clearly invalid; don't block the flow
-        const size = (info as any)?.size ?? 1; // assume non-zero if unknown
-        if (info && info.exists === false) {
-          console.warn('⚠️ [DEBUG] File not reported as existing, proceeding anyway with URI');
-        }
-        if (size <= 0) {
-          console.warn('⚠️ [DEBUG] File size reported as 0, proceeding anyway with URI');
-        }
-      } catch (e) {
-        console.warn('⚠️ [DEBUG] getInfoAsync() failed, proceeding with URI anyway:', e);
-      }
-
-      console.log('✅ [DEBUG] stopListening() checks passed, returning URI');
-      return uri;
-    } finally {
-      // Clear local recording ref
-      if (this.recording) {
-        try { await this.recording.getStatusAsync(); } catch {}
-      }
-      this.recording = null;
-
-      // Always release the audio lock for AI agent
-      try {
-        await audioLockService.releaseLock('ai-agent');
-      } catch (e) {
-        console.warn('⚠️ [DEBUG] Failed to release audio lock in stopListening:', e);
-      }
-
-      // Optionally reset audio mode is handled by audioLockService.releaseLock
-      console.log('============================\n');
-    }
+    throw new Error('Recording is now handled directly in AIAgent component');
   }
 
   // Enhanced backend connection with better caching
@@ -300,6 +100,15 @@ export class AIAgentService {
     AIAgentService.workingBackendUrl = null;
     AIAgentService.lastConnectionTest = now;
     return null;
+  }
+
+  // Debug helper: expose cached backend data and candidates for diagnostics
+  getBackendDebugInfo(): { cachedUrl: string | null; lastTestMs: number; candidates: string[] } {
+    return {
+      cachedUrl: AIAgentService.workingBackendUrl,
+      lastTestMs: AIAgentService.lastConnectionTest,
+      candidates: API_CONFIG.BACKEND_URLS || [],
+    };
   }
 
   // Voice command processing with hybrid FileSystem API
@@ -551,12 +360,6 @@ export class AIAgentService {
   // Cleanup method for proper resource management
   async cleanup(): Promise<void> {
     try {
-      // Stop any active recording
-      if (this.recording) {
-        await this.recording.stopAndUnloadAsync();
-        this.recording = null;
-      }
-
       // Stop any active sound playback
       if (this.sound) {
         await this.sound.unloadAsync();

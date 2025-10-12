@@ -3,18 +3,20 @@ import {
   View,
   TouchableOpacity,
   Animated,
-  Alert,
   StyleSheet,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Audio } from 'expo-av';
 import { AIAgentService } from '../services/aiAgentService';
 import { runAIAgentMicDiagnostic, showMicDiagnostic } from '../services/aiAgentDiagnostics';
+import audioLockService from '../services/audioLockService';
 import { 
   AIAgentProps, 
   AIAgentState, 
   VoiceCommandResponse 
 } from '../types/aiAgent';
+import { useFontScale } from '../context/FontScaleContext';
 
 // Company Colors
 const COLORS = {
@@ -26,6 +28,7 @@ const COLORS = {
 
 // Animated Dots Component for processing state
 const AnimatedDots = ({ color = COLORS.WHITE }) => {
+  const { fontScale } = useFontScale();
   const dot1Anim = useRef(new Animated.Value(0.3)).current;
   const dot2Anim = useRef(new Animated.Value(0.3)).current;
   const dot3Anim = useRef(new Animated.Value(0.3)).current;
@@ -55,10 +58,11 @@ const AnimatedDots = ({ color = COLORS.WHITE }) => {
     };
   }, []);
 
+  const size = Math.max(3, Math.round(4 * fontScale));
   const dotStyle = (anim: Animated.Value) => ({
-    width: 4,
-    height: 4,
-    borderRadius: 2,
+    width: size,
+    height: size,
+    borderRadius: Math.round(size / 2),
     backgroundColor: color,
     opacity: anim,
     transform: [{ scale: anim }],
@@ -83,6 +87,7 @@ export default function AIAgent({
   disabled = false,
   customStyle,
 }: AIAgentProps) {
+  const { fontScale } = useFontScale();
 
   // State Management
   const [agentState, setAgentState] = useState<AIAgentState>({
@@ -96,6 +101,9 @@ export default function AIAgent({
   const autoStopTimerRef = useRef<NodeJS.Timeout | null>(null);
   const autoStopSessionRef = useRef<number | null>(null);
 
+  // Local recording state
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+
   // Service and Animation Refs
   const aiService = AIAgentService.getInstance();
   // Abort controller for cancelling in-flight processing (transcription/summarization/voice-command)
@@ -103,7 +111,7 @@ export default function AIAgent({
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
 
-  const buttonSize = customStyle?.size || 80;
+  const buttonSize = customStyle?.size || Math.round(80 * fontScale);
   const buttonColor = customStyle?.buttonColor;
 
   // Stop all animations utility
@@ -128,6 +136,10 @@ export default function AIAgent({
       // Async cleanup for audio: queue as a microtask after unmount to avoid Android mic race
       Promise.resolve().then(async () => {
         try {
+          if (recording) {
+            await recording.stopAndUnloadAsync();
+            setRecording(null);
+          }
           await aiService.cleanup();
         } catch (error) {
           console.warn('AIAgent cleanup error:', error);
@@ -179,16 +191,74 @@ export default function AIAgent({
       startListeningAnimations();
 
       // Check permissions early; in some release builds Android denies without a prompt
-      const perm = await (await import('expo-av')).Audio.getPermissionsAsync();
+      const perm = await Audio.getPermissionsAsync();
+      console.log('🔐 Permission status:', perm.status);
       if (perm.status !== 'granted') {
-        const req = await (await import('expo-av')).Audio.requestPermissionsAsync();
+        const req = await Audio.requestPermissionsAsync();
         if (req.status !== 'granted') {
           throw new Error('Microphone permission is required. Please enable it in Settings.');
         }
       }
 
-      const recording = await aiService.startListening();
-      console.log('✅ Recording started successfully');
+      // Acquire audio lock
+      const lockAcquired = await audioLockService.acquireLock('ai-agent');
+      if (!lockAcquired) {
+        console.warn('Microphone Busy: Another recording is in progress.');
+        return;
+      }
+
+      // Preflight: ensure no lingering recording and set audio mode for recording
+      try {
+        if (recording) {
+          await recording.stopAndUnloadAsync();
+          setRecording(null);
+        }
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+        });
+      } catch (e) {
+        console.warn('Audio preflight for startListening failed (non-fatal):', e);
+      }
+
+      // Recording options tuned for Android speech capture
+      const outputFormat = (Audio as any).RECORDING_OPTION_ANDROID_OUTPUT_FORMAT_MPEG_4 ?? 2;
+      const audioEncoder = (Audio as any).RECORDING_OPTION_ANDROID_AUDIO_ENCODER_AAC ?? 3;
+      const audioSource = (Audio as any).RECORDING_OPTION_ANDROID_AUDIO_SOURCE_VOICE_RECOGNITION
+        ?? (Audio as any).RECORDING_OPTION_ANDROID_AUDIO_SOURCE_MIC
+        ?? 6;
+      const ANDROID_RECORDING_OPTIONS: Audio.RecordingOptions = {
+        android: {
+          extension: '.m4a',
+          outputFormat,
+          audioEncoder,
+          sampleRate: 44100,
+          numberOfChannels: 1,
+          bitRate: 128000,
+          audioSource,
+        },
+        ios: Audio.RecordingOptionsPresets.HIGH_QUALITY.ios,
+        web: Audio.RecordingOptionsPresets.HIGH_QUALITY.web,
+        isMeteringEnabled: false,
+      } as Audio.RecordingOptions;
+
+      const options = Platform.OS === 'android' ? ANDROID_RECORDING_OPTIONS : Audio.RecordingOptionsPresets.HIGH_QUALITY;
+
+      const { recording: newRecording } = await Audio.Recording.createAsync(options);
+      setRecording(newRecording);
+
+      // Ensure recording is actually started
+      try {
+        const st = await newRecording.getStatusAsync();
+        if (!st.isRecording && st.canRecord) {
+          await newRecording.startAsync();
+        }
+      } catch {}
+
+  console.log('✅ Recording started successfully. Speak now! Tap again to stop.');
 
       // Auto-stop after 30 seconds (guarded against stale closures)
       if (autoStopTimerRef.current) {
@@ -207,15 +277,16 @@ export default function AIAgent({
       console.error('❌ Failed to start recording:', error);
       setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
       stopAllAnimations();
-
+      await audioLockService.releaseLock('ai-agent');
       const errorMessage = error instanceof Error ? error.message : 'Failed to start recording';
-      Alert.alert('Recording Error', errorMessage);
+      console.warn('Recording Error:', errorMessage);
     }
   };
 
   // Stop listening and process voice input
   const stopListening = async () => {
     try {
+      console.log('⏹️ Stopping: Processing audio...');
       console.log('⏹️ Stopping recording...');
       stopAllAnimations();
       setAgentState({ isListening: false, isProcessing: true, isPlayingResponse: false });
@@ -227,16 +298,29 @@ export default function AIAgent({
       }
       autoStopSessionRef.current = null;
 
-      const audioFile = await aiService.stopListening();
+      // Stop recording and get URI
+      let audioUri: string | null = null;
+      if (recording) {
+        try {
+          await recording.stopAndUnloadAsync();
+          audioUri = recording.getURI();
+          setRecording(null);
+          console.log('🎵 Audio URI:', audioUri);
+        } catch (e) {
+          console.error('❌ Failed to stop recording:', e);
+          await audioLockService.releaseLock('ai-agent');
+          setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
+          return;
+        }
+      }
+
+      // Release audio lock
+      await audioLockService.releaseLock('ai-agent');
 
       // Better error handling - check if we actually got audio
-      if (!audioFile) {
-        console.warn('⚠️ No audio file returned from recording');
+      if (!audioUri) {
+        console.warn('⚠️ No audio URI returned from recording');
         setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
-        Alert.alert(
-          'No Audio Detected',
-          'No audio was recorded. Please try speaking again and ensure your microphone is working.'
-        );
         return; // Don't throw, just return early
       }
 
@@ -248,13 +332,14 @@ export default function AIAgent({
       processingController.current = new AbortController();
 
       const response = await aiService.processVoiceCommand(
-        audioFile,
+        audioUri,
         screenContext,
         processingController.current.signal
       );
-      console.log('📥 Received response:', response);
+  console.log('📥 Received response:', response);
 
       await executeCommand(response);
+  console.log('✅ Complete: Command executed successfully');
 
       // Return to idle after successful processing
       setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
@@ -262,10 +347,7 @@ export default function AIAgent({
     } catch (error) {
       console.error('❌ Voice processing failed:', error);
       setAgentState({ isListening: false, isProcessing: false, isPlayingResponse: false });
-      Alert.alert(
-        'Processing Error',
-        error instanceof Error ? error.message : 'Failed to process voice command'
-      );
+      console.warn('Processing Error:', error instanceof Error ? error.message : 'Failed to process voice command');
     } finally {
       stopAllAnimations();
       // Defensive: ensure we always return to idle a tick later
@@ -391,31 +473,39 @@ export default function AIAgent({
 
     } catch (error) {
       console.error('❌ Command execution failed:', error);
-      Alert.alert('Error', 'Failed to execute command');
+      console.warn('Error: Failed to execute command');
     }
   };
 
   // Main button press handler
   const handlePress = async () => {
-    if (disabled) return;
+    console.log('🔘 AIAgent button pressed', {
+      disabled,
+      isListening: agentState.isListening,
+      isProcessing: agentState.isProcessing,
+      isPlayingResponse: agentState.isPlayingResponse
+    });
+    
+    if (disabled) {
+      console.warn('AI Agent button is currently disabled');
+      return;
+    }
 
     if (agentState.isListening) {
+      console.log('⏹️ Stopping listening...');
       await stopListening();
     } else if (!agentState.isProcessing && !agentState.isPlayingResponse) {
+      console.log('🎤 Starting listening...');
       await startListening();
+    } else {
+      console.warn(`Busy: Cannot start (processing=${agentState.isProcessing}, playing=${agentState.isPlayingResponse})`);
     }
   };
 
   // Long-press to run diagnostics when debug flag is set
   const handleLongPress = async () => {
-    const debug = process.env.EXPO_PUBLIC_AI_DEBUG === 'true';
-    if (!debug) return;
-    try {
-      const diag = await runAIAgentMicDiagnostic(1200);
-      showMicDiagnostic(diag);
-    } catch (e) {
-      console.warn('Mic diagnostic failed:', e);
-    }
+    // Debug long-press disabled (no popups)
+    console.log('Long press detected on AI Agent (debug disabled).');
   };
 
   // Get button style based on state
@@ -484,6 +574,7 @@ export default function AIAgent({
 
   return (
     <View style={[styles.container, positionStyles[position]]}>
+      {/* Mount/Unmount debug removed to avoid popups */}
       {/* Glow effect when listening */}
       {agentState.isListening && (
         <Animated.View

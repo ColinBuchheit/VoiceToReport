@@ -242,7 +242,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
           {!loaded ? (
             <View style={styles.settingsLoadingContainer}>
               <ActivityIndicator size="large" color={colors.accent} />
-              <Text style={[styles.settingsLoadingText, { color: colors.textSecondary }]}>Loading profile...</Text>
+              <Text style={[styles.settingsLoadingText, { color: colors.textSecondary, fontSize: scaled(14) }]}>Loading profile...</Text>
             </View>
           ) : (
             <ScrollView

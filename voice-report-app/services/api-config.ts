@@ -1,12 +1,10 @@
 // Auto-generated API configuration
 // This file is automatically updated by ngrok_manager.py
-// Last updated: 2025-10-11 16:09:25
+// Last updated: 2025-10-11 19:27:39
 
 import { Platform } from 'react-native';
 
-// Allow EAS/Expo env overrides for production Azure backend
-// IMPORTANT: Use direct process.env access so Metro/EAS can statically inline these at build time.
-// EXPO_PUBLIC_* variables are safe to expose to the client bundle.
+// Env override support for Azure/prod
 const ENV_URLS_RAW: string | undefined = process.env.EXPO_PUBLIC_BACKEND_URLS as any;
 const ENV_URL_SINGLE: string | undefined = process.env.EXPO_PUBLIC_BACKEND_URL as any;
 const RESOLVED_ENV_URLS: string[] | null = (() => {
@@ -20,16 +18,14 @@ const RESOLVED_ENV_URLS: string[] | null = (() => {
 export const API_CONFIG = {
   // Backend URLs in order of preference
   BACKEND_URLS: [
-    // Azure production first by default
-    'https://speech-to-report-api.azurewebsites.net',
-    'https://5217a1305a8f.ngrok-free.app',
+    'https://90c35f1828f4.ngrok-free.app',
     'http://192.168.1.171:8000',
     'http://localhost:8000',
     'http://10.0.2.2:8000'
   ],
   
   // Current ngrok URL (null if not available)
-  NGROK_URL: 'https://5217a1305a8f.ngrok-free.app',
+  NGROK_URL: 'https://90c35f1828f4.ngrok-free.app',
   
   // Local network IP
   LOCAL_IP: '192.168.1.171',
@@ -50,24 +46,14 @@ export const API_CONFIG = {
   },
 };
 
-// If env overrides are provided, force those to the top (Azure or other prod URL)
+// If env overrides are provided, force those
 if (RESOLVED_ENV_URLS && RESOLVED_ENV_URLS.length > 0) {
-  // Normalize to ensure proper scheme and no trailing slashes
   const normalized = RESOLVED_ENV_URLS.map((u) => u.replace(/\/$/, ''));
   API_CONFIG.BACKEND_URLS = normalized;
-  // Null ngrok URL to avoid accidental use in prod
-  // @ts-ignore - keep type simple at runtime
+  // @ts-ignore
   API_CONFIG.NGROK_URL = null;
   console.log('[api-config] Using backend URL(s) from env:', normalized);
 }
-
-export const ENV_OVERRIDE_ACTIVE: boolean = !!(RESOLVED_ENV_URLS && RESOLVED_ENV_URLS.length > 0);
-export const ENV_BACKEND_URLS: string[] | null = RESOLVED_ENV_URLS;
-
-// Log the effective list once for diagnostics
-try {
-  console.log('[api-config] Effective BACKEND_URLS:', API_CONFIG.BACKEND_URLS);
-} catch {}
 
 // FIXED: Helper function with critical ngrok header
 export const testBackendConnection = async (url: string): Promise<boolean> => {

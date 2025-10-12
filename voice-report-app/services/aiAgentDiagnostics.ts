@@ -3,6 +3,7 @@ import { Audio } from 'expo-av';
 import { File } from 'expo-file-system';
 import * as FileSystemLegacy from 'expo-file-system/legacy';
 import { AIAgentService } from './aiAgentService';
+import audioLockService from './audioLockService';
 
 export type MicDiagnostic = {
   platform: string;
@@ -13,12 +14,22 @@ export type MicDiagnostic = {
   format?: string;
   base64Length?: number;
   error?: string;
+  audioLock?: { held: boolean; owner: string | null };
+  backend?: { cachedUrl: string | null; candidates: string[] };
 };
 
 export async function runAIAgentMicDiagnostic(durationMs: number = 1500): Promise<MicDiagnostic> {
   const diag: MicDiagnostic = { platform: Platform.OS, permission: 'unknown' };
   const svc = AIAgentService.getInstance();
   try {
+    // Include audio lock state and backend info up front
+    try {
+      diag.audioLock = { held: audioLockService.isLockHeld(), owner: audioLockService.getCurrentOwner() } as any;
+    } catch {}
+    try {
+      const b = svc.getBackendDebugInfo();
+      diag.backend = { cachedUrl: b.cachedUrl, candidates: b.candidates };
+    } catch {}
     const perm = await Audio.getPermissionsAsync();
     diag.permission = perm.status;
     if (perm.status !== 'granted') {
@@ -72,7 +83,9 @@ export function showMicDiagnostic(diag: MicDiagnostic) {
   const dur = typeof diag.statusBeforeStop?.durationMillis === 'number' ? `${diag.statusBeforeStop.durationMillis} ms` : 'n/a';
   const b64 = typeof diag.base64Length === 'number' ? `${diag.base64Length}` : 'n/a';
   const uri = diag.uri || 'null';
-  const msg = `Platform: ${diag.platform}\nPerm: ${diag.permission}\nDur: ${dur}\nURI: ${uri}\nSize: ${size}\nB64 len: ${b64}\nFmt: ${diag.format || 'n/a'}\nErr: ${diag.error || 'none'}`;
+  const lock = diag.audioLock ? `\nLock: held=${diag.audioLock.held} owner=${diag.audioLock.owner || 'none'}` : '';
+  const backend = diag.backend ? `\nBackend: ${diag.backend.cachedUrl || 'none'}\nCandidates: ${(diag.backend.candidates || []).join(', ')}` : '';
+  const msg = `Platform: ${diag.platform}\nPerm: ${diag.permission}\nDur: ${dur}\nURI: ${uri}\nSize: ${size}\nB64 len: ${b64}\nFmt: ${diag.format || 'n/a'}\nErr: ${diag.error || 'none'}${lock}${backend}`;
   Alert.alert('AI Mic Diagnostic', msg);
   // Also log detailed object
   // eslint-disable-next-line no-console

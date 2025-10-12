@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "voice-report-app",
+    "name": "BEAR S&T Voice",
     "slug": "voice-report-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -20,6 +20,7 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
+        "CFBundleDisplayName": "BEAR S&T Voice",
         "NSMicrophoneUsageDescription": "Allow Voice Report App to access the microphone to record voice notes and generate summaries.",
         "NSPhotoLibraryUsageDescription": "Allow Voice Report App to access your photo library to attach screenshots to feedback emails."
       }
@@ -31,18 +32,18 @@
       },
       "package": "com.beartechs.voicereport",
       "edgeToEdgeEnabled": true,
-      "statusBar": {
-        "backgroundColor": "#101214",
-        "barStyle": "light-content"
-      },
-      "navigationBar": {
-        "backgroundColor": "#101214",
-        "barStyle": "light-content"
-      },
       "permissions": [
         "RECORD_AUDIO",
         "READ_MEDIA_IMAGES"
       ]
+    },
+    "androidStatusBar": {
+      "backgroundColor": "#101214",
+      "barStyle": "light-content"
+    },
+    "androidNavigationBar": {
+      "backgroundColor": "#101214",
+      "barStyle": "light-content"
     },
     "web": {
       "favicon": "./assets/favicon.png"
