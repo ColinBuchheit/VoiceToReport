@@ -45,176 +45,10 @@ class SummarizationService:
             
         except Exception as e:
             logger.error(f"Summary generation failed: {e}", exc_info=True)
-            # Return pattern results as fallback
-            def _extract_with_patterns(self, transcription: str) -> Dict[str, Any]:
-                """Extract fields using regex patterns - very fast and accurate for structured data"""
-                result = self._get_empty_summary()
-                text_lower = transcription.lower()
-
-                # Normalize common explicit negatives up front to map to "None" for key fields
-                # We only set to "None" if not otherwise positively identified later in patterns
-                negative_map_checks = {
-                    'delays': [r'\bno\s+(delays?|issues?|problems?)\b', r'\bno issues\b', r'\bno delays\b'],
-                    'photos_uploaded': [r'\bno\s+(photos?|pictures?|images?)\b', r"didn't\s+take\s+any\s+photos", r'\b0\s+photos?\b'],
-                    'materials_used': [r'\bno\s+(materials?|parts?|equipment)\b', r"didn't\s+use\s+any\s+(materials?|parts?)"],
-                    'out_of_scope_work': [r'\bno\s+(out\s+of\s+scope|extra\s+work|additional\s+work)\b'],
-                    'release_code': [r'\bno\s+(release|authorization|auth|confirmation|ticket)\s*(code|number)?\b', r'\bno\s+code\s+(provided|given)\b'],
-                    'troubleshooting_steps': [r'\bno\s+(troubleshooting|diagnostics?)\s+(needed|required|performed|necessary)\b', r'\bnothing\s+to\s+troubleshoot\b'],
-                    'return_tracking': [r'\bno\s+(returns?|return\s+shipment|shipping|tracking)\b'],
-                    'expenses': [r'\bno\s+(expenses?|costs?|charges?)\b', r'\bzero\s+expenses?\b', r"didn't\s+spend\s+anything"],
-                }
-                for field, patterns in negative_map_checks.items():
-                    try:
-                        if any(re.search(pat, text_lower) for pat in patterns):
-                            result[field] = "None"
-                    except re.error:
-                        pass
-
-                # LOCATION extraction (reintroduced & improved)
-                location = None
-                location_patterns = [
-                    r'(?:location|site|store)\s*[:#-]\s*([A-Z0-9][A-Za-z0-9&@.\- ]{2,60})',
-                    r'(?:at|arrived at|on site at|onsite at)\s+([A-Z][A-Za-z0-9&@.\- ]{2,60})',
-                    r'(?:store|site)\s+#?(\d{3,8})',
-                ]
-                exclusion_substrings = {'delay', 'delayed', 'waiting', 'waited'}
-                def _clean_location(raw: str) -> Optional[str]:
-                    if not raw:
-                        return None
-                    raw = raw.strip()
-                    raw = re.split(r'[\.;\n]', raw)[0]
-                    raw = re.sub(r'\b(today|yesterday|tonight|this morning)\b.*$', '', raw, flags=re.IGNORECASE).strip()
-                    raw = re.sub(r'\s{2,}', ' ', raw)
-                    lowered = raw.lower()
-                    if any(term in lowered for term in exclusion_substrings):
-                        return None
-                    if len(raw) < 3:
-                        return None
-                    if re.fullmatch(r'\d{3,8}', raw):
-                        raw = f"Store {raw}"
-                    return raw.strip(' -:')
-                for pattern in location_patterns:
-                    match = re.search(pattern, transcription, re.IGNORECASE)
-                    if match:
-                        candidate = match.group(1)
-                        cleaned = _clean_location(candidate)
-                        if cleaned:
-                            location = cleaned
-                            logger.info(f"Found location (pattern): {location}")
-                            break
-                if location:
-                    result['location'] = location
-
-                # ONSITE CONTACT - specific patterns
-                contact_patterns = [
-                    r'contacts?:\s*([^,\n-]+(?:,\s*[^,\n-]+)?)',
-                    r'(?:met with|worked with|contact was)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
-                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+\([^)]*(?:operations|manager|supervisor|contact)\)',
-                ]
-                for pattern in contact_patterns:
-                    match = re.search(pattern, transcription, re.IGNORECASE)
-                    if match:
-                        contact = match.group(1).strip()
-                        if ',' in contact:
-                            contact = contact.split(',')[0].strip()
-                        contact = re.sub(r'\s*\([^)]+\)', '', contact)
-                        result['onsite_contact'] = contact
-                        logger.info(f"Found onsite contact: {result['onsite_contact']}")
-                        break
-
-                # SUPPORT CONTACT - look for IT/support/contractor mentions
-                support_patterns = [
-                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+\((?:IT|support|tech|contractor)\)',
-                    r'([A-Z][a-z]+)\s+(?:from|in)\s+(?:tech\s+)?support',
-                    r'(?:support from|helped by)\s+([A-Z][a-z]+)',
-                ]
-                for pattern in support_patterns:
-                    match = re.search(pattern, transcription, re.IGNORECASE)
-                    if match:
-                        result['support_contact'] = match.group(1).strip()
-                        logger.info(f"Found support contact: {result['support_contact']}")
-                        break
-
-                # DELAYS - specific delay mentions
-                delay_patterns = [
-                    r'delay[:\s]+([^.\n]+)',
-                    r'waited?\s+(?:for\s+)?([^.\n]+)',
-                    r'(?:delayed by|held up by)\s+([^.\n]+)',
-                ]
-                for pattern in delay_patterns:
-                    match = re.search(pattern, text_lower)
-                    if match:
-                        result['delays'] = match.group(1).strip()
-                        logger.info(f"Found delays: {result['delays']}")
-                        break
-
-                # RELEASE CODE - SKIP PATTERN MATCHING, LET GPT HANDLE IT
-                logger.debug("Skipping pattern matching for release_code - relying on GPT extraction")
-
-                # Don't set result['release_code'] here - let GPT handle it entirely
-
-                # PHOTOS
-                photo_patterns = [
-                    r'photos?\s+uploaded\s*\(?(\d+)\)?',
-                    r'(\d+)\s+photos?\s+(?:taken|uploaded|captured)',
-                    r'uploaded\s+\(?(\d+)\)?\s+photos?',
-                ]
-                for pattern in photo_patterns:
-                    match = re.search(pattern, text_lower)
-                    if match:
-                        num_photos = match.group(1)
-                        if str(num_photos) == '0':
-                            result['photos_uploaded'] = "None"
-                        else:
-                            result['photos_uploaded'] = f"{num_photos} photos"
-                        logger.info(f"Found photos: {result['photos_uploaded']}")
-                        break
-
-                # EXPENSES
-                expense_patterns = [
-                    r'expenses?:\s*([^.\n]+)',
-                    r'(?:parking|gas|meals?|tolls?|costs?|charges?)[\s:]+\$?(\d+(?:\.\d{2})?)',
-                    r'no\s+(?:expenses?|parking|tolls|costs|charges)',
-                    r'zero\s+expenses?',
-                ]
-                for pattern in expense_patterns:
-                    match = re.search(pattern, text_lower)
-                    if match:
-                        if any(term in match.group(0).lower() for term in ['no expense', 'no expenses', 'no cost', 'no costs', 'no charge', 'no charges', 'zero expense', 'zero expenses', 'none']):
-                            result['expenses'] = "None"
-                        else:
-                            result['expenses'] = match.group(0).strip()
-                        logger.info(f"Found expenses: {result['expenses']}")
-                        break
-
-                # MATERIALS USED
-                materials_patterns = [
-                    r'materials?\s+used:\s*([^.\n]+)',
-                    r'used:\s*(\d+x?\s+[^.\n,]+(?:,\s*\d+x?\s+[^.\n,]+)*)',
-                    r'installed\s+(?:new\s+)?(\w+\s+\w+\s+(?:AP|switch|cable|router))',
-                ]
-                for pattern in materials_patterns:
-                    match = re.search(pattern, text_lower)
-                    if match:
-                        result['materials_used'] = match.group(1).strip()
-                        logger.info(f"Found materials: {result['materials_used']}")
-                        break
-
-                # SCOPE COMPLETED
-                if (
-                    'job complete' in text_lower or
-                    'work complete' in text_lower or
-                    'network restored' in text_lower
-                ):
-                    result['scope_completed'] = "Yes"
-                elif (
-                    'not complete' in text_lower or
-                    'incomplete' in text_lower
-                ):
-                    result['scope_completed'] = "No"
-                elif 'partial' in text_lower:
-                    result['scope_completed'] = "Partially"
-                return result
+            # Return pattern results as fallback when available
+            if 'pattern_results' in locals() and pattern_results:
+                return pattern_results
+            return self._get_empty_summary()
         
         
     
@@ -381,6 +215,164 @@ Return ONLY this JSON (no markdown):
         except Exception as e:
             logger.error(f"GPT extraction failed: {e}")
             return self._get_empty_summary()
+
+    def _extract_with_patterns(self, transcription: str) -> Dict[str, Any]:
+        """Extract fields using regex patterns - very fast and accurate for structured data"""
+        result = self._get_empty_summary()
+        text_lower = transcription.lower()
+
+        # Normalize common explicit negatives up front to map to "None" for key fields
+        negative_map_checks = {
+            'delays': [r'\bno\s+(delays?|issues?|problems?)\b', r'\bno issues\b', r'\bno delays\b'],
+            'photos_uploaded': [r'\bno\s+(photos?|pictures?|images?)\b', r"didn't\s+take\s+any\s+photos", r'\b0\s+photos?\b'],
+            'materials_used': [r'\bno\s+(materials?|parts?|equipment)\b', r"didn't\s+use\s+any\s+(materials?|parts?)"],
+            'out_of_scope_work': [r'\bno\s+(out\s+of\s+scope|extra\s+work|additional\s+work)\b'],
+            'release_code': [r'\bno\s+(release|authorization|auth|confirmation|ticket)\s*(code|number)?\b', r'\bno\s+code\s+(provided|given)\b'],
+            'troubleshooting_steps': [r'\bno\s+(troubleshooting|diagnostics?)\s+(needed|required|performed|necessary)\b', r'\bnothing\s+to\s+troubleshoot\b'],
+            'return_tracking': [r'\bno\s+(returns?|return\s+shipment|shipping|tracking)\b'],
+            'expenses': [r'\bno\s+(expenses?|costs?|charges?)\b', r'\bzero\s+expenses?\b', r"didn't\s+spend\s+anything"],
+        }
+        for field, patterns in negative_map_checks.items():
+            try:
+                if any(re.search(pat, text_lower) for pat in patterns):
+                    result[field] = "None"
+            except re.error:
+                pass
+
+        # LOCATION extraction (reintroduced & improved)
+        location = None
+        location_patterns = [
+            r'(?:location|site|store)\s*[:#-]\s*([A-Z0-9][A-Za-z0-9&@.\- ]{2,60})',
+            r'(?:at|arrived at|on site at|onsite at)\s+([A-Z][A-Za-z0-9&@.\- ]{2,60})',
+            r'(?:store|site)\s+#?(\d{3,8})',
+        ]
+        exclusion_substrings = {'delay', 'delayed', 'waiting', 'waited'}
+        def _clean_location(raw: str) -> Optional[str]:
+            if not raw:
+                return None
+            raw = raw.strip()
+            raw = re.split(r'[\.;\n]', raw)[0]
+            raw = re.sub(r'\b(today|yesterday|tonight|this morning)\b.*$', '', raw, flags=re.IGNORECASE).strip()
+            raw = re.sub(r'\s{2,}', ' ', raw)
+            lowered = raw.lower()
+            if any(term in lowered for term in exclusion_substrings):
+                return None
+            if len(raw) < 3:
+                return None
+            if re.fullmatch(r'\d{3,8}', raw):
+                raw = f"Store {raw}"
+            return raw.strip(' -:')
+        for pattern in location_patterns:
+            match = re.search(pattern, transcription, re.IGNORECASE)
+            if match:
+                candidate = match.group(1)
+                cleaned = _clean_location(candidate)
+                if cleaned:
+                    location = cleaned
+                    logger.info(f"Found location (pattern): {location}")
+                    break
+        if location:
+            result['location'] = location
+
+        # ONSITE CONTACT - specific patterns
+        contact_patterns = [
+            r'contacts?:\s*([^,\n-]+(?:,\s*[^,\n-]+)?)',
+            r'(?:met with|worked with|contact was)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
+            r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+\([^)]*(?:operations|manager|supervisor|contact)\)',
+        ]
+        for pattern in contact_patterns:
+            match = re.search(pattern, transcription, re.IGNORECASE)
+            if match:
+                contact = match.group(1).strip()
+                if ',' in contact:
+                    contact = contact.split(',')[0].strip()
+                contact = re.sub(r'\s*\([^)]+\)', '', contact)
+                result['onsite_contact'] = contact
+                logger.info(f"Found onsite contact: {result['onsite_contact']}")
+                break
+
+        # SUPPORT CONTACT - look for IT/support/contractor mentions
+        support_patterns = [
+            r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+\((?:IT|support|tech|contractor)\)',
+            r'([A-Z][a-z]+)\s+(?:from|in)\s+(?:tech\s+)?support',
+            r'(?:support from|helped by)\s+([A-Z][a-z]+)',
+        ]
+        for pattern in support_patterns:
+            match = re.search(pattern, transcription, re.IGNORECASE)
+            if match:
+                result['support_contact'] = match.group(1).strip()
+                logger.info(f"Found support contact: {result['support_contact']}")
+                break
+
+        # DELAYS - specific delay mentions
+        delay_patterns = [
+            r'delay[:\s]+([^.\n]+)',
+            r'waited?\s+(?:for\s+)?([^.\n]+)',
+            r'(?:delayed by|held up by)\s+([^.\n]+)',
+        ]
+        for pattern in delay_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                result['delays'] = match.group(1).strip()
+                logger.info(f"Found delays: {result['delays']}")
+                break
+
+        # RELEASE CODE - GPT handles it; skip pattern
+        logger.debug("Skipping pattern matching for release_code - relying on GPT extraction")
+
+        # PHOTOS
+        photo_patterns = [
+            r'photos?\s+uploaded\s*\(?(\d+)\)?',
+            r'(\d+)\s+photos?\s+(?:taken|uploaded|captured)',
+            r'uploaded\s+\(?(\d+)\)?\s+photos?',
+        ]
+        for pattern in photo_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                num_photos = match.group(1)
+                result['photos_uploaded'] = "None" if str(num_photos) == '0' else f"{num_photos} photos"
+                logger.info(f"Found photos: {result['photos_uploaded']}")
+                break
+
+        # EXPENSES
+        expense_patterns = [
+            r'expenses?:\s*([^.\n]+)',
+            r'(?:parking|gas|meals?|tolls?|costs?|charges?)[\s:]+\$?(\d+(?:\.\d{2})?)',
+            r'no\s+(?:expenses?|parking|tolls|costs|charges)',
+            r'zero\s+expenses?',
+        ]
+        for pattern in expense_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                if any(term in match.group(0).lower() for term in ['no expense', 'no expenses', 'no cost', 'no costs', 'no charge', 'no charges', 'zero expense', 'zero expenses', 'none']):
+                    result['expenses'] = "None"
+                else:
+                    result['expenses'] = match.group(0).strip()
+                logger.info(f"Found expenses: {result['expenses']}")
+                break
+
+        # MATERIALS USED
+        materials_patterns = [
+            r'materials?\s+used:\s*([^.\n]+)',
+            r'used:\s*(\d+x?\s+[^.\n,]+(?:,\s*\d+x?\s+[^.\n,]+)*)',
+            r'installed\s+(?:new\s+)?(\w+\s+\w+\s+(?:AP|switch|cable|router))',
+        ]
+        for pattern in materials_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                result['materials_used'] = match.group(1).strip()
+                logger.info(f"Found materials: {result['materials_used']}")
+                break
+
+        # SCOPE COMPLETED
+        if 'job complete' in text_lower or 'work complete' in text_lower or 'network restored' in text_lower:
+            result['scope_completed'] = "Yes"
+        elif 'not complete' in text_lower or 'incomplete' in text_lower:
+            result['scope_completed'] = "No"
+        elif 'partial' in text_lower:
+            result['scope_completed'] = "Partially"
+
+        return result
     
     def _parse_gpt_response(self, text: str) -> Dict[str, Any]:
         """Parse GPT response robustly"""
