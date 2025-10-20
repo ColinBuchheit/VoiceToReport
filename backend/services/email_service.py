@@ -277,16 +277,18 @@ class EmailService:
         # Use _value_for to benefit from synonyms/fallbacks
         for field_name, label in ordered_fields:
             value = self._value_for(closeout_data, field_name)
-            if value and value != 'Not specified':
+            # Skip fields with placeholders or explicit "None"
+            if value and value not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no']:
                 # Prefer dash formatting for quick paste
                 copy_lines.append(f"{label} - {value}")
 
         # Append transcription at end if available
-        if transcription and str(transcription).strip() and transcription != 'Not specified':
+        if transcription and str(transcription).strip() and str(transcription) not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no']:
             copy_lines.append("Transcription - " + str(transcription).strip())
 
-        # Add a blank line between each entry for readability in email clients
-        copy_block_text = ("\n\n".join(copy_lines)).replace('<', '\u27e8').replace('>', '\u27e9')
+        # Use HTML line breaks for better mobile compatibility; sanitize each line to preserve <br>
+        sanitized_lines = [line.replace('<', '\u27e8').replace('>', '\u27e9') for line in copy_lines]
+        copy_block_text = ("<br><br>".join(sanitized_lines))
         copy_paste_html = f"""
             <tr>
                 <td style=\"padding: 28px 0 12px 0;\">
@@ -298,7 +300,7 @@ class EmailService:
                     <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"background-color:#F7F7F8; border:1px solid #ECEFF1; border-radius:10px;\">
                         <tr>
                             <td style=\"padding:14px 16px;\">
-                                <div style=\"font-family:Menlo,Consolas,'Courier New',monospace; font-size:12px; line-height:1.55; white-space:pre-wrap; color:#374151;\">{copy_block_text}</div>
+                                <div style=\"font-family:Menlo,Consolas,'Courier New',monospace; font-size:12px; line-height:1.8; color:#374151;\">{copy_block_text}</div>
                             </td>
                         </tr>
                     </table>

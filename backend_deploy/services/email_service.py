@@ -240,14 +240,16 @@ class EmailService:
 
         for field_name, label in ordered_fields:
             value = self._safe_get(closeout_data, field_name)
-            if value and value != 'Not specified':
+            # Skip fields with "Not mentioned", "None", or "Not specified"
+            if value and value not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no']:
                 copy_lines.append(f"{label} - {value}")
 
-        if transcription and transcription.strip() and transcription != 'Not specified':
+        if transcription and transcription.strip() and transcription not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no']:
             copy_lines.append("Transcription - " + transcription.strip())
 
-        # Add a blank line between entries for readability
-        copy_block_text = ("\n\n".join(copy_lines)).replace('<', '\u27e8').replace('>', '\u27e9')
+            # Use HTML line breaks for better mobile compatibility; sanitize lines to preserve <br>
+            sanitized_lines = [line.replace('<', '\u27e8').replace('>', '\u27e9') for line in copy_lines]
+            copy_block_text = ("<br><br>".join(sanitized_lines))
 
         copy_paste_html = f"""
             <tr>
@@ -260,7 +262,7 @@ class EmailService:
                     <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"background-color:#F7F7F8; border:1px solid #ECEFF1; border-radius:10px;\"> 
                         <tr>
                             <td style=\"padding:14px 16px;\"> 
-                                <div style=\"font-family:Menlo,Consolas,'Courier New',monospace; font-size:12px; line-height:1.55; white-space:pre-wrap; color:#374151;\">{copy_block_text}</div>
+                                <div style=\"font-family:Menlo,Consolas,'Courier New',monospace; font-size:12px; line-height:1.8; color:#374151;\">{copy_block_text}</div>
                             </td>
                         </tr>
                     </table>

@@ -55,6 +55,24 @@ class SummarizationService:
         result = self._get_empty_summary()
         text_lower = transcription.lower()
 
+        # Normalize explicit negatives to "None" early for key fields
+        negative_map_checks = {
+            'delays': [r'\bno\s+(delays?|issues?|problems?)\b', r'\bno issues\b', r'\bno delays\b'],
+            'photos_uploaded': [r'\bno\s+(photos?|pictures?|images?)\b', r"didn't\s+take\s+any\s+photos", r'\b0\s+photos?\b'],
+            'materials_used': [r'\bno\s+(materials?|parts?|equipment)\b', r"didn't\s+use\s+any\s+(materials?|parts?)"],
+            'out_of_scope_work': [r'\bno\s+(out\s+of\s+scope|extra\s+work|additional\s+work)\b'],
+            'release_code': [r'\bno\s+(release|authorization|auth|confirmation|ticket)\s*(code|number)?\b', r'\bno\s+code\s+(provided|given)\b'],
+            'troubleshooting_steps': [r'\bno\s+(troubleshooting|diagnostics?)\s+(needed|required|performed|necessary)\b', r'\bnothing\s+to\s+troubleshoot\b'],
+            'return_tracking': [r'\bno\s+(returns?|return\s+shipment|shipping|tracking)\b'],
+            'expenses': [r'\bno\s+(expenses?|costs?|charges?)\b', r'\bzero\s+expenses?\b', r"didn't\s+spend\s+anything"],
+        }
+        for field, patterns in negative_map_checks.items():
+            try:
+                if any(re.search(pat, text_lower) for pat in patterns):
+                    result[field] = "None"
+            except re.error:
+                pass
+
         # LOCATION extraction (reintroduced & improved)
         # Heuristics: capture site/store/location names while avoiding delay phrases.
         # We try several targeted patterns and pick the first high-confidence match.
@@ -175,21 +193,25 @@ class SummarizationService:
             match = re.search(pattern, text_lower)
             if match:
                 num_photos = match.group(1)
-                result['photos_uploaded'] = f"{num_photos} photos"
+                if str(num_photos) == '0':
+                    result['photos_uploaded'] = "None"
+                else:
+                    result['photos_uploaded'] = f"{num_photos} photos"
                 logger.info(f"Found photos: {result['photos_uploaded']}")
                 break
         
         # EXPENSES
         expense_patterns = [
             r'expenses?:\s*([^.\n]+)',
-            r'(?:parking|gas|meals?|tolls?)[\s:]+\$?(\d+(?:\.\d{2})?)',
-            r'no\s+(?:expenses?|parking|tolls)',
+            r'(?:parking|gas|meals?|tolls?|costs?|charges?)[\s:]+\$?(\d+(?:\.\d{2})?)',
+            r'no\s+(?:expenses?|parking|tolls|costs|charges)',
+            r'zero\s+expenses?',
         ]
         
         for pattern in expense_patterns:
             match = re.search(pattern, text_lower)
             if match:
-                if 'no expense' in match.group(0).lower() or 'none' in match.group(0).lower():
+                if any(term in match.group(0).lower() for term in ['no expense', 'no expenses', 'no cost', 'no costs', 'no charge', 'no charges', 'zero expense', 'zero expenses', 'none']):
                     result['expenses'] = "None"
                 else:
                     result['expenses'] = match.group(0).strip()
@@ -233,7 +255,11 @@ IMPORTANT RULES:
 2. troubleshooting_steps: List ONLY diagnostic and troubleshooting actions (tested, checked, tried different ports, etc.).
 3. location: Extract ONLY the actual site/location name (store, facility, company site). Do NOT include delay phrases or time info.
 4. Keep each field distinct - do not mix content between fields.
-5. If a field is not clearly stated, return "Not mentioned" exactly.
+5. If a field is not discussed at all, return "Not mentioned" exactly.
+6. Distinguish explicit negatives from missing info:
+    - If the user clearly states there were none of something (e.g., "no expenses", "no delays", "no photos", "no materials", "no return shipment"), return the exact string "None" for that field.
+    - Only use "Not mentioned" when the field isn’t discussed.
+    - Do not use synonyms like "N/A" or "NA"; use exactly "None" or "Not mentioned" per the rules above.
 
 EXTRACT THESE FIELDS:
 
@@ -308,21 +334,21 @@ EXTRACT THESE FIELDS:
 
 Return ONLY this JSON (no markdown):
 {{
-  "onsite_contact": "value or Not mentioned",
-  "support_contact": "value or Not mentioned",
-    "location": "value or Not mentioned",
-  "work_completed": "value or Not mentioned",
-  "delays": "value or Not mentioned",
-  "troubleshooting_steps": "value or Not mentioned",
+    "onsite_contact": "value or None or Not mentioned",
+    "support_contact": "value or None or Not mentioned",
+        "location": "value or None or Not mentioned",
+    "work_completed": "value or None or Not mentioned",
+    "delays": "value or None or Not mentioned",
+    "troubleshooting_steps": "value or None or Not mentioned",
   "scope_completed": "Yes/No/Partially or Not mentioned",
-  "released_by": "value or Not mentioned",
-  "release_code": "value or Not mentioned",
-  "return_tracking": "value or Not mentioned",
-  "expenses": "value or Not mentioned",
-  "materials_used": "value or Not mentioned",
-  "out_of_scope_work": "value or Not mentioned",
-    "work_order": "value or Not mentioned",
-  "photos_uploaded": "value or Not mentioned"
+    "released_by": "value or None or Not mentioned",
+    "release_code": "value or None or Not mentioned",
+    "return_tracking": "value or None or Not mentioned",
+    "expenses": "value or None or Not mentioned",
+    "materials_used": "value or None or Not mentioned",
+    "out_of_scope_work": "value or None or Not mentioned",
+        "work_order": "value or None or Not mentioned",
+    "photos_uploaded": "value or None or Not mentioned"
 }}"""
 
             logger.info("Calling GPT for enhanced extraction with fallback and JSON response...")
