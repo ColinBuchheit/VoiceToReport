@@ -65,6 +65,32 @@ class EmailService:
     def get_recipients(self) -> List[str]:
         """Get current list of email recipients"""
         return self.recipients.copy()
+
+    def _value_for(self, data: Union[Dict[str, Any], object], key: str, default: str = 'Not specified') -> str:
+        """Get a field value with sensible fallbacks for known synonyms."""
+        v = self._safe_get(data, key, None)
+        if v and v != 'Not specified':
+            return v
+        if key == 'work_completed':
+            v2 = self._safe_get(data, 'taskDescription', None)
+            return v2 if v2 else default
+        if key == 'scope_completed':
+            v2 = self._safe_get(data, 'outcome', None)
+            return v2 if v2 else default
+        if key == 'notes' or key == 'additional_notes':
+            # prefer 'notes' but allow 'additional_notes'
+            for alt in ['notes', 'additional_notes']:
+                v2 = self._safe_get(data, alt, None)
+                if v2 and v2 != 'Not specified':
+                    return v2
+            return default
+        if key == 'work_order':
+            for alt in ['workOrder', 'work_order_number']:
+                v2 = self._safe_get(data, alt, None)
+                if v2 and v2 != 'Not specified':
+                    return v2
+            return default
+        return default
     
     def format_closeout_email_html(self, closeout_data: Union[Dict[str, Any], object], transcription: str, technician_name: str = None, technician_email: str = None, logo_src_override: str = None) -> str:
         """Format closeout data into a sleek, professional HTML email inspired by Stripe/Notion"""
@@ -98,6 +124,14 @@ class EmailService:
 
     # Define field groups with clean organization
         field_groups = [
+            {
+                "title": "Job Details",
+                "fields": [
+                    ("work_order", "Work Order #"),
+                    ("location", "Location"),
+                    ("technician_name", "Technician Name"),
+                ],
+            },
             {
                 "title": "Service Summary",
                 "fields": [
@@ -134,21 +168,24 @@ class EmailService:
                 "title": "Additional Notes",
                 "fields": [
                     ("out_of_scope_work", "Out of Scope Work"),
-                    ("additional_notes", "Notes"),
+                    ("notes", "Notes"),
                 ]
             },
         ]
         
         # Build field sections with modern card style (accent left border, subtle shadow)
         sections_html = ""
+        HIDE_VALUES = {None, "", "Not specified", "Not mentioned", "None"}
         for group in field_groups:
             group_html = ""
             has_content = False
 
             # Check if this group has content
             for field_name, _ in group["fields"]:
-                value = self._safe_get(closeout_data, field_name)
-                if value and value != 'Not specified':
+                # use value_for to take advantage of fallbacks
+                value = self._value_for(closeout_data, field_name)
+                value_cmp = value.strip() if isinstance(value, str) else value
+                if value_cmp not in HIDE_VALUES:
                     has_content = True
                     break
 
@@ -166,8 +203,9 @@ class EmailService:
 
             # Fields as cards
             for field_name, label in group["fields"]:
-                value = self._safe_get(closeout_data, field_name)
-                if value and value != 'Not specified':
+                value = self._value_for(closeout_data, field_name)
+                value_cmp = value.strip() if isinstance(value, str) else value
+                if value_cmp not in HIDE_VALUES:
                     group_html += f"""
             <tr>
                 <td style="padding: 8px 0 12px 0;">
@@ -220,8 +258,6 @@ class EmailService:
                 copy_lines.append(f"Technician - {technician_email}")
 
         ordered_fields = [
-            ("location", "Location"),
-            ("work_order", "Work Order"),
             ("onsite_contact", "On-Site Contact"),
             ("support_contact", "Support Contact"),
             ("work_completed", "Work Completed"),
@@ -235,11 +271,11 @@ class EmailService:
             ("expenses", "Expenses"),
             ("materials_used", "Materials Used"),
             ("out_of_scope_work", "Out of Scope Work"),
-            ("additional_notes", "Notes"),
+            ("notes", "Notes"),
         ]
 
         for field_name, label in ordered_fields:
-            value = self._safe_get(closeout_data, field_name)
+            value = self._value_for(closeout_data, field_name)
             # Skip fields with "Not mentioned", "None", or "Not specified"
             if value and value not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no']:
                 copy_lines.append(f"{label} - {value}")
@@ -247,9 +283,9 @@ class EmailService:
         if transcription and transcription.strip() and transcription not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no']:
             copy_lines.append("Transcription - " + transcription.strip())
 
-            # Use HTML line breaks for better mobile compatibility; sanitize lines to preserve <br>
-            sanitized_lines = [line.replace('<', '\u27e8').replace('>', '\u27e9') for line in copy_lines]
-            copy_block_text = ("<br><br>".join(sanitized_lines))
+        # Use HTML line breaks for better mobile compatibility; sanitize lines to preserve <br>
+        sanitized_lines = [line.replace('<', '\u27e8').replace('>', '\u27e9') for line in copy_lines]
+        copy_block_text = ("<br><br>".join(sanitized_lines))
 
         copy_paste_html = f"""
             <tr>

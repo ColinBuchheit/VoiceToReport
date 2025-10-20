@@ -186,12 +186,14 @@ class EmailService:
         ]
 
         sections_html = ""
+        HIDE_VALUES = {None, "", "Not specified", "Not mentioned", "None"}
         for group in field_groups:
             group_html = ""
             has_content = False
             for field_name, _ in group["fields"]:
                 value = self._value_for(closeout_data, field_name)
-                if value and value != 'Not specified':
+                value_cmp = value.strip() if isinstance(value, str) else value
+                if value_cmp not in HIDE_VALUES:
                     has_content = True
                     break
             if not has_content:
@@ -205,7 +207,8 @@ class EmailService:
             """
             for field_name, label in group["fields"]:
                 value = self._value_for(closeout_data, field_name)
-                if value and value != 'Not specified':
+                value_cmp = value.strip() if isinstance(value, str) else value
+                if value_cmp not in HIDE_VALUES:
                     group_html += f"""
             <tr>
                 <td style="padding: 8px 0 12px 0;">
@@ -257,8 +260,6 @@ class EmailService:
 
         # Canonical order and labels
         ordered_fields: list[tuple[str, str]] = [
-            ("location", "Location"),
-            ("work_order", "Work Order"),
             ("onsite_contact", "On-Site Contact"),
             ("support_contact", "Support Contact"),
             ("work_completed", "Work Completed"),
