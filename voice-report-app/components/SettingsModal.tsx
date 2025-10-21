@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Modal, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, TextInput, Alert, Image, Keyboard, TouchableWithoutFeedback, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, Modal, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, TextInput, Alert, Image, Keyboard, TouchableWithoutFeedback, KeyboardAvoidingView, Platform, Switch } from 'react-native';
 import * as MailComposer from 'expo-mail-composer';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
@@ -8,6 +8,7 @@ import { useFontScale } from '../context/FontScaleContext';
 import userProfileService from '../services/userProfileService';
 import { useTheme, ThemeMode } from '../context/ThemeContext';
 import { submitBugReport } from '../services/api';
+import { useSettings } from '../context/SettingsContext';
 
 interface SettingsModalProps {
   visible: boolean;
@@ -23,6 +24,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
   const [error, setError] = useState('');
   const { fontScale, setFontScale, scaled } = useFontScale();
   const { mode, setMode, colors, isDark } = useTheme();
+  const { showReportProgressBar, setShowReportProgressBar, showBottomBarBackground, setShowBottomBarBackground } = useSettings();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [attachments, setAttachments] = useState<string[]>([]);
@@ -310,7 +312,25 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
                 <Text style={{ fontSize: scaled(12), color: colors.textSecondary, marginTop: 6 }}>Use system to follow your device setting automatically.</Text>
               </View>
               <View style={styles.settingsSection}>
-                <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13), color: colors.textSecondary }]}>Accessibility</Text>
+                <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13), color: colors.textSecondary }]}>Layout & Accessibility</Text>
+                <View style={[styles.settingsItem, { borderBottomColor: colors.border }]}> 
+                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), color: colors.textPrimary }]}>Show Report Progress Bar</Text>
+                  <Switch
+                    value={showReportProgressBar}
+                    onValueChange={setShowReportProgressBar}
+                    thumbColor={showReportProgressBar ? colors.accent : (isDark ? '#888' : '#f4f3f4')}
+                    trackColor={{ false: isDark ? '#444' : '#ccc', true: colors.accent }}
+                  />
+                </View>
+                <View style={[styles.settingsItem, { borderBottomColor: colors.border }]}> 
+                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), color: colors.textPrimary }]}>Show Bottom Bar Background</Text>
+                  <Switch
+                    value={showBottomBarBackground}
+                    onValueChange={setShowBottomBarBackground}
+                    thumbColor={showBottomBarBackground ? colors.accent : (isDark ? '#888' : '#f4f3f4')}
+                    trackColor={{ false: isDark ? '#444' : '#ccc', true: colors.accent }}
+                  />
+                </View>
                 <View style={styles.settingsItemNoBorder}>
                   <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), flex: 1, color: colors.textPrimary }]}>Font Size</Text>
                   <Text style={{ fontSize: scaled(14), color: colors.textSecondary, width: 50, textAlign: 'right' }}>{(fontScale).toFixed(2)}x</Text>

@@ -1,8 +1,16 @@
 // voice-report-app/screens/HomeScreen.tsx - COMPLETE VERSION WITH ALL FIXES
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, Alert, Image, ScrollView, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, Alert, Image, ScrollView, TouchableOpacity, Platform, TextInput, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, Animated } from 'react-native';
 import { useFontScale } from '../context/FontScaleContext';
 import { Ionicons } from '@expo/vector-icons';
+// Optional blur support (no-op if expo-blur isn't installed)
+let RNBlurView: any = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  RNBlurView = require('expo-blur').BlurView;
+} catch (e) {
+  RNBlurView = null;
+}
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -15,6 +23,11 @@ import SettingsModal from '../components/SettingsModal'; // explicit import; TS 
 import audioLockService from '../services/audioLockService';
 import emailHistoryService, { EmailHistoryItem } from '../services/emailHistoryService';
 import { useTheme } from '../context/ThemeContext';
+import Checklist from '../components/Checklist';
+import { useChecklist } from '../context/ChecklistContext';
+import { criteriaCategories } from '../components/checklistData';
+import { useTranscription } from '../context/TranscriptionContext';
+import { useSettings } from '../context/SettingsContext';
 // Pre-require both logos so Metro bundles them and switching is instant
 const LIGHT_LOGO = require('../assets/bears&t.png');
 const DARK_LOGO = require('../assets/DarkModeLogo.png');
@@ -40,23 +53,32 @@ interface CriteriaCategory {
 
 // Global state to persist across navigation
 let persistedState: {
-  checkedItems: Record<string, boolean>;
   showChecklist: boolean;
   shouldReset: boolean;
+  showManualInput: boolean;
 } = {
-  checkedItems: {},
   showChecklist: true,
   shouldReset: false, // Flag to trigger complete reset
+  showManualInput: false,
 };
 
 function HomeScreenInner({ navigation }: Props) {
   const [isProcessing, setIsProcessing] = useState(false);
   // Initialize from persisted state
-  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>(persistedState.checkedItems);
   const [showChecklist, setShowChecklist] = useState(persistedState.showChecklist);
+  const [showManualInput, setShowManualInput] = useState(persistedState.showManualInput);
   const [showHistorySidebar, setShowHistorySidebar] = useState(false);
   const [emailCount, setEmailCount] = useState(0);
   const [showSettings, setShowSettings] = useState(false); // Settings modal visibility
+  const { checkedItems, toggleItem, reset } = useChecklist();
+  const { transcription, setTranscription } = useTranscription();
+  const { showReportProgressBar, showBottomBarBackground } = useSettings();
+  const manualInputRef = useRef<TextInput | null>(null);
+  // Hold-to-clear state for manual input
+  const [isHoldingClear, setIsHoldingClear] = useState(false);
+  const holdProgress = useRef(new Animated.Value(0)).current;
+  const holdTimeout = useRef<NodeJS.Timeout | null>(null);
+  const HOLD_DURATION = 2000;
   
   // Shared recording state - always reset to clean state
   const [isRecording, setIsRecording] = useState(false);
@@ -69,8 +91,9 @@ function HomeScreenInner({ navigation }: Props) {
   // Function to completely reset all state
   const resetAllState = () => {
     // Reset checklist state
-    setCheckedItems({});
+  reset();
     setShowChecklist(true);
+  setShowManualInput(false);
     
     // Reset recording state
     setIsRecording(false);
@@ -84,8 +107,7 @@ function HomeScreenInner({ navigation }: Props) {
       timerRef.current = null;
     }
     
-    // Reset persisted state
-    persistedState.checkedItems = {};
+  // Reset persisted state
     persistedState.showChecklist = true;
     persistedState.shouldReset = false;
     // (Removed) manual job detail persistence
@@ -93,9 +115,7 @@ function HomeScreenInner({ navigation }: Props) {
 
   // Save state to persistence when values change
   useEffect(() => {
-    if (!persistedState.shouldReset) {
-      persistedState.checkedItems = checkedItems;
-    }
+    // checklist state is global via context; no local persistence needed here
   }, [checkedItems]);
 
   useEffect(() => {
@@ -103,6 +123,12 @@ function HomeScreenInner({ navigation }: Props) {
       persistedState.showChecklist = showChecklist;
     }
   }, [showChecklist]);
+
+  useEffect(() => {
+    if (!persistedState.shouldReset) {
+      persistedState.showManualInput = showManualInput;
+    }
+  }, [showManualInput]);
 
   // (Removed) manual job details persistence effect
 
@@ -151,7 +177,7 @@ function HomeScreenInner({ navigation }: Props) {
         timerRef.current = null;
       }
 
-      // Cleanup on blur: ensure mic is released and audio mode reset
+  // Cleanup on blur: ensure mic is released and audio mode reset
       return () => {
         // Capture the current recording to avoid stale closures and dependency reruns
         const currentRecording = recording;
@@ -249,123 +275,6 @@ function HomeScreenInner({ navigation }: Props) {
     };
   }, [isRecording]);
 
-  const criteriaCategories: CriteriaCategory[] = [
-    {
-      title: "Closeout Notes",
-      color: "#000000",
-      items: [
-        {
-          id: "work_order",
-          label: "What is the Work Order number?",
-          hint: "Say the work order number clearly",
-          required: true
-        },
-        {
-          id: "location",
-          label: "What is the location?",
-          hint: "Say the site, store, or address",
-          required: true
-        },
-        {
-          id: "onsite_contact",
-          label: "Who did you meet with on-site?",
-          hint: "Mention the name of your on-site contact",
-          required: true
-        },
-        {
-          id: "support_contact", 
-          label: "Who did you work with for support?",
-          hint: "Name the support person or company",
-          required: true
-        },
-        {
-          id: "work_completed",
-          label: "What work was completed?",
-          hint: "Describe all tasks and technical work done",
-          required: true
-        },
-        {
-          id: "delays",
-          label: "Were there any delays?",
-          hint: "Mention any delays or say 'no delays'",
-          required: true
-        },
-        {
-          id: "troubleshooting_steps",
-          label: "What troubleshooting steps did you take?",
-          hint: "Describe debugging or problem-solving steps",
-          required: true
-        },
-        {
-          id: "scope_completed",
-          label: "Was the scope completed successfully?",
-          hint: "Say yes/no and explain the outcome",
-          required: true
-        },
-        {
-          id: "released_by",
-          label: "Who released you?",
-          hint: "Name of person who signed off on completion",
-          required: true
-        },
-        {
-          id: "release_code",
-          label: "Is there a release code? If so, what is it?",
-          hint: "Mention release code or say 'no release code'",
-          required: true
-        },
-        {
-          id: "return_tracking",
-          label: "Is there a return tracking number? If so, what is it?",
-          hint: "Mention tracking number or say 'no return tracking'",
-          required: true
-        }
-      ]
-    },
-    {
-      title: "Expenses",
-      color: "#10B981",
-      items: [
-        {
-          id: "expenses",
-          label: "Did you have any expenses (parking fees, etc)?",
-          hint: "List any expenses or say 'no expenses'",
-          required: true
-        },
-        {
-          id: "materials_used",
-          label: "What materials did you use?",
-          hint: "List materials used or say 'no materials used'",
-          required: true
-        }
-      ]
-    },
-    {
-      title: "Out of Scope",
-      color: "#F59E0B",
-      items: [
-        {
-          id: "out_of_scope_work",
-          label: "Was there any out of scope work? If so, what is it and who approved the work?",
-          hint: "Describe out of scope work and approval or say 'no out of scope work'",
-          required: true
-        }
-      ]
-    },
-    {
-      title: "Photos",
-      color: "#8B5CF6",
-      items: [
-        {
-          id: "photos_uploaded",
-          label: "How many photos did you upload?",
-          hint: "State number of photos uploaded or say 'no photos uploaded'",
-          required: true
-        }
-      ]
-    }
-  ];
-
   const totalItems = criteriaCategories.reduce((sum, cat) => sum + cat.items.length, 0);
   const checkedCount = Object.values(checkedItems).filter(Boolean).length;
   const requiredItems = criteriaCategories.flatMap(cat => cat.items.filter(item => item.required));
@@ -376,6 +285,8 @@ function HomeScreenInner({ navigation }: Props) {
     try {
       setIsProcessing(true);
       const result = await transcribeAudio(audioUri);
+      // Sync to global transcription state
+      setTranscription(result.transcription);
       
       // Set flag to reset state when returning from the workflow
       persistedState.shouldReset = true;
@@ -408,12 +319,7 @@ function HomeScreenInner({ navigation }: Props) {
     setShowHistorySidebar(false);
   };
 
-  const toggleItem = (id: string) => {
-    setCheckedItems(prev => ({
-      ...prev,
-      [id]: !prev[id]
-    }));
-  };
+  // checklist toggling handled via context
 
   const insets = useSafeAreaInsets();
   const { scaled } = useFontScale();
@@ -424,7 +330,9 @@ function HomeScreenInner({ navigation }: Props) {
   // SettingsModal extracted to separate component to prevent remounts on each render (which caused flicker during recording updates)
 
   return (
-  <View style={[styles.container, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 8), backgroundColor: colors.background }]}>    
+  <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.container, { backgroundColor: colors.background }]}> 
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+    <View style={{ flex: 1, paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 8) }}>    
       {/* Fixed Header - centered logo */}
       <View style={[styles.header, { paddingTop: (Platform.OS === 'ios' ? 10 : 20) + insets.top * 0.2, backgroundColor: colors.surface, borderBottomColor: colors.border }]}> 
         <View style={styles.logoWrapper}> 
@@ -437,23 +345,25 @@ function HomeScreenInner({ navigation }: Props) {
         </View>
       </View>
 
-      {/* Progress Summary */}
-      <View style={[styles.progressSummary, { backgroundColor: colors.surfaceAlt, borderBottomColor: colors.border }]}>
-        <View style={styles.progressInfo}>
-          <Text style={[styles.progressTitle, { fontSize: scaled(16), color: colors.textPrimary }]}>Report Progress</Text>
-          <Text style={[styles.progressDetails, { fontSize: scaled(13), color: colors.textSecondary }]}>
-            {checkedRequiredCount}/{requiredItems.length} required • {checkedCount}/{totalItems} total
-          </Text>
+      {/* Progress Summary (show only when checklist is hidden to avoid duplicates) */}
+      {showReportProgressBar && !showChecklist && (
+        <View style={[styles.progressSummary, { backgroundColor: colors.surfaceAlt, borderBottomColor: colors.border }]}>
+          <View style={styles.progressInfo}>
+            <Text style={[styles.progressTitle, { fontSize: scaled(16), color: colors.textPrimary }]}>Report Progress</Text>
+            <Text style={[styles.progressDetails, { fontSize: scaled(13), color: colors.textSecondary }]}>
+              {checkedRequiredCount}/{requiredItems.length} required • {checkedCount}/{totalItems} total
+            </Text>
+          </View>
+          <View style={[styles.progressCircle, { backgroundColor: colors.accent }]}>
+            <Text style={[styles.progressPercent, { color: colors.accentContrast }]}>{progressPercent}%</Text>
+          </View>
         </View>
-        <View style={[styles.progressCircle, { backgroundColor: colors.accent }]}>
-          <Text style={[styles.progressPercent, { color: colors.accentContrast }]}>{progressPercent}%</Text>
-        </View>
-      </View>
+      )}
 
       {/* Content Area */}
       <View style={[styles.contentContainer, { backgroundColor: colors.background }]}>
 
-        <View style={styles.contentHeader}>
+        <View style={[styles.contentHeader, { flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap' }]}>
           <TouchableOpacity 
             style={[styles.toggleButton, { backgroundColor: isDark ? colors.surfaceAlt : '#F3F4F6' }]}
             onPress={() => setShowChecklist(!showChecklist)}
@@ -462,82 +372,178 @@ function HomeScreenInner({ navigation }: Props) {
               {showChecklist ? 'Hide Checklist' : 'Show Checklist'}
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.toggleButton, { backgroundColor: isDark ? colors.surfaceAlt : '#F3F4F6' }]}
+            onPress={() => {
+              const next = !showManualInput;
+              setShowManualInput(next);
+              if (!next) {
+                manualInputRef.current?.blur();
+                Keyboard.dismiss();
+              }
+            }}
+          >
+            <Text style={[styles.toggleText, { fontSize: scaled(14), color: colors.textPrimary }]}>
+              {showManualInput ? 'Hide Text Entry' : 'Show Text Entry'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {showChecklist ? (
-          /* Checklist View */
-          <ScrollView 
-            style={[styles.checklistContainer, { backgroundColor: colors.background }]}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={[styles.checklistContent, { paddingBottom: bottomNavOverlaySpace }]}
-          >
-            {criteriaCategories.map((category) => {
-              const categoryChecked = category.items.filter(item => checkedItems[item.id]).length;
-              
-              return (
-                <View key={category.title} style={styles.categorySection}>
-                  <View style={[styles.categoryHeader, { borderBottomColor: colors.border }]}>
-                    <Text style={[styles.categoryTitle, { fontSize: scaled(16), color: colors.textPrimary }]}>{category.title}</Text>
-                    <Text style={[styles.categoryProgress, { backgroundColor: colors.surfaceAlt, color: colors.textSecondary }] }>
-                      {categoryChecked}/{category.items.length}
-                    </Text>
-                  </View>
-                  
-                  {category.items.map((item) => (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={[
-                        styles.checklistItem,
-                        checkedItems[item.id] && styles.checklistItemChecked
-                      ]}
-                      onPress={() => toggleItem(item.id)}
-                    >
-                      <View style={[styles.itemCheckbox, { borderColor: colors.border }] }>
-                        {checkedItems[item.id] && <View style={[styles.checkmark, { backgroundColor: '#10B981' }]} />}
-                      </View>
-                      
-                      <View style={styles.itemContent}>
-                        <View style={styles.itemLabelRow}>
-                          <Text style={[
-                            styles.itemLabel,
-                            { fontSize: scaled(15), color: colors.textPrimary },
-                            checkedItems[item.id] && { textDecorationLine: 'line-through', color: colors.textSecondary }
-                          ]}>
-                            {item.label}
-                          </Text>
-                          {item.required && (
-                            <View style={[styles.requiredDot, { backgroundColor: '#EF4444' }]} />
-                          )}
-                        </View>
-                        <Text style={[styles.itemHint, { fontSize: scaled(13), lineHeight: scaled(16), color: colors.textSecondary }]}>{item.hint}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              );
-            })}
-          </ScrollView>
-        ) : (
-          /* Large Centered Record Button */
-          <View style={styles.centeredRecorderView}>
-            <Recorder
-              onRecordingComplete={handleRecordingComplete}
-              isProcessing={isProcessing}
-              size="large"
-              isRecording={isRecording}
-              setIsRecording={setIsRecording}
-              recording={recording}
-              setRecording={setRecording}
-              recordingDuration={recordingDuration}
-              setRecordingDuration={setRecordingDuration}
+        {/* Manual transcription input (collapsible compact when checklist is visible) */}
+        {showManualInput && showChecklist && (
+          <View style={[styles.manualInputCard, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}> 
+            <Text style={[styles.manualInputLabel, { color: colors.textPrimary }]}>Enter Transcription</Text>
+            <TextInput
+              ref={manualInputRef}
+              style={[styles.manualTextInput, { color: colors.textPrimary }]}
+              value={transcription}
+              onChangeText={setTranscription}
+              placeholder="Type or paste your transcription here..."
+              placeholderTextColor={colors.textSecondary}
+              multiline
+              textAlignVertical="top"
+              returnKeyType={Platform.OS === 'ios' ? 'default' : 'done'}
+              blurOnSubmit={false}
             />
+            <View style={[styles.manualActionsRow, { gap: 8 }]}>
+              <TouchableOpacity
+                style={[styles.useTextButton, { backgroundColor: colors.accent }]}
+                onPress={() => {
+                  if (!transcription || transcription.trim().length === 0) return;
+                  navigation.navigate('Transcript', { transcription: transcription.trim() });
+                }}
+                disabled={!transcription || transcription.trim().length === 0}
+              >
+                <Text style={[styles.useTextButtonText, { color: colors.accentContrast }]}>Continue with Text</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.clearButton, { backgroundColor: colors.accent }]}
+                onPressIn={() => {
+                  setIsHoldingClear(true);
+                  Animated.timing(holdProgress, { toValue: 1, duration: HOLD_DURATION, useNativeDriver: false }).start();
+                  holdTimeout.current = setTimeout(() => {
+                    setTranscription('');
+                    setIsHoldingClear(false);
+                    holdProgress.setValue(0);
+                  }, HOLD_DURATION);
+                }}
+                onPressOut={() => {
+                  if (holdTimeout.current) {
+                    clearTimeout(holdTimeout.current);
+                    holdTimeout.current = null;
+                  }
+                  setIsHoldingClear(false);
+                  Animated.timing(holdProgress, { toValue: 0, duration: 200, useNativeDriver: false }).start();
+                }}
+                activeOpacity={0.8}
+              >
+                <View style={styles.progressBarBackground}>
+                  <Animated.View
+                    style={[styles.progressBar, { width: holdProgress.interpolate({ inputRange: [0,1], outputRange: ['0%','100%'] }) }]}
+                  />
+                </View>
+                <Text style={[styles.useTextButtonText, { color: colors.accentContrast }]}>{isHoldingClear ? 'Hold to Clear...' : 'Clear'}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
+        )}
+
+        {showChecklist ? (
+          <Checklist contentPaddingBottom={bottomNavOverlaySpace} />
+        ) : (
+          showManualInput ? (
+            /* Expanded Manual Text Entry taking main area */
+            <View style={styles.centeredManualView}>
+              <View style={[styles.manualInputCardLarge, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}> 
+                <Text style={[styles.manualInputLabel, { color: colors.textPrimary }]}>Enter Transcription</Text>
+                <TextInput
+                  ref={manualInputRef}
+                  style={[styles.manualTextInputLarge, { color: colors.textPrimary }]}
+                  value={transcription}
+                  onChangeText={setTranscription}
+                  placeholder="Type or paste your transcription here..."
+                  placeholderTextColor={colors.textSecondary}
+                  multiline
+                  textAlignVertical="top"
+                  returnKeyType={Platform.OS === 'ios' ? 'default' : 'done'}
+                  blurOnSubmit={false}
+                />
+                <View style={[styles.manualActionsRow, { gap: 8 }]}>
+                  <TouchableOpacity
+                    style={[styles.useTextButton, { backgroundColor: colors.accent }]}
+                    onPress={() => {
+                      if (!transcription || transcription.trim().length === 0) return;
+                      navigation.navigate('Transcript', { transcription: transcription.trim() });
+                    }}
+                    disabled={!transcription || transcription.trim().length === 0}
+                  >
+                    <Text style={[styles.useTextButtonText, { color: colors.accentContrast }]}>Continue with Text</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.clearButton, { backgroundColor: colors.accent }]}
+                    onPressIn={() => {
+                      setIsHoldingClear(true);
+                      Animated.timing(holdProgress, { toValue: 1, duration: HOLD_DURATION, useNativeDriver: false }).start();
+                      holdTimeout.current = setTimeout(() => {
+                        setTranscription('');
+                        setIsHoldingClear(false);
+                        holdProgress.setValue(0);
+                      }, HOLD_DURATION);
+                    }}
+                    onPressOut={() => {
+                      if (holdTimeout.current) {
+                        clearTimeout(holdTimeout.current);
+                        holdTimeout.current = null;
+                      }
+                      setIsHoldingClear(false);
+                      Animated.timing(holdProgress, { toValue: 0, duration: 200, useNativeDriver: false }).start();
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.progressBarBackground}>
+                      <Animated.View
+                        style={[styles.progressBar, { width: holdProgress.interpolate({ inputRange: [0,1], outputRange: ['0%','100%'] }) }]}
+                      />
+                    </View>
+                    <Text style={[styles.useTextButtonText, { color: colors.accentContrast }]}>{isHoldingClear ? 'Hold to Clear...' : 'Clear'}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          ) : (
+            /* Large Centered Record Button */
+            <View style={styles.centeredRecorderView}>
+              <Recorder
+                onRecordingComplete={handleRecordingComplete}
+                isProcessing={isProcessing}
+                size="large"
+                isRecording={isRecording}
+                setIsRecording={setIsRecording}
+                recording={recording}
+                setRecording={setRecording}
+                recordingDuration={recordingDuration}
+                setRecordingDuration={setRecordingDuration}
+              />
+            </View>
+          )
         )}
       </View>
 
       {/* Bottom Navigation: variant changes depending on checklist visibility */}
       {showChecklist ? (
-        <View style={[styles.bottomNavContainer, { backgroundColor: colors.surface, borderTopColor: colors.border }] }>
+        <View style={[
+          styles.bottomNavContainer,
+          showBottomBarBackground && {
+            backgroundColor: colors.surface,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: -2 },
+            shadowOpacity: 0.1,
+            shadowRadius: 8,
+            elevation: 10,
+          }
+        ]}>
           {/* History */}
           <View style={styles.navSide}>
             <TouchableOpacity
@@ -548,23 +554,42 @@ function HomeScreenInner({ navigation }: Props) {
               accessibilityRole="button"
               accessibilityLabel="Open email history"
             >
-              <View style={[
-                styles.navIconContainer,
-                { backgroundColor: isDark ? colors.surfaceAlt : '#FFE4D7', borderColor: isDark ? colors.border : '#FFC8B0' },
-                showHistorySidebar && { backgroundColor: colors.accent, borderColor: colors.accent }
-              ]}>
+              <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+                {RNBlurView && (
+                  <RNBlurView
+                    intensity={28}
+                    tint={isDark ? 'dark' : 'light'}
+                    style={styles.navBlurCircleSmall}
+                  />
+                )}
+                <View style={[
+                  styles.navIconContainer,
+                  isDark && styles.navIconContainerHaloDark,
+                  {
+                    backgroundColor: showHistorySidebar ? colors.accent : '#000000',
+                    borderColor: showHistorySidebar ? '#000000' : colors.accent,
+                    borderWidth: 4,
+                  },
+                ]}>
                 <Ionicons
                   name="mail-outline"
                   size={24}
-                  color={showHistorySidebar ? colors.accentContrast : colors.accent}
+                  color={showHistorySidebar ? '#000000' : colors.accentContrast}
                 />
                 {emailCount > 0 && (
                   <View style={[styles.countBadge, { backgroundColor: colors.accent, borderColor: colors.surface }] }>
                     <Text style={[styles.countBadgeText, { color: colors.accentContrast }]}>{emailCount}</Text>
                   </View>
                 )}
+                </View>
               </View>
-              <Text style={[styles.navLabel, { fontSize: scaled(12), color: showHistorySidebar ? colors.accent : colors.textSecondary } ]}>History</Text>
+              <Text style={[
+                styles.navLabel,
+                {
+                  fontSize: scaled(12),
+                  color: isDark ? colors.accent : (showHistorySidebar ? colors.accent : colors.textSecondary),
+                },
+              ]}>History</Text>
             </TouchableOpacity>
           </View>
 
@@ -593,23 +618,55 @@ function HomeScreenInner({ navigation }: Props) {
               accessibilityRole="button"
               accessibilityLabel="Open settings"
             >
-              <View style={[
-                styles.navIconContainer,
-                { backgroundColor: isDark ? colors.surfaceAlt : '#FFE4D7', borderColor: isDark ? colors.border : '#FFC8B0' },
-                showSettings && { backgroundColor: colors.accent, borderColor: colors.accent }
-              ]}>
+              <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+                {RNBlurView && (
+                  <RNBlurView
+                    intensity={28}
+                    tint={isDark ? 'dark' : 'light'}
+                    style={styles.navBlurCircleSmall}
+                  />
+                )}
+                <View style={[
+                  styles.navIconContainer,
+                  isDark && styles.navIconContainerHaloDark,
+                  {
+                    backgroundColor: showSettings ? colors.accent : '#000000',
+                    borderColor: showSettings ? '#000000' : colors.accent,
+                    borderWidth: 4,
+                  },
+                ]}>
                 <Ionicons
                   name="settings-outline"
                   size={24}
-                  color={showSettings ? colors.accentContrast : colors.accent}
+                  color={showSettings ? '#000000' : colors.accentContrast}
                 />
+                </View>
               </View>
-              <Text style={[styles.navLabel, { fontSize: scaled(12), color: showSettings ? colors.accent : colors.textSecondary }]}>Settings</Text>
+              <Text style={[
+                styles.navLabel,
+                {
+                  fontSize: scaled(12),
+                  color: isDark ? colors.accent : (showSettings ? colors.accent : colors.textSecondary),
+                },
+              ]}>Settings</Text>
             </TouchableOpacity>
           </View>
         </View>
       ) : (
-        <View style={[styles.bottomNavContainer, styles.bottomNavContainerSimple, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+        <View style={[
+          styles.bottomNavContainer,
+          styles.bottomNavContainerSimple,
+          showBottomBarBackground && {
+            backgroundColor: colors.surface,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: -2 },
+            shadowOpacity: 0.1,
+            shadowRadius: 8,
+            elevation: 10,
+          }
+        ]}>
           <View style={styles.simpleButtonsRow}>
             <TouchableOpacity
               style={styles.simpleNavButton}
@@ -618,23 +675,39 @@ function HomeScreenInner({ navigation }: Props) {
               accessibilityRole="button"
               accessibilityLabel="Open email history"
             >
-              <View style={[
-                styles.navIconContainerLarge,
-                { backgroundColor: isDark ? colors.surfaceAlt : '#FFE4D7', borderColor: isDark ? colors.border : '#FFC8B0' },
-                showHistorySidebar && { backgroundColor: colors.accent, borderColor: colors.accent }
-              ]}>
+              <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+                {RNBlurView && (
+                  <RNBlurView
+                    intensity={30}
+                    tint={isDark ? 'dark' : 'light'}
+                    style={styles.navBlurCircle}
+                  />
+                )}
+                <View style={[
+                  styles.navIconContainerLarge,
+                  isDark && styles.navIconContainerLargeHaloDark,
+                  {
+                    backgroundColor: showHistorySidebar ? colors.accent : '#000000',
+                    borderColor: showHistorySidebar ? '#000000' : colors.accent,
+                    borderWidth: 4,
+                  },
+                ]}>
                 <Ionicons
                   name="mail-outline"
                   size={30}
-                  color={showHistorySidebar ? colors.accentContrast : colors.accent}
+                  color={showHistorySidebar ? '#000000' : colors.accentContrast}
                 />
                 {emailCount > 0 && (
                   <View style={[styles.countBadgeLarge, { backgroundColor: colors.accent, borderColor: colors.surface }] }>
                     <Text style={[styles.countBadgeTextLarge, { color: colors.accentContrast }]}>{emailCount}</Text>
                   </View>
                 )}
+                </View>
               </View>
-              <Text style={[styles.navLabelLarge, { fontSize: scaled(14), color: showHistorySidebar ? colors.accent : colors.textSecondary }]}>History</Text>
+              <Text style={[
+                styles.navLabelLarge,
+                { fontSize: scaled(14), color: isDark ? colors.accent : (showHistorySidebar ? colors.accent : colors.textSecondary) }
+              ]}>History</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.simpleNavButton}
@@ -643,18 +716,34 @@ function HomeScreenInner({ navigation }: Props) {
               accessibilityRole="button"
               accessibilityLabel="Open settings"
             >
-              <View style={[
-                styles.navIconContainerLarge,
-                { backgroundColor: isDark ? colors.surfaceAlt : '#FFE4D7', borderColor: isDark ? colors.border : '#FFC8B0' },
-                showSettings && { backgroundColor: colors.accent, borderColor: colors.accent }
-              ]}>
+              <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+                {RNBlurView && (
+                  <RNBlurView
+                    intensity={30}
+                    tint={isDark ? 'dark' : 'light'}
+                    style={styles.navBlurCircle}
+                  />
+                )}
+                <View style={[
+                  styles.navIconContainerLarge,
+                  isDark && styles.navIconContainerLargeHaloDark,
+                  {
+                    backgroundColor: showSettings ? colors.accent : '#000000',
+                    borderColor: showSettings ? '#000000' : colors.accent,
+                    borderWidth: 4,
+                  },
+                ]}>
                 <Ionicons
                   name="settings-outline"
                   size={30}
-                  color={showSettings ? colors.accentContrast : colors.accent}
+                  color={showSettings ? '#000000' : colors.accentContrast}
                 />
+                </View>
               </View>
-              <Text style={[styles.navLabelLarge, { fontSize: scaled(14), color: showSettings ? colors.accent : colors.textSecondary }]}>Settings</Text>
+              <Text style={[
+                styles.navLabelLarge,
+                { fontSize: scaled(14), color: isDark ? colors.accent : (showSettings ? colors.accent : colors.textSecondary) }
+              ]}>Settings</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -670,6 +759,8 @@ function HomeScreenInner({ navigation }: Props) {
       {/* Settings Modal */}
       <SettingsModal visible={showSettings} onClose={() => setShowSettings(false)} />
     </View>
+    </TouchableWithoutFeedback>
+  </KeyboardAvoidingView>
   );
 }
 
@@ -774,6 +865,87 @@ const styles = StyleSheet.create({
   },
   checklistContent: {
     padding: 20,
+  },
+  manualInputCard: {
+    marginHorizontal: 20,
+    marginTop: 12,
+    marginBottom: 8,
+    padding: 14,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  manualInputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  manualTextInput: {
+    minHeight: 120, // ~5 rows
+    fontSize: 16,
+    lineHeight: 22,
+    textAlignVertical: 'top',
+  },
+  manualActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 10,
+  },
+  clearButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 100,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  progressBarBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'transparent',
+  },
+  progressBar: {
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 8,
+  },
+  centeredManualView: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 120,
+    paddingTop: 10,
+  },
+  manualInputCardLarge: {
+    width: '100%',
+    maxWidth: 900,
+    padding: 14,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  manualTextInputLarge: {
+    minHeight: 300,
+    fontSize: 16,
+    lineHeight: 22,
+    textAlignVertical: 'top',
+  },
+  useTextButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  useTextButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   
   // Centered Recorder View - Enhanced for large button
@@ -891,14 +1063,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     paddingBottom: Platform.OS === 'ios' ? 30 : 16,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 10,
+    backgroundColor: 'transparent',
+    borderTopWidth: 0,
+    borderTopColor: 'transparent',
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
     zIndex: 20,
   },
   // Simplified variant when checklist hidden (no recorder in bar)
@@ -927,7 +1099,7 @@ const styles = StyleSheet.create({
   navIconContainer: {
     width: 52,
     height: 52,
-    borderRadius: 18,
+    borderRadius: 26,
     backgroundColor: '#FFE4D7', // light brand tint
     justifyContent: 'center',
     alignItems: 'center',
@@ -941,10 +1113,17 @@ const styles = StyleSheet.create({
     elevation: 3,
     position: 'relative',
   },
+  navIconContainerHaloDark: {
+    shadowColor: '#FF6B35',
+    shadowOpacity: 0.45,
+    shadowOffset: { width: 0, height: 0 },
+    shadowRadius: 14,
+    elevation: 8,
+  },
   navIconContainerLarge: {
     width: 70,
     height: 70,
-    borderRadius: 24,
+    borderRadius: 35,
     backgroundColor: '#FFE4D7',
     justifyContent: 'center',
     alignItems: 'center',
@@ -957,6 +1136,36 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
     position: 'relative',
+  },
+  navIconContainerLargeHaloDark: {
+    shadowColor: '#FF6B35',
+    shadowOpacity: 0.5,
+    shadowOffset: { width: 0, height: 0 },
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  // Blur overlays behind nav buttons (if expo-blur present)
+  navBlurCircleSmall: {
+    position: 'absolute',
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    top: -8,
+    alignSelf: 'center',
+    opacity: 0.9,
+    overflow: 'hidden',
+    pointerEvents: 'none' as any,
+  },
+  navBlurCircle: {
+    position: 'absolute',
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    top: -11,
+    alignSelf: 'center',
+    opacity: 0.9,
+    overflow: 'hidden',
+    pointerEvents: 'none' as any,
   },
   countBadge: {
     position: 'absolute',

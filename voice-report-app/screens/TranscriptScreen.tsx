@@ -25,6 +25,8 @@ import { ScreenContext, FieldInfo, CloseoutSummary } from '../types/aiAgent';
 import { useTheme } from '../context/ThemeContext';
 import { AIAgentService } from '../services/aiAgentService';
 import audioLockService from '../services/audioLockService';
+import Checklist from '../components/Checklist';
+import { useTranscription } from '../context/TranscriptionContext';
 
 type TranscriptScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -59,9 +61,11 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   );
   const { scaled, fontScale } = useFontScale();
   const { colors, isDark } = useTheme();
+  const { setTranscription: setGlobalTranscription } = useTranscription();
   const [transcription, setTranscription] = useState(route.params.transcription);
   const [isEditing, setIsEditing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showChecklist, setShowChecklist] = useState(true);
   const [estimateSeconds, setEstimateSeconds] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [progressPercent, setProgressPercent] = useState<number>(0);
@@ -143,6 +147,8 @@ export default function TranscriptScreen({ navigation, route }: Props) {
       timestamp: new Date().toISOString(),
       screenContextMode: isEditing ? 'edit' : 'preview'
     });
+    // Keep global transcription in sync so Home's manual input reflects updates when returning
+    try { setGlobalTranscription(transcription || ''); } catch {}
   }, [transcription, isEditing]);
 
   const handleGenerateSummary = async () => {
@@ -482,7 +488,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         </View>
 
-        <View style={[styles.transcriptionCard, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+        <View style={[styles.transcriptionCard, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}> 
           {isEditing ? (
             <TextInput
               style={[styles.transcriptionInput, { fontSize: scaled(16), lineHeight: scaled(24), color: colors.textPrimary }]}
@@ -542,6 +548,25 @@ export default function TranscriptScreen({ navigation, route }: Props) {
               {isHoldingClear ? 'Hold to Clear...' : 'Clear'}
             </Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Checklist section (expandable) */}
+        <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+          <View style={styles.sectionHeaderRow}>
+            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Checklist</Text>
+            <TouchableOpacity
+              style={[styles.sectionToggleBtn, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
+              onPress={() => setShowChecklist(!showChecklist)}
+            >
+              <Text style={{ color: colors.textPrimary, fontWeight: '600' }}>{showChecklist ? 'Hide' : 'Show'}</Text>
+            </TouchableOpacity>
+          </View>
+          {showChecklist && (
+            <>
+              <View style={{ height: 12 }} />
+              <Checklist contentPaddingBottom={24} />
+            </>
+          )}
         </View>
       </ScrollView>
 
@@ -624,6 +649,33 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e9ecef',
     minHeight: 200,
+  },
+  sectionCard: {
+    marginHorizontal: 20,
+    marginBottom: 12,
+    padding: 14,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  sectionToggleBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
   },
   transcriptionInput: {
     fontSize: 16,
