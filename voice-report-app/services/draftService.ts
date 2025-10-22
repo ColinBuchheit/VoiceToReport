@@ -79,19 +79,48 @@ class DraftService {
     await this.ensureLoaded();
     const id = draft.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const timestamp = draft.timestamp || new Date().toISOString();
+    const idx = this.cache.findIndex(d => d.id === id);
+    const prev = idx >= 0 ? this.cache[idx] : undefined;
+
+    // Helper to build default title from WO/Location
+    const buildDefaultTitle = (wo?: string, loc?: string) => {
+      const woT = (wo || '').trim();
+      const locT = (loc || '').trim();
+      const parts: string[] = [];
+      if (woT) parts.push(`WO ${woT}`);
+      if (locT) parts.push(locT);
+      return parts.length ? parts.join(' – ') : undefined;
+    };
+
+    // Resolve title according to rules:
+    // - If a new explicit title is provided (non-empty), use it
+    // - Else if saving from Summary and we have WO or Location, auto-title from them
+    // - Else preserve previous title if exists
+    let resolvedTitle = (draft.title || '').trim();
+    if (!resolvedTitle) {
+      const isSummary = draft.lastSavedRoute === 'Summary';
+      const hasWOOrLoc = !!(draft.workOrder?.trim() || draft.location?.trim());
+      if (isSummary && hasWOOrLoc) {
+        resolvedTitle = buildDefaultTitle(draft.workOrder, draft.location) || (prev?.title || '');
+      } else {
+        resolvedTitle = prev?.title || '';
+      }
+    }
+
+    // Merge with previous draft to avoid unintentionally wiping fields when omitted
     const item: DraftItem = {
       id,
       timestamp,
-      title: draft.title,
-      workOrder: draft.workOrder,
-      location: draft.location,
-      transcription: draft.transcription,
-      summary: draft.summary,
-      lastSavedRoute: draft.lastSavedRoute,
-      checklist: draft.checklist,
+      title: resolvedTitle || undefined,
+      workOrder: draft.workOrder ?? prev?.workOrder,
+      location: draft.location ?? prev?.location,
+      transcription: draft.transcription ?? prev?.transcription,
+      summary: draft.summary ?? prev?.summary as any,
+      lastSavedRoute: draft.lastSavedRoute ?? prev?.lastSavedRoute,
+      checklist: draft.checklist ?? prev?.checklist,
     };
+
     // Upsert by id: replace existing entry if present, else insert at top
-    const idx = this.cache.findIndex(d => d.id === id);
     if (idx >= 0) {
       // Remove the old entry and place the updated one at the top
       this.cache.splice(idx, 1);

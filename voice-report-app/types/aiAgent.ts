@@ -129,6 +129,8 @@ export interface CloseoutSummary {
   // Closeout Notes
   onsite_contact?: string;
   support_contact?: string;
+  checked_in_with?: string;
+  check_in_code?: string;
   work_completed?: string;
   delays?: string;
   troubleshooting_steps?: string;

@@ -796,7 +796,7 @@ export default function EmailHistorySidebar({
                               }}
                             >
                               <Text style={[styles.rowTitle, { color: colors.textPrimary, fontSize: scaled(14) }]} numberOfLines={1}>
-                                {draft.location || 'Unknown Location'} • WO {draft.workOrder || 'N/A'}
+                                {draft.title?.trim() ? draft.title.trim() : `${draft.location || 'Unknown Location'} • WO ${draft.workOrder || 'N/A'}`}
                               </Text>
                               {isCurrent ? (
                                 <Text style={[styles.rowMeta, { color: colors.accent, fontSize: scaled(12), fontWeight: '700' }]} numberOfLines={1}>

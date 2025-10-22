@@ -44,18 +44,30 @@ export const DraftSaveButton: React.FC<DraftSaveButtonProps> = ({
   const [showNameModal, setShowNameModal] = useState(false);
   const [titleInput, setTitleInput] = useState('');
 
+  // Build a sensible default title from Work Order and Location when available
+  const buildDefaultTitle = () => {
+    const wo = (workOrder || '').trim();
+    const loc = (location || '').trim();
+    const parts: string[] = [];
+    if (wo) parts.push(`WO ${wo}`);
+    if (loc) parts.push(loc);
+    return parts.length ? parts.join(' – ') : undefined;
+  };
+
   const handleSave = async () => {
     if (saving) return;
     // If this is the first save (no draftId) and a name is required, prompt for title
-    if (!draftId && requireNameOnFirstSave) {
+    const hasWOOrLoc = !!(workOrder?.trim() || location?.trim());
+    if (!draftId && requireNameOnFirstSave && !hasWOOrLoc) {
       setShowNameModal(true);
       return;
     }
     setSaving(true);
     try {
+      const defaultTitle = buildDefaultTitle();
       const draft = await draftService.addDraft({
         id: draftId,
-        title: titleInput?.trim() ? titleInput.trim() : undefined,
+        title: titleInput?.trim() ? titleInput.trim() : defaultTitle,
         workOrder,
         location,
         transcription,
@@ -81,9 +93,10 @@ export const DraftSaveButton: React.FC<DraftSaveButtonProps> = ({
     setShowNameModal(false);
     setSaving(true);
     try {
+      const defaultTitle = buildDefaultTitle();
       const draft = await draftService.addDraft({
         id: draftId,
-        title: titleInput?.trim() ? titleInput.trim() : undefined,
+        title: titleInput?.trim() ? titleInput.trim() : defaultTitle,
         workOrder,
         location,
         transcription,

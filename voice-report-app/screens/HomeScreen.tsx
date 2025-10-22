@@ -1,6 +1,6 @@
 // voice-report-app/screens/HomeScreen.tsx - COMPLETE VERSION WITH ALL FIXES
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { View, Text, StyleSheet, Alert, Image, ScrollView, TouchableOpacity, Platform, TextInput, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, Animated } from 'react-native';
+import { View, Text, StyleSheet, Alert, Image, ScrollView, TouchableOpacity, Platform, TextInput, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, Animated, useWindowDimensions } from 'react-native';
 import { useFontScale } from '../context/FontScaleContext';
 import { Ionicons } from '@expo/vector-icons';
 // Optional blur support (no-op if expo-blur isn't installed)
@@ -67,6 +67,7 @@ let persistedState: {
 };
 
 function HomeScreenInner({ navigation }: Props) {
+  const { height: windowHeight } = useWindowDimensions();
   const [isProcessing, setIsProcessing] = useState(false);
   // Initialize from persisted state
   const [showChecklist, setShowChecklist] = useState(persistedState.showChecklist);
@@ -662,13 +663,17 @@ function HomeScreenInner({ navigation }: Props) {
             <Text style={[styles.manualInputLabel, { color: colors.textPrimary }]}>Enter Transcription</Text>
             <TextInput
               ref={manualInputRef}
-              style={[styles.manualTextInput, { color: colors.textPrimary }]}
+              style={[
+                styles.manualTextInput,
+                { color: colors.textPrimary, maxHeight: Math.max(140, Math.min(260, windowHeight * 0.35)) }
+              ]}
               value={transcription}
               onChangeText={setTranscription}
               placeholder="Type or paste your transcription here..."
               placeholderTextColor={colors.textSecondary}
               multiline
               textAlignVertical="top"
+              scrollEnabled
               returnKeyType={Platform.OS === 'ios' ? 'default' : 'done'}
               blurOnSubmit={false}
             />
@@ -726,13 +731,17 @@ function HomeScreenInner({ navigation }: Props) {
                 <Text style={[styles.manualInputLabel, { color: colors.textPrimary }]}>Enter Transcription</Text>
                 <TextInput
                   ref={manualInputRef}
-                  style={[styles.manualTextInputLarge, { color: colors.textPrimary }]}
+                  style={[
+                    styles.manualTextInputLarge,
+                    { color: colors.textPrimary, maxHeight: Math.max(220, Math.min(480, windowHeight * 0.55)) }
+                  ]}
                   value={transcription}
                   onChangeText={setTranscription}
                   placeholder="Type or paste your transcription here..."
                   placeholderTextColor={colors.textSecondary}
                   multiline
                   textAlignVertical="top"
+                  scrollEnabled
                   returnKeyType={Platform.OS === 'ios' ? 'default' : 'done'}
                   blurOnSubmit={false}
                 />

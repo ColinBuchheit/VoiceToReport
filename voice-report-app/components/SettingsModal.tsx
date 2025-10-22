@@ -385,7 +385,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
                 <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13), color: colors.textSecondary }]}>About</Text>
                 <View style={[styles.settingsItem, { borderBottomColor: colors.border }]}>
                   <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), color: colors.textPrimary }]}>Version</Text>
-                  <Text style={[styles.settingsItemValue, { fontSize: scaled(16), color: colors.textSecondary }]}>2.0.0</Text>
+                  <Text style={[styles.settingsItemValue, { fontSize: scaled(16), color: colors.textSecondary }]}>2.34</Text>
                 </View>
               </View>
             </ScrollView>
