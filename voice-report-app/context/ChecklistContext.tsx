@@ -17,6 +17,7 @@ interface ChecklistContextValue {
   checkedItems: Record<string, boolean>;
   toggleItem: (id: string) => void;
   setChecked: (id: string, checked: boolean) => void;
+  setAll: (items: Record<string, boolean>) => void;
   reset: () => void;
 }
 
@@ -32,6 +33,9 @@ export function ChecklistProvider({ children }: { children: ReactNode }) {
     },
     setChecked: (id: string, checked: boolean) => {
       setCheckedItems(prev => ({ ...prev, [id]: checked }));
+    },
+    setAll: (items: Record<string, boolean>) => {
+      setCheckedItems(items || {});
     },
     reset: () => setCheckedItems({}),
   }), [checkedItems]);

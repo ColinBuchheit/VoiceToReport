@@ -138,6 +138,35 @@ class SummarizationService:
                 result['onsite_contact'] = contact
                 logger.info(f"Found onsite contact: {result['onsite_contact']}")
                 break
+
+        # CHECKED IN WITH
+        checked_in_patterns = [
+            r'checked\s*-?in\s+with\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
+            r'check\s*-?in\s+with\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
+            r'checked\s*-?in\s+at\s+(?:the\s+)?(front desk|reception|security|service desk)'
+        ]
+        for pattern in checked_in_patterns:
+            m = re.search(pattern, transcription, re.IGNORECASE)
+            if m:
+                try:
+                    grp = m.group(1) if m.lastindex and m.lastindex >= 1 else None
+                    result['checked_in_with'] = (grp or '').strip().title()
+                except Exception:
+                    pass
+                logger.info(f"Found checked_in_with: {result.get('checked_in_with')}")
+                break
+
+        # CHECK-IN CODE
+        check_in_code_patterns = [
+            r'(?:check\s*-?in|checkin|check\s+in)\s+(?:code|number|id)\s*(?:is|was|:)?\s*([A-Za-z0-9\-]{3,})',
+            r'(?:code)\s*(?:for\s*)?(?:check\s*-?in|checkin)\s*(?:is|was|:)?\s*([A-Za-z0-9\-]{3,})'
+        ]
+        for pattern in check_in_code_patterns:
+            m = re.search(pattern, transcription, re.IGNORECASE)
+            if m:
+                result['check_in_code'] = m.group(1).strip()
+                logger.info(f"Found check_in_code: {result['check_in_code']}")
+                break
         
         # SUPPORT CONTACT - look for IT/support/contractor mentions
         support_patterns = [
@@ -240,6 +269,15 @@ class SummarizationService:
             result['scope_completed'] = "No"
         elif 'partial' in text_lower:
             result['scope_completed'] = "Partially"
+
+        # RELEASED BY - include synonym: "checked out with <name>"
+        try:
+            m = re.search(r'checked\s*-?out\s+with\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)', transcription, re.IGNORECASE)
+            if m:
+                result['released_by'] = m.group(1).strip()
+                logger.info(f"Found released_by via checkout synonym: {result['released_by']}")
+        except re.error:
+            pass
         
         return result
     
@@ -266,13 +304,15 @@ EXTRACT THESE FIELDS:
 
 1. onsite_contact: Name of person met at site (just the name)
 2. support_contact: Name of support/IT person (just the name)
-3. location: Actual site / store / facility name
-4. work_completed: Tasks actually completed (e.g., "Installed new AP, configured settings, verified connectivity")
-5. delays: Any delays and their causes
-6. troubleshooting_steps: Diagnostic steps taken (e.g., "Tested cable, checked power, tried different port")
-7. scope_completed: Was work finished? (Yes/No/Partially)
-8. released_by: Who signed off
-9. release_code: Authorization, confirmation, or reference code/number
+3. checked_in_with: Who you checked in with (name or desk like Front Desk)
+4. check_in_code: The check-in code if mentioned
+5. location: Actual site / store / facility name
+6. work_completed: Tasks actually completed (e.g., "Installed new AP, configured settings, verified connectivity")
+7. delays: Any delays and their causes
+8. troubleshooting_steps: Diagnostic steps taken (e.g., "Tested cable, checked power, tried different port")
+9. scope_completed: Was work finished? (Yes/No/Partially)
+10. released_by: Who signed off (treat phrases like "checked out with <name>" as this field)
+11. release_code: Authorization, confirmation, or reference code/number
    
     \u26a0\ufe0f CRITICAL - EXTRACTION RULES (Read Carefully):
    
@@ -326,29 +366,31 @@ EXTRACT THESE FIELDS:
     - Letter-number: "E-04721", "MC-2024-1587"
     - Complex: "WM-AUTH-9847", "OG-2024-CH-17"
     - Alphanumeric: "AUTH9847", "MC20241587"
-10. return_tracking: Shipping/tracking info
-11. expenses: Money spent (parking, etc.)
-12. materials_used: Parts/equipment used
-13. out_of_scope_work: Extra work beyond original scope
-14. work_order: Work order number if mentioned
-15. photos_uploaded: Number of photos taken
+12. return_tracking: Shipping/tracking info
+13. expenses: Money spent (parking, etc.)
+14. materials_used: Parts/equipment used
+15. out_of_scope_work: Extra work beyond original scope
+16. work_order: Work order number if mentioned
+17. photos_uploaded: Number of photos taken
 
 Return ONLY this JSON (no markdown):
 {{
     "onsite_contact": "value or None or Not mentioned",
     "support_contact": "value or None or Not mentioned",
-        "location": "value or None or Not mentioned",
+    "checked_in_with": "value or None or Not mentioned",
+    "check_in_code": "value or None or Not mentioned",
+    "location": "value or None or Not mentioned",
     "work_completed": "value or None or Not mentioned",
     "delays": "value or None or Not mentioned",
     "troubleshooting_steps": "value or None or Not mentioned",
-  "scope_completed": "Yes/No/Partially or Not mentioned",
+    "scope_completed": "Yes/No/Partially or Not mentioned",
     "released_by": "value or None or Not mentioned",
     "release_code": "value or None or Not mentioned",
     "return_tracking": "value or None or Not mentioned",
     "expenses": "value or None or Not mentioned",
     "materials_used": "value or None or Not mentioned",
     "out_of_scope_work": "value or None or Not mentioned",
-        "work_order": "value or None or Not mentioned",
+    "work_order": "value or None or Not mentioned",
     "photos_uploaded": "value or None or Not mentioned"
 }}"""
 
@@ -476,6 +518,8 @@ Return ONLY this JSON (no markdown):
         return {
             "onsite_contact": "Not mentioned",
             "support_contact": "Not mentioned",
+            "checked_in_with": "Not mentioned",
+            "check_in_code": "Not mentioned",
             "location": "Not mentioned",
             "work_completed": "Not mentioned",
             "delays": "Not mentioned",

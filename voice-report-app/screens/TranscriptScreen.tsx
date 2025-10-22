@@ -21,6 +21,7 @@ import { useFontScale } from '../context/FontScaleContext';
 import Loader from '../components/Loader';
 import { generateSummary } from '../services/api';
 import AIAgent from '../components/AIAgent';
+import DraftSaveButton from '../components/DraftSaveButton';
 import { ScreenContext, FieldInfo, CloseoutSummary } from '../types/aiAgent';
 import { useTheme } from '../context/ThemeContext';
 import { AIAgentService } from '../services/aiAgentService';
@@ -28,6 +29,9 @@ import audioLockService from '../services/audioLockService';
 import Checklist from '../components/Checklist';
 import { useTranscription } from '../context/TranscriptionContext';
 import { useSummary } from '../context/SummaryContext';
+import { useChecklist } from '../context/ChecklistContext';
+import draftService from '../services/draftService';
+import { useReportSession } from '../context/ReportSessionContext';
 
 type TranscriptScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -64,7 +68,101 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   const { colors, isDark } = useTheme();
   const { setTranscription: setGlobalTranscription } = useTranscription();
   const { lastSummary, lastTranscription, setSummary } = useSummary();
+  const { checkedItems, reset: resetChecklist } = useChecklist();
+  const { setCurrentDraftId, setJustExitedDraft } = useReportSession();
+  const [draftId, setDraftId] = useState<string | undefined>(() => route.params?.draftId);
   const [transcription, setTranscription] = useState(route.params.transcription);
+  // Ensure session knows we are editing this draft if navigated with a draftId
+  useEffect(() => {
+    if (route.params?.draftId) {
+      setCurrentDraftId(route.params.draftId);
+    }
+  }, [route.params?.draftId]);
+
+  // Helper to compare checklists
+  const equalChecklist = (a?: Record<string, boolean>, b?: Record<string, boolean>) => {
+    const ak = Object.keys(a || {});
+    const bk = Object.keys(b || {});
+    if (ak.length !== bk.length) return false;
+    for (const k of ak) {
+      if (!!(a as any)[k] !== !!(b as any)[k]) return false;
+    }
+    return true;
+  };
+
+  const hasUnsavedChanges = async (): Promise<boolean> => {
+    const text = (transcription || '').trim();
+    if (!draftId) {
+      // If nothing saved yet, consider any content as unsaved changes
+      const anyChecklist = Object.values(checkedItems || {}).some(Boolean);
+      return text.length > 0 || anyChecklist;
+    }
+    try {
+      const saved = await draftService.getDraftById(draftId);
+      if (!saved) {
+        const anyChecklist = Object.values(checkedItems || {}).some(Boolean);
+        return text.length > 0 || anyChecklist;
+      }
+      const savedText = (saved.transcription || '').trim();
+      const sameText = savedText === text;
+      const sameChecklist = equalChecklist(saved.checklist, checkedItems);
+      return !(sameText && sameChecklist);
+    } catch {
+      return true;
+    }
+  };
+
+  // Track dirtiness to control Save button enabled/disabled state
+  const [isDirty, setIsDirty] = useState(false);
+  const [saveSignal, setSaveSignal] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const dirty = await hasUnsavedChanges();
+        if (!cancelled) setIsDirty(dirty);
+      } catch {
+        if (!cancelled) setIsDirty(true);
+      }
+    })();
+    return () => { cancelled = true; };
+    // Re-evaluate whenever relevant inputs change
+  }, [draftId, transcription, checkedItems, saveSignal]);
+
+  const performExit = () => {
+    // Fully exit draft: clear session and working state, and reset nav stack
+    setCurrentDraftId(undefined);
+    setJustExitedDraft(true);
+    try { setGlobalTranscription(''); } catch {}
+    try { resetChecklist(); } catch {}
+    navigation.reset({ index: 0, routes: [{ name: 'Home' as any }] });
+  };
+
+  const handleExitPress = async () => {
+    const unsaved = await hasUnsavedChanges();
+    if (!unsaved) return performExit();
+    Alert.alert(
+      'Unsaved changes',
+      'Do you want to save your changes to the draft before exiting?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: () => performExit() },
+        { text: 'Save', onPress: async () => {
+            try {
+              await draftService.addDraft({
+                id: draftId,
+                transcription,
+                summary: {} as CloseoutSummary,
+                lastSavedRoute: 'Transcript',
+                checklist: checkedItems,
+              });
+            } catch {}
+            performExit();
+          }
+        },
+      ]
+    );
+  };
   const [isEditing, setIsEditing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showChecklist, setShowChecklist] = useState(true);
@@ -90,7 +188,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
           onPress={() => {
             const shouldReuse = lastSummary && (lastTranscription ?? '') === (transcription ?? '');
             const payload: CloseoutSummary = shouldReuse ? (lastSummary as CloseoutSummary) : {};
-            navigation.navigate('Summary', { transcription, summary: payload });
+            navigation.navigate('Summary', { transcription, summary: payload, ...(draftId ? { draftId } : {}) });
           }}
           accessibilityRole="button"
           accessibilityLabel="Next"
@@ -100,7 +198,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         </TouchableOpacity>
       ),
     });
-  }, [navigation, transcription, colors.accent, lastSummary, lastTranscription]);
+  }, [navigation, transcription, colors.accent, lastSummary, lastTranscription, draftId]);
 
   // Enhanced screen context with comprehensive field mapping
   const screenContext = useMemo((): ScreenContext => {
@@ -173,6 +271,22 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     try { setGlobalTranscription(transcription || ''); } catch {}
   }, [transcription, isEditing]);
 
+  // If transcription is missing but we have a draft id, hydrate from saved draft
+  useEffect(() => {
+    (async () => {
+      try {
+        if ((!transcription || transcription.trim() === '') && draftId) {
+          const d = await draftService.getDraftById(draftId);
+          if (d && d.transcription && d.transcription.trim().length) {
+            setTranscription(d.transcription);
+          }
+        }
+      } catch (e) {
+        // non-blocking
+      }
+    })();
+  }, [draftId]);
+
   const handleGenerateSummary = async () => {
     // Heuristic progress simulation based on transcription length
     const chars = transcription ? transcription.length : 0;
@@ -241,6 +355,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
       navigation.navigate('Summary', {
         transcription,
         summary: closeoutSummary,
+        ...(draftId ? { draftId } : {}),
       });
     } catch (error) {
       console.error('❌ Error generating summary:', error);
@@ -503,15 +618,38 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   <ScrollView style={[styles.scrollContainer]} contentContainerStyle={{ paddingBottom: 180 }}>
         <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <Text style={[styles.title, { fontSize: scaled(24), color: colors.textPrimary }]}>Voice Transcription</Text>
-          <TouchableOpacity
-            style={[styles.editButton, { backgroundColor: isEditing ? colors.accent : colors.surfaceAlt, borderColor: colors.border }, isEditing && { } ]}
-            onPress={handleModeToggle}
-          >
-            <Text style={[styles.editButtonText, { fontSize: scaled(14), color: isEditing ? colors.accentContrast : colors.textPrimary }]}>
-              {isEditing ? 'Done' : 'Edit'}
-            </Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TouchableOpacity
+              style={[styles.editButton, { backgroundColor: isEditing ? colors.accent : colors.surfaceAlt, borderColor: colors.border }]}
+              onPress={handleModeToggle}
+            >
+              <Text style={[styles.editButtonText, { fontSize: scaled(14), color: isEditing ? colors.accentContrast : colors.textPrimary }]}>
+                {isEditing ? 'Done' : 'Edit'}
+              </Text>
+            </TouchableOpacity>
+            <DraftSaveButton
+              compact
+              data={(lastSummary && (lastTranscription ?? '') === (transcription ?? '')) ? (lastSummary as CloseoutSummary) : ({ } as CloseoutSummary)}
+              draftId={draftId}
+              transcription={transcription}
+              checklist={checkedItems}
+              onSaved={(id) => { setDraftId(id); setCurrentDraftId(id); setSaveSignal(x => x + 1); }}
+              style={{ paddingHorizontal: 8, paddingVertical: 6 }}
+              disabled={!isDirty}
+              currentRoute="Transcript"
+            />
+          </View>
         </View>
+
+        {/* Editing Draft banner below header */}
+        {!!draftId && (
+          <View style={[styles.draftBanner, { borderColor: colors.accent, backgroundColor: colors.surface }]}> 
+            <Text style={[styles.draftBannerText, { color: colors.textPrimary }]}>Editing Draft</Text>
+            <TouchableOpacity onPress={handleExitPress} style={[styles.draftExitBtn, { borderColor: colors.accent }]}> 
+              <Text style={[styles.draftExitBtnText, { color: colors.accent }]}>Exit Draft</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         <View style={[styles.transcriptionCard, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}> 
           {isEditing ? (
@@ -636,6 +774,20 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#ffffff',
   },
+  draftBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 20,
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  draftBannerText: { fontWeight: '700' },
+  draftExitBtn: { paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderRadius: 8 },
+  draftExitBtnText: { fontWeight: '700' },
   scrollContainer: {
     flex: 1,
   },

@@ -6,10 +6,15 @@ import { CloseoutSummary } from '../types/aiAgent';
 export interface DraftItem {
   id: string;            // uuid
   timestamp: string;     // ISO string
+  title?: string;
   workOrder?: string;
   location?: string;
   transcription?: string;
   summary: CloseoutSummary;
+  // The last app route where this draft was saved from
+  lastSavedRoute?: 'Home' | 'Transcript' | 'Summary';
+  // Optional saved checklist progress for this draft
+  checklist?: Record<string, boolean>;
 }
 
 const STORAGE_KEY = 'email_drafts_v1';
@@ -74,16 +79,48 @@ class DraftService {
     await this.ensureLoaded();
     const id = draft.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const timestamp = draft.timestamp || new Date().toISOString();
+    const idx = this.cache.findIndex(d => d.id === id);
+    const prev = idx >= 0 ? this.cache[idx] : undefined;
+
+    // Helper to build default title from WO/Location
+    const buildDefaultTitle = (wo?: string, loc?: string) => {
+      const woT = (wo || '').trim();
+      const locT = (loc || '').trim();
+      const parts: string[] = [];
+      if (woT) parts.push(`WO ${woT}`);
+      if (locT) parts.push(locT);
+      return parts.length ? parts.join(' – ') : undefined;
+    };
+
+    // Resolve title according to rules:
+    // - If a new explicit title is provided (non-empty), use it
+    // - Else if saving from Summary and we have WO or Location, auto-title from them
+    // - Else preserve previous title if exists
+    let resolvedTitle = (draft.title || '').trim();
+    if (!resolvedTitle) {
+      const isSummary = draft.lastSavedRoute === 'Summary';
+      const hasWOOrLoc = !!(draft.workOrder?.trim() || draft.location?.trim());
+      if (isSummary && hasWOOrLoc) {
+        resolvedTitle = buildDefaultTitle(draft.workOrder, draft.location) || (prev?.title || '');
+      } else {
+        resolvedTitle = prev?.title || '';
+      }
+    }
+
+    // Merge with previous draft to avoid unintentionally wiping fields when omitted
     const item: DraftItem = {
       id,
       timestamp,
-      workOrder: draft.workOrder,
-      location: draft.location,
-      transcription: draft.transcription,
-      summary: draft.summary,
+      title: resolvedTitle || undefined,
+      workOrder: draft.workOrder ?? prev?.workOrder,
+      location: draft.location ?? prev?.location,
+      transcription: draft.transcription ?? prev?.transcription,
+      summary: draft.summary ?? prev?.summary as any,
+      lastSavedRoute: draft.lastSavedRoute ?? prev?.lastSavedRoute,
+      checklist: draft.checklist ?? prev?.checklist,
     };
+
     // Upsert by id: replace existing entry if present, else insert at top
-    const idx = this.cache.findIndex(d => d.id === id);
     if (idx >= 0) {
       // Remove the old entry and place the updated one at the top
       this.cache.splice(idx, 1);
@@ -116,6 +153,23 @@ class DraftService {
     this.cache = [];
     this.loaded = true;
     await this.persist();
+  }
+
+  /** Returns the most recently edited draft (newest timestamp) or null */
+  async getLatestDraft(): Promise<DraftItem | null> {
+    await this.ensureLoaded();
+    const list = [...this.cache];
+    if (!list.length) return null;
+    // cache is already sorted newest-first by prune(); be defensive
+    list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return list[0] ?? null;
+  }
+
+  /** Returns a draft by id or null if not found */
+  async getDraftById(id: string): Promise<DraftItem | null> {
+    await this.ensureLoaded();
+    const d = this.cache.find(x => x.id === id);
+    return d ? { ...d } : null;
   }
 }
 

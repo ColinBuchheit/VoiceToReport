@@ -1,5 +1,5 @@
 // voice-report-app/screens/SummaryScreen.tsx - UPDATED with Email Success Popup
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,8 @@ import { sendCloseoutEmail, generateSummary } from '../services/api';
 import emailHistoryService from '../services/emailHistoryService';
 import draftService from '../services/draftService';
 import AIAgent from '../components/AIAgent';
+import DraftSaveButton from '../components/DraftSaveButton';
+import useAutoSave from '../hooks/useAutoSave';
 import EmailSuccessPopup from '../components/EmailSuccessPopup';
 import DraftSavedPopup from '../components/DraftSavedPopup';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,12 +30,15 @@ import { useTheme } from '../context/ThemeContext';
 import { AIAgentService } from '../services/aiAgentService';
 import audioLockService from '../services/audioLockService';
 import { useSummary } from '../context/SummaryContext';
+import { useChecklist } from '../context/ChecklistContext';
+import { useReportSession } from '../context/ReportSessionContext';
+import { useTranscription } from '../context/TranscriptionContext';
 
 // Allowed scope status options (used by UI and validation)
 const SCOPE_STATUS_OPTIONS = [
   'Complete',
   'Incomplete',
-  'Incomplete – Revisit required',
+  'Incomplete - Revisit required',
   'Multi-day scope',
 ];
 
@@ -57,7 +62,7 @@ const normalizeScopeStatus = (raw?: string): string => {
     r.includes('come back') || r.includes('return visit') ||
     r.includes('not fully') || r.includes('in progress')
   ) {
-    return 'Incomplete – Revisit required';
+    return 'Incomplete - Revisit required';
   }
   // Multi-day variants
   if (r.includes('multi day') || r.includes('multi-day') || r.includes('multi‑day') || r.includes('multi day scope') || r.includes('multi-day scope') || r.includes('continuing') || r.includes('return tomorrow') || r.includes('next day')) {
@@ -177,7 +182,28 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const { scaled } = useFontScale();
   const { colors } = useTheme();
   const { lastTranscription, setSummary } = useSummary();
+  const { checkedItems, setAll, reset: resetChecklist } = useChecklist();
+  const { setCurrentDraftId, setJustExitedDraft } = useReportSession();
+  const { setTranscription } = useTranscription();
   // Initialize CloseoutSummary with proper field mapping
+  const sanitizeMaterials = (raw?: string): string => {
+    const text = (raw || '').trim();
+    if (!text) return '';
+    // Split by lines or commas for simple tokenization
+    const parts = text.split(/\n|,|;|\u2022|\-/).map(s => s.trim()).filter(Boolean);
+    const keep = parts.filter(p => {
+      const lower = p.toLowerCase();
+      const mentionsSupply = /(we\s+supplied|we\s+provided|supplier|provided|supplied|company[- ]?provided|our\s+(?:materials|parts))/i.test(lower);
+      const isInstalledOnly = /(installed|mounted|configured|replaced|setup|set up|wired|connected|commissioned)/i.test(lower);
+      // Keep if it explicitly mentions supply/provide/our materials; drop if looks like installed-only without supply mention
+      if (mentionsSupply) return true;
+      if (isInstalledOnly) return false;
+      // If ambiguous, keep conservative: require mention of supply
+      return false;
+    });
+    return keep.join(', ');
+  };
+
   const initializeCloseoutSummary = (summary: CloseoutSummary): CloseoutSummary => {
     console.log('🔧 Initializing CloseoutSummary from:', summary);
     
@@ -185,6 +211,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
       // Primary closeout fields
       onsite_contact: summary?.onsite_contact || '',
       support_contact: summary?.support_contact || '',
+      checked_in_with: (summary as any)?.checked_in_with || (summary as any)?.check_in_with || (summary as any)?.checkedInWith || '',
+      check_in_code: (summary as any)?.check_in_code || (summary as any)?.checkin_code || (summary as any)?.checkInCode || '',
       work_completed: summary?.work_completed || summary?.taskDescription || '',
       delays: summary?.delays || '',
   troubleshooting_steps: summary?.troubleshooting_steps || '',
@@ -198,7 +226,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
       
       // Expenses and materials
       expenses: summary?.expenses || '',
-      materials_used: summary?.materials_used || '',
+  materials_used: sanitizeMaterials(summary?.materials_used),
       
       // Out of scope work
       out_of_scope_work: summary?.out_of_scope_work || '',
@@ -228,6 +256,13 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const [showDraftSaved, setShowDraftSaved] = useState(false);
+  const [draftId, setDraftId] = useState<string | undefined>(route.params?.draftId);
+  // Ensure session marks active draft if navigated with draftId
+  useEffect(() => {
+    if (route.params?.draftId) {
+      setCurrentDraftId(route.params.draftId);
+    }
+  }, [route.params?.draftId]);
   const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [hasAutoSent, setHasAutoSent] = useState(false);
@@ -237,6 +272,72 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const [aiFieldUpdates, setAiFieldUpdates] = useState<Record<string, number>>({});
   const [fieldHistory, setFieldHistory] = useState<Record<string, { previous?: string; current: string }>>({});
   const [fieldHistoryMeta, setFieldHistoryMeta] = useState<Record<string, number>>({});
+  // Signal for external saves (e.g., DraftSaveButton) to refresh isDirty immediately
+  const [saveSignal, setSaveSignal] = useState(0);
+
+  // Auto-save drafts for safety
+  const { lastSaved, isDirty, saveNow } = useAutoSave(editableSummary, {
+    draftId,
+    workOrder: editableSummary.work_order,
+    location: editableSummary.location,
+    transcription: editableTranscription,
+    enabled: false,
+    interval: 30000,
+    currentRoute: 'Summary',
+    checklist: checkedItems,
+    externalSaveSignal: saveSignal,
+  });
+
+  // Hydrate from saved draft if params are missing
+  useEffect(() => {
+    (async () => {
+      try {
+        const missingSummary = !route.params?.summary || Object.values(route.params?.summary || {}).every(v => (v ?? '').toString().trim() === '');
+        const missingTrans = !route.params?.transcription || (route.params?.transcription || '').trim() === '';
+        if ((missingSummary || missingTrans) && draftId) {
+          const d = await draftService.getDraftById(draftId);
+          if (d) {
+            if (missingSummary && d.summary) setEditableSummary(initializeCloseoutSummary(d.summary));
+            if (missingTrans && d.transcription) setEditableTranscription(d.transcription);
+            // If checklist isn't present in context (empty), seed from draft
+            if (d.checklist) {
+              try { setAll(d.checklist); } catch {}
+            }
+          }
+        }
+      } catch {}
+    })();
+  }, [draftId]);
+
+  // Customize back button to go to Transcript when in a draft session
+  useLayoutEffect(() => {
+    if (!draftId) return;
+    navigation.setOptions({
+      headerLeft: () => (
+        <TouchableOpacity
+          onPress={async () => {
+            try {
+              // Prefer current editable transcription; if empty, hydrate from saved draft
+              let text = (editableTranscription || '').trim();
+              if (!text) {
+                const d = await draftService.getDraftById(draftId);
+                if (d?.transcription) text = d.transcription;
+              }
+              // Replace Summary with Transcript so back from Transcript goes to Home
+              // @ts-ignore navigation.replace is available on native stack
+              navigation.replace('Transcript', { transcription: text, draftId });
+            } catch {
+              // @ts-ignore
+              navigation.replace('Transcript', { transcription: editableTranscription || '', draftId });
+            }
+          }}
+          style={{ paddingHorizontal: 10, paddingVertical: 6 }}
+        >
+          <Ionicons name="chevron-back" size={22} color={colors.accent} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, draftId, editableTranscription, colors.accent]);
 
   // Highlight window (ms)
   const HIGHLIGHT_WINDOW_MS = 8000;
@@ -328,6 +429,14 @@ export default function SummaryScreen({ navigation, route }: Props) {
           synonyms: ['support', 'support contact', 'it contact', 'helped by', 'support person']
         },
         {
+          name: 'checked_in_with',
+          label: 'Who did you check in with?',
+          type: 'text',
+          currentValue: editableSummary.checked_in_with || '',
+          isEditable: true,
+          synonyms: ['check in with', 'checked in with', 'checked-in with', 'checkin with', 'front desk', 'manager at check-in']
+        },
+        {
           name: 'work_completed',
           label: 'What work was completed?',
           type: 'multiline',
@@ -365,7 +474,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
           type: 'text',
           currentValue: editableSummary.released_by || '',
           isEditable: true,
-          synonyms: ['released by', 'signed off by', 'released', 'approved by', 'release']
+          synonyms: ['released by', 'signed off by', 'released', 'approved by', 'release', 'checked out with', 'check out with', 'checked-out with', 'checkout with']
         },
         {
           name: 'release_code',
@@ -373,7 +482,15 @@ export default function SummaryScreen({ navigation, route }: Props) {
           type: 'text',
           currentValue: editableSummary.release_code || '',
           isEditable: true,
-          synonyms: ['release code', 'confirmation code', 'reference number', 'ticket', 'code']
+          synonyms: ['release code', 'confirmation code', 'reference number', 'ticket', 'code', 'check out code', 'checkout code']
+        },
+        {
+          name: 'check_in_code',
+          label: 'Check-In Code',
+          type: 'text',
+          currentValue: editableSummary.check_in_code || '',
+          isEditable: true,
+          synonyms: ['check in code', 'check-in code', 'checkin code', 'check code', 'site check in code']
         },
         {
           name: 'return_tracking',
@@ -417,7 +534,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
         },
         {
           name: 'transcription',
-          label: 'Original Transcript',
+          label: 'Transcription',
           type: 'multiline',
           currentValue: editableTranscription || '',
           isEditable: false,
@@ -522,7 +639,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
       // If this Summary originated from a draft, remove the draft once successfully sent
       try {
-        const did = route.params?.draftId;
+        const did = draftId || route.params?.draftId;
         if (did) {
           await draftService.deleteDraft(did);
         }
@@ -563,22 +680,30 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
   const handleSuccessComplete = () => {
     setShowSuccessPopup(false);
-    // Navigate to Home after popup closes
-    navigation.navigate('Home');
+    // Fully reset session and return Home on fresh slate after successful send
+    try { setTranscription(''); } catch {}
+    try { resetChecklist(); } catch {}
+    try { setSummary({} as any, ''); } catch {}
+    setCurrentDraftId(undefined);
+    setJustExitedDraft(true);
+    // Reset the navigation stack to Home
+    navigation.reset({ index: 0, routes: [{ name: 'Home' as any }] });
   };
 
   const handleSaveDraft = async () => {
     try {
       await draftService.addDraft({
-        id: route.params?.draftId,
+        id: draftId,
         workOrder: editableSummary.work_order,
         location: editableSummary.location,
         transcription: editableTranscription,
         summary: editableSummary,
+        lastSavedRoute: 'Summary',
+        checklist: checkedItems,
       });
-  setShowDraftSaved(true);
+      setShowDraftSaved(true);
     } catch (e) {
-  alert('Failed to save draft');
+      alert('Failed to save draft');
     }
   };
 
@@ -682,8 +807,100 @@ export default function SummaryScreen({ navigation, route }: Props) {
     console.log('═══════════════════════════════════════════════════════');
   };
 
+  // Build a single block of text for easy copy/paste sharing
+  const buildCopyPasteSummary = (): string => {
+    const s = editableSummary;
+    const lines: string[] = [];
+    lines.push('JOB DETAILS');
+    if (s.work_order) lines.push(`Work Order #: ${s.work_order}`);
+    if (s.location) lines.push(`Location: ${s.location}`);
+    if (s.technician_name) lines.push(`Technician Name: ${s.technician_name}`);
+    lines.push('');
+
+    lines.push('SERVICE SUMMARY');
+    if (s.scope_completed) lines.push(`Scope Status: ${s.scope_completed}`);
+    if (s.checked_in_with) lines.push(`Checked In With: ${s.checked_in_with}`);
+    if (s.check_in_code) lines.push(`Check In Code: ${s.check_in_code}`);
+    if (s.onsite_contact) lines.push(`On-Site Contact: ${s.onsite_contact}`);
+    if (s.support_contact) lines.push(`Support Contact: ${s.support_contact}`);
+    if (s.released_by) lines.push(`Released By: ${s.released_by}`);
+    if (s.release_code) lines.push(`Release Code: ${s.release_code}`);
+    if (editableTranscription) lines.push(`Transcription: ${editableTranscription}`);
+    lines.push('');
+
+    lines.push('TECHNICAL INFORMATION');
+    if (s.work_completed) lines.push(`Work Completed: ${s.work_completed}`);
+    if (s.troubleshooting_steps) lines.push(`Troubleshooting Steps: ${s.troubleshooting_steps}`);
+    if (s.delays) lines.push(`Delays & Issues: ${s.delays}`);
+    if (s.out_of_scope_work) lines.push(`Out of Scope Work: ${s.out_of_scope_work}`);
+    lines.push('');
+
+    lines.push('CLOSEOUT DETAILS');
+    if (s.return_tracking) lines.push(`Return Tracking: ${s.return_tracking}`);
+    if (s.materials_used) lines.push(`Materials Used: ${s.materials_used}`);
+    if (s.expenses) lines.push(`Expenses: ${s.expenses}`);
+    if (s.photos_uploaded) lines.push(`Photos Uploaded: ${s.photos_uploaded}`);
+
+    return lines.join('\n');
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }] }>
+      {/* Editing Draft banner */}
+      {!!draftId && (
+        <View style={[styles.draftBanner, { borderColor: colors.accent, backgroundColor: colors.surface }]}> 
+          <Text style={[styles.draftBannerText, { color: colors.textPrimary }]}>Editing Draft</Text>
+          <TouchableOpacity onPress={() => {
+            const doExit = () => {
+              setShowSuccessPopup(false);
+              try { setTranscription(''); } catch {}
+              try { resetChecklist(); } catch {}
+              try { setSummary({} as any, ''); } catch {}
+              setCurrentDraftId(undefined);
+              setJustExitedDraft(true);
+              navigation.reset({ index: 0, routes: [{ name: 'Home' as any }] });
+            };
+
+            if (isDirty) {
+              Alert.alert(
+                'Unsaved changes',
+                'Do you want to save your changes before exiting?',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Discard', style: 'destructive', onPress: () => doExit() },
+                  { text: 'Save', onPress: async () => {
+                      try {
+                        const wo = (editableSummary.work_order || '').trim();
+                        const loc = (editableSummary.location || '').trim();
+                        const parts: string[] = [];
+                        if (wo) parts.push(`WO ${wo}`);
+                        if (loc) parts.push(loc);
+                        const title = parts.length ? parts.join(' – ') : undefined;
+                        const d = await draftService.addDraft({
+                          id: draftId,
+                          title,
+                          workOrder: editableSummary.work_order,
+                          location: editableSummary.location,
+                          transcription: editableTranscription,
+                          summary: editableSummary,
+                          lastSavedRoute: 'Summary',
+                          checklist: checkedItems,
+                        });
+                        setDraftId(d.id);
+                      } catch {}
+                      doExit();
+                    }
+                  },
+                ]
+              );
+            } else {
+              doExit();
+            }
+          }} style={[styles.draftExitBtn, { borderColor: colors.accent }]}> 
+            <Text style={[styles.draftExitBtnText, { color: colors.accent }]}>Exit Draft</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       {/* Regeneration banner when transcription changed since last generated summary */}
       {needsRegenerate && (
         <View style={[styles.regenBanner, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
@@ -701,20 +918,10 @@ export default function SummaryScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         </View>
       )}
-      <ScrollView style={styles.scrollContainer} contentContainerStyle={{ paddingBottom: 180 }}>
-        {/* CLOSEOUT NOTES SECTION */}
+  <ScrollView style={styles.scrollContainer} contentContainerStyle={{ paddingBottom: 180 }}>
+        {/* JOB DETAILS SECTION */}
         <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]} accessibilityRole="header">CLOSEOUT NOTES</Text>
-          
-          <EditableField
-            label="Who did you meet with on-site?"
-            value={editableSummary.onsite_contact || ''}
-            onChangeText={(text) => updateSummaryField('onsite_contact', text)}
-            isEditing={true}
-            placeholder="Name and role of on-site contact person..."
-            scaled={scaled}
-            highlight={shouldHighlight('onsite_contact')}
-          />
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>JOB DETAILS</Text>
 
           <EditableField
             label="Work Order #"
@@ -745,49 +952,11 @@ export default function SummaryScreen({ navigation, route }: Props) {
             scaled={scaled}
             highlight={shouldHighlight('technician_name')}
           />
+        </View>
 
-          <EditableField
-            label="Who did you work with for support?"
-            value={editableSummary.support_contact || ''}
-            onChangeText={(text) => updateSummaryField('support_contact', text)}
-            isEditing={true}
-            placeholder="Support team members or remote assistance..."
-            scaled={scaled}
-            highlight={shouldHighlight('support_contact')}
-          />
-
-          <EditableField
-            label="What work was completed?"
-            value={editableSummary.work_completed || ''}
-            onChangeText={(text) => updateSummaryField('work_completed', text)}
-            isEditing={true}
-            multiline
-            placeholder="Describe all tasks and work that was completed..."
-            scaled={scaled}
-            highlight={shouldHighlight('work_completed')}
-          />
-
-          <EditableField
-            label="Were there any delays?"
-            value={editableSummary.delays || ''}
-            onChangeText={(text) => updateSummaryField('delays', text)}
-            isEditing={true}
-            multiline
-            placeholder="Any delays encountered and reasons..."
-            scaled={scaled}
-            highlight={shouldHighlight('delays')}
-          />
-
-          <EditableField
-            label="What troubleshooting steps did you take?"
-            value={editableSummary.troubleshooting_steps || ''}
-            onChangeText={(text) => updateSummaryField('troubleshooting_steps', text)}
-            isEditing={true}
-            multiline
-            placeholder="Describe debugging or problem-solving steps..."
-            scaled={scaled}
-            highlight={shouldHighlight('troubleshooting_steps')}
-          />
+        {/* SERVICE SUMMARY SECTION */}
+        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>SERVICE SUMMARY</Text>
 
           {/* Scope Status - dropdown selector */}
           <View style={styles.fieldContainer}>
@@ -804,16 +973,49 @@ export default function SummaryScreen({ navigation, route }: Props) {
               <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
-        </View>
 
-        
-
-        {/* SIGN-OFF & TRACKING SECTION */}
-        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>SIGN-OFF & TRACKING</Text>
-          
           <EditableField
-            label="Who released you?"
+            label="Checked In With"
+            value={editableSummary.checked_in_with || ''}
+            onChangeText={(text) => updateSummaryField('checked_in_with', text)}
+            isEditing={true}
+            placeholder="Front desk or person you checked in with..."
+            scaled={scaled}
+            highlight={shouldHighlight('checked_in_with')}
+          />
+
+          <EditableField
+            label="Check In Code"
+            value={editableSummary.check_in_code || ''}
+            onChangeText={(text) => updateSummaryField('check_in_code', text)}
+            isEditing={true}
+            placeholder="Enter the check-in code if applicable..."
+            scaled={scaled}
+            highlight={shouldHighlight('check_in_code')}
+          />
+
+          <EditableField
+            label="On-Site Contact"
+            value={editableSummary.onsite_contact || ''}
+            onChangeText={(text) => updateSummaryField('onsite_contact', text)}
+            isEditing={true}
+            placeholder="Name and role of on-site contact person..."
+            scaled={scaled}
+            highlight={shouldHighlight('onsite_contact')}
+          />
+
+          <EditableField
+            label="Support Contact"
+            value={editableSummary.support_contact || ''}
+            onChangeText={(text) => updateSummaryField('support_contact', text)}
+            isEditing={true}
+            placeholder="Support team members or remote assistance..."
+            scaled={scaled}
+            highlight={shouldHighlight('support_contact')}
+          />
+
+          <EditableField
+            label="Released By"
             value={editableSummary.released_by || ''}
             onChangeText={(text) => updateSummaryField('released_by', text)}
             isEditing={true}
@@ -827,35 +1029,85 @@ export default function SummaryScreen({ navigation, route }: Props) {
             value={editableSummary.release_code || ''}
             onChangeText={(text) => updateSummaryField('release_code', text)}
             isEditing={true}
-            placeholder="Enter release code if applicable..."
+            placeholder="Enter release/authorization code if applicable..."
             scaled={scaled}
             highlight={shouldHighlight('release_code')}
           />
 
           <EditableField
-            label="Return Tracking #"
+            label="Transcription"
+            value={editableTranscription}
+            onChangeText={setEditableTranscription}
+            isEditing={true}
+            multiline
+            placeholder="Original voice transcription..."
+            scaled={scaled}
+            highlight={shouldHighlight('transcription')}
+            highlightBadge="AI revised"
+          />
+        </View>
+
+        {/* TECHNICAL INFORMATION SECTION */}
+        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>TECHNICAL INFORMATION</Text>
+
+          <EditableField
+            label="Work Completed"
+            value={editableSummary.work_completed || ''}
+            onChangeText={(text) => updateSummaryField('work_completed', text)}
+            isEditing={true}
+            multiline
+            placeholder="Describe all tasks and work that was completed..."
+            scaled={scaled}
+            highlight={shouldHighlight('work_completed')}
+          />
+
+          <EditableField
+            label="Troubleshooting Steps"
+            value={editableSummary.troubleshooting_steps || ''}
+            onChangeText={(text) => updateSummaryField('troubleshooting_steps', text)}
+            isEditing={true}
+            multiline
+            placeholder="Describe debugging or problem-solving steps..."
+            scaled={scaled}
+            highlight={shouldHighlight('troubleshooting_steps')}
+          />
+
+          <EditableField
+            label="Delays & Issues"
+            value={editableSummary.delays || ''}
+            onChangeText={(text) => updateSummaryField('delays', text)}
+            isEditing={true}
+            multiline
+            placeholder="Any delays encountered and reasons..."
+            scaled={scaled}
+            highlight={shouldHighlight('delays')}
+          />
+
+          <EditableField
+            label="Out of Scope Work"
+            value={editableSummary.out_of_scope_work || ''}
+            onChangeText={(text) => updateSummaryField('out_of_scope_work', text)}
+            isEditing={true}
+            multiline
+            placeholder="Describe any work outside the original scope..."
+            scaled={scaled}
+            highlight={shouldHighlight('out_of_scope_work')}
+          />
+        </View>
+
+  {/* CLOSEOUT DETAILS SECTION */}
+        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>CLOSEOUT DETAILS</Text>
+
+          <EditableField
+            label="Return Tracking"
             value={editableSummary.return_tracking || ''}
             onChangeText={(text) => updateSummaryField('return_tracking', text)}
             isEditing={true}
             placeholder="Enter return tracking number..."
             scaled={scaled}
             highlight={shouldHighlight('return_tracking')}
-          />
-        </View>
-
-        {/* EXPENSES & MATERIALS SECTION */}
-        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>EXPENSES & MATERIALS</Text>
-          
-          <EditableField
-            label="Expenses"
-            value={editableSummary.expenses || ''}
-            onChangeText={(text) => updateSummaryField('expenses', text)}
-            isEditing={true}
-            multiline
-            placeholder="List any expenses incurred..."
-            scaled={scaled}
-            highlight={shouldHighlight('expenses')}
           />
 
           <EditableField
@@ -868,21 +1120,16 @@ export default function SummaryScreen({ navigation, route }: Props) {
             scaled={scaled}
             highlight={shouldHighlight('materials_used')}
           />
-        </View>
 
-        {/* ADDITIONAL INFORMATION SECTION */}
-        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>ADDITIONAL INFORMATION</Text>
-          
           <EditableField
-            label="Out of Scope Work"
-            value={editableSummary.out_of_scope_work || ''}
-            onChangeText={(text) => updateSummaryField('out_of_scope_work', text)}
+            label="Expenses"
+            value={editableSummary.expenses || ''}
+            onChangeText={(text) => updateSummaryField('expenses', text)}
             isEditing={true}
             multiline
-            placeholder="Describe any work outside the original scope..."
+            placeholder="List any expenses incurred..."
             scaled={scaled}
-            highlight={shouldHighlight('out_of_scope_work')}
+            highlight={shouldHighlight('expenses')}
           />
 
           <EditableField
@@ -890,32 +1137,32 @@ export default function SummaryScreen({ navigation, route }: Props) {
             value={editableSummary.photos_uploaded || ''}
             onChangeText={(text) => updateSummaryField('photos_uploaded', text)}
             isEditing={true}
-            multiline
-            placeholder="List photos taken and uploaded..."
+            placeholder="Number or description of photos uploaded..."
             scaled={scaled}
             highlight={shouldHighlight('photos_uploaded')}
           />
         </View>
 
-        {/* ORIGINAL TRANSCRIPTION SECTION */}
-        <View style={styles.transcriptionSection}>
-          <View style={[styles.transcriptionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>ORIGINAL TRANSCRIPTION</Text>
-            <EditableField
-              label=""
-              value={editableTranscription}
-              onChangeText={setEditableTranscription}
-              isEditing={true}
-              multiline
-              placeholder="Original voice transcription..."
-              scaled={scaled}
-              highlight={shouldHighlight('transcription')}
-              highlightBadge="AI revised"
-            />
-          </View>
+        {/* COPY/PASTE SUMMARY SECTION */}
+        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>Copy/Paste Summary</Text>
+          <Text
+            selectable
+            style={{
+              color: colors.textPrimary,
+              backgroundColor: colors.surfaceAlt,
+              borderColor: colors.border,
+              borderWidth: 1,
+              borderRadius: 8,
+              padding: 12,
+              lineHeight: 20,
+            }}
+          >
+            {buildCopyPasteSummary()}
+          </Text>
         </View>
 
-        {/* SEND/SAVE BUTTONS */}
+        {/* Auto-save status + SEND/SAVE BUTTONS */}
         <View style={styles.actionButtons}>
           <TouchableOpacity
             style={[styles.primaryButton, { backgroundColor: colors.accent }, isSendingEmail && styles.buttonDisabled]}
@@ -928,13 +1175,27 @@ export default function SummaryScreen({ navigation, route }: Props) {
               <Text style={[styles.buttonText, { fontSize: scaled(16), color: colors.accentContrast || '#fff' }]}>Send Email Report</Text>
             )}
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.secondaryButton, { backgroundColor: colors.accent }]}
-            onPress={handleSaveDraft}
-            disabled={isSendingEmail}
-          >
-            <Text style={[styles.buttonText, { fontSize: scaled(16), color: colors.accentContrast || '#fff' }]}>Save Draft</Text>
-          </TouchableOpacity>
+          <DraftSaveButton
+            data={editableSummary}
+            draftId={draftId}
+            workOrder={editableSummary.work_order}
+            location={editableSummary.location}
+            transcription={editableTranscription}
+            checklist={checkedItems}
+            onSaved={(id) => { setDraftId(id); setCurrentDraftId(id); setShowDraftSaved(true); setSaveSignal(x => x + 1); }}
+            style={styles.secondaryButton}
+            disabled={!isDirty || isSendingEmail}
+            currentRoute="Summary"
+            requireNameOnFirstSave={!(editableSummary.work_order?.trim() || editableSummary.location?.trim())}
+          />
+        </View>
+        {/* Save status indicator (single source of truth: the Save button above) */}
+        <View style={{ paddingHorizontal: 20, marginTop: 6 }}>
+          {isDirty ? (
+            <Text style={{ color: colors.textSecondary }}>• Unsaved changes</Text>
+          ) : lastSaved ? (
+            <Text style={{ color: colors.textSecondary }}>Saved {lastSaved.toLocaleTimeString()}</Text>
+          ) : null}
         </View>
       </ScrollView>
 
@@ -1008,6 +1269,20 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8f9fa',
   },
+  draftBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 20,
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  draftBannerText: { fontWeight: '700' },
+  draftExitBtn: { paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderRadius: 8 },
+  draftExitBtnText: { fontWeight: '700' },
   scrollContainer: {
     flex: 1,
     paddingTop: 20,

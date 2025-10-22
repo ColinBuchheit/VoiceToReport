@@ -35,6 +35,8 @@ interface EmailHistorySidebarProps {
   onEmailSelect?: (email: EmailHistoryItem) => void;
   /** Legacy prop name kept for backward compatibility */
   onSelectEmail?: (email: EmailHistoryItem) => void;
+  /** If provided, the draft with this id is currently being edited and should be disabled/grayed out */
+  currentDraftId?: string;
 }
 
 export default function EmailHistorySidebar({
@@ -42,6 +44,7 @@ export default function EmailHistorySidebar({
   onClose,
   onEmailSelect,
   onSelectEmail,
+  currentDraftId,
 }: EmailHistorySidebarProps) {
   const { colors, isDark } = useTheme();
   const { scaled } = useFontScale();
@@ -292,6 +295,8 @@ export default function EmailHistorySidebar({
         location: d.location,
         transcription: d.transcription,
         summary: d.summary,
+        lastSavedRoute: d.lastSavedRoute,
+        checklist: d.checklist,
       });
       await loadHistory();
       // Ensure fresh animation values for this restored draft
@@ -743,6 +748,7 @@ export default function EmailHistorySidebar({
                         },
                       });
 
+                      const isCurrent = currentDraftId && draft.id === currentDraftId;
                       return (
                         <View key={draft.id} style={styles.swipeContainer}>
                           <Animated.View style={[styles.swipeUnderlay, { opacity: deleteProgress }]}>
@@ -767,11 +773,12 @@ export default function EmailHistorySidebar({
                                 ],
                                 opacity: opacityAnim,
                               },
+                              isCurrent ? { opacity: 0.55 } : null,
                             ]}
                           >
                             <TouchableOpacity
                               activeOpacity={0.85}
-                              onPress={() => {
+                              onPress={isCurrent ? undefined : () => {
                                 // Open as Summary with draft payload
                                 try { (onEmailSelect || onSelectEmail)?.({
                                   id: draft.id,
@@ -783,15 +790,23 @@ export default function EmailHistorySidebar({
                                   rawBody: undefined,
                                   _isDraft: true,
                                   _draftId: draft.id,
+                                  _lastSavedRoute: draft.lastSavedRoute,
+                                  checklist: draft.checklist,
                                 } as any); } catch {}
                               }}
                             >
                               <Text style={[styles.rowTitle, { color: colors.textPrimary, fontSize: scaled(14) }]} numberOfLines={1}>
-                                {draft.location || 'Unknown Location'} • WO {draft.workOrder || 'N/A'}
+                                {draft.title?.trim() ? draft.title.trim() : `${draft.location || 'Unknown Location'} • WO ${draft.workOrder || 'N/A'}`}
                               </Text>
-                              <Text style={[styles.rowMeta, { color: colors.textSecondary, fontSize: scaled(12) }]} numberOfLines={1}>
-                                Draft • {formatDateTime(draft.timestamp)}
-                              </Text>
+                              {isCurrent ? (
+                                <Text style={[styles.rowMeta, { color: colors.accent, fontSize: scaled(12), fontWeight: '700' }]} numberOfLines={1}>
+                                  Editing now
+                                </Text>
+                              ) : (
+                                <Text style={[styles.rowMeta, { color: colors.textSecondary, fontSize: scaled(12) }]} numberOfLines={1}>
+                                  Draft • {formatDateTime(draft.timestamp)}
+                                </Text>
+                              )}
                             </TouchableOpacity>
                           </Animated.View>
                         </View>

@@ -151,7 +151,7 @@ class EmailService:
             technician_email = None
         logo_src = logo_src_override or self._get_logo_base64()
 
-        # Ensure all 17 fields appear in the structured sections
+        # Ensure all fields appear in the structured sections in the required order
         field_groups = [
             {"title": "Job Details", "fields": [
                 ("work_order", "Work Order #"),
@@ -159,28 +159,26 @@ class EmailService:
                 ("technician_name", "Technician Name"),
             ]},
             {"title": "Service Summary", "fields": [
+                ("scope_completed", "Scope Status"),
+                ("checked_in_with", "Checked In With"),
+                ("check_in_code", "Check In Code"),
                 ("onsite_contact", "On-Site Contact"),
                 ("support_contact", "Support Contact"),
-                ("work_completed", "Work Completed"),
-                ("scope_completed", "Scope Status"),
-            ]},
-            {"title": "Technical Information", "fields": [
-                ("delays", "Delays & Issues"),
-                ("troubleshooting_steps", "Troubleshooting Steps"),
-            ]},
-            {"title": "Closeout Details", "fields": [
                 ("released_by", "Released By"),
                 ("release_code", "Release Code"),
-                ("return_tracking", "Return Tracking"),
+                ("transcription", "Transcription"),  # special-case value from argument
             ]},
-            {"title": "Resources", "fields": [
-                ("photos_uploaded", "Photos Uploaded"),
-                ("expenses", "Expenses"),
-                ("materials_used", "Materials Used"),
-            ]},
-            {"title": "Additional Notes", "fields": [
+            {"title": "Technical Information", "fields": [
+                ("work_completed", "Work Completed"),
+                ("troubleshooting_steps", "Troubleshooting Steps"),
+                ("delays", "Delays & Issues"),
                 ("out_of_scope_work", "Out of Scope Work"),
-                ("notes", "Notes"),
+            ]},
+            {"title": "Closeout Details", "fields": [
+                ("return_tracking", "Return Tracking"),
+                ("materials_used", "Materials Used"),
+                ("expenses", "Expenses"),
+                ("photos_uploaded", "Photos Uploaded"),
             ]},
         ]
 
@@ -209,7 +207,11 @@ class EmailService:
             </tr>
             """
             for field_name, label in group["fields"]:
-                value = self._value_for(closeout_data, field_name)
+                # Special-case: transcription value comes from argument, not summary
+                if field_name == 'transcription':
+                    value = transcription
+                else:
+                    value = self._value_for(closeout_data, field_name)
                 value_cmp = value.strip() if isinstance(value, str) else value
                 if value_cmp not in HIDE_VALUES:
                     group_html += f"""
@@ -229,26 +231,8 @@ class EmailService:
                     """
             sections_html += group_html
 
+        # Transcription is only shown within the Service Summary section
         transcription_html = ""
-        if transcription and str(transcription).strip() and transcription != 'Not specified':
-            transcription_html = f"""
-            <tr>
-                <td style=\"padding: 20px 0 12px 0;\">
-                    <h2 class=\"section-title\" style=\"margin:0; font-size:12px; font-weight:700; color:#9CA3AF; text-transform:uppercase; letter-spacing:0.08em;\">Voice Transcription</h2>
-                </td>
-            </tr>
-            <tr>
-                <td style=\"padding: 8px 0 16px 0;\">
-                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"background-color:#FFF9F6; border:1px solid #FFE9DA; border-radius:10px;\">
-                        <tr>
-                            <td style=\"padding:14px 16px;\">
-                                <div style=\"font-size:14px; line-height:1.7; color:#374151; font-style:normal;\">{transcription}</div>
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-            """
 
         # Build a simplified, ordered copy block for easy paste into emails or portals
         copy_lines: list[str] = []
@@ -261,22 +245,23 @@ class EmailService:
             else:
                 copy_lines.append(f"Technician - {technician_email}")
 
-        # Canonical order and labels
-        # Exclude Location and Work Order from the Copy/Paste section
+        # Canonical order and labels for copy/paste block (omit Location/WO header badge)
         ordered_fields: list[tuple[str, str]] = [
+            ("scope_completed", "Scope Status"),
+            ("checked_in_with", "Checked In With"),
+            ("check_in_code", "Check In Code"),
             ("onsite_contact", "On-Site Contact"),
             ("support_contact", "Support Contact"),
-            ("work_completed", "Work Completed"),
-            ("scope_completed", "Scope Status"),
-            ("troubleshooting_steps", "Troubleshooting Steps"),
-            ("delays", "Delays & Issues"),
             ("released_by", "Released By"),
             ("release_code", "Release Code"),
-            ("return_tracking", "Return Tracking"),
-            ("photos_uploaded", "Photos Uploaded"),
-            ("expenses", "Expenses"),
-            ("materials_used", "Materials Used"),
+            ("work_completed", "Work Completed"),
+            ("troubleshooting_steps", "Troubleshooting Steps"),
+            ("delays", "Delays & Issues"),
             ("out_of_scope_work", "Out of Scope Work"),
+            ("return_tracking", "Return Tracking"),
+            ("materials_used", "Materials Used"),
+            ("expenses", "Expenses"),
+            ("photos_uploaded", "Photos Uploaded"),
             ("notes", "Notes"),
         ]
 
@@ -288,9 +273,11 @@ class EmailService:
                 # Prefer dash formatting for quick paste
                 copy_lines.append(f"{label} - {value}")
 
-        # Append transcription at end if available
-        if transcription and str(transcription).strip() and str(transcription) not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no']:
-            copy_lines.append("Transcription - " + str(transcription).strip())
+        # Include transcription at the end of the copy/paste block (single-line for easy paste)
+        if isinstance(transcription, str):
+            tx = transcription.strip()
+            if tx:
+                copy_lines.append(f"Transcription - {tx}")
 
         # Use HTML line breaks for better mobile compatibility; sanitize each line to preserve <br>
         sanitized_lines = [line.replace('<', '\u27e8').replace('>', '\u27e9') for line in copy_lines]
@@ -410,7 +397,6 @@ class EmailService:
                                 <td style=\"padding: 18px 28px 28px 28px;\">\n
                                     <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\">\n
                                         {sections_html}
-                                        {transcription_html}
                                         {copy_paste_html}
                                     </table>
                                 </td>
