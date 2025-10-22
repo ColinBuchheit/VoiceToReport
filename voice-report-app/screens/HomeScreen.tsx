@@ -1,5 +1,5 @@
 // voice-report-app/screens/HomeScreen.tsx - COMPLETE VERSION WITH ALL FIXES
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { View, Text, StyleSheet, Alert, Image, ScrollView, TouchableOpacity, Platform, TextInput, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, Animated } from 'react-native';
 import { useFontScale } from '../context/FontScaleContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +19,7 @@ import { RootStackParamList } from '../App';
 import Recorder from '../components/Recorder';
 import EmailHistorySidebar from '../components/EmailHistorySidebar';
 import { transcribeAudio } from '../services/api';
+import { useSummary } from '../context/SummaryContext';
 import SettingsModal from '../components/SettingsModal'; // explicit import; TS should resolve .tsx
 import audioLockService from '../services/audioLockService';
 import emailHistoryService, { EmailHistoryItem } from '../services/emailHistoryService';
@@ -72,6 +73,7 @@ function HomeScreenInner({ navigation }: Props) {
   const [showSettings, setShowSettings] = useState(false); // Settings modal visibility
   const { checkedItems, toggleItem, reset } = useChecklist();
   const { transcription, setTranscription } = useTranscription();
+  const { setSummary } = useSummary();
   const { showReportProgressBar, showBottomBarBackground } = useSettings();
   const manualInputRef = useRef<TextInput | null>(null);
   // Hold-to-clear state for manual input
@@ -310,6 +312,8 @@ function HomeScreenInner({ navigation }: Props) {
     console.log('📧 Selected email transcription length:', email.transcription?.length || 0);
     console.log('📧 Transcription preview:', email.transcription ? email.transcription.slice(0, 100) : 'EMPTY');
     const draftId = (email as any)?._draftId as string | undefined;
+    // Seed summary context so forward/back preserves it
+    try { if (email.summary) setSummary(email.summary, email.transcription || ''); } catch {}
     navigation.navigate('Summary', {
       transcription: email.transcription || '',
       summary: email.summary,
@@ -328,6 +332,24 @@ function HomeScreenInner({ navigation }: Props) {
   const bottomNavOverlaySpace = 160 + (Platform.OS === 'ios' ? insets.bottom : 0);
 
   // SettingsModal extracted to separate component to prevent remounts on each render (which caused flicker during recording updates)
+
+  // Add forward button in header to proceed to Transcript without losing input
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={() => {
+            navigation.navigate('Transcript', { transcription: transcription || '' });
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Next"
+          style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+        >
+          <Ionicons name="chevron-forward" size={22} color={colors.accent} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, transcription, colors.accent]);
 
   return (
   <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.container, { backgroundColor: colors.background }]}> 

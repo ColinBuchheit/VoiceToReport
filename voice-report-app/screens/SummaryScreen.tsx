@@ -8,22 +8,64 @@ import {
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
+  Alert,
+  Modal,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
-import { sendCloseoutEmail } from '../services/api';
+import { sendCloseoutEmail, generateSummary } from '../services/api';
 import emailHistoryService from '../services/emailHistoryService';
 import draftService from '../services/draftService';
 import AIAgent from '../components/AIAgent';
 import EmailSuccessPopup from '../components/EmailSuccessPopup';
 import DraftSavedPopup from '../components/DraftSavedPopup';
+import { Ionicons } from '@expo/vector-icons';
 import { CloseoutSummary, ScreenContext } from '../types/aiAgent';
 import { useFontScale } from '../context/FontScaleContext';
 import userProfileService from '../services/userProfileService';
 import { useTheme } from '../context/ThemeContext';
 import { AIAgentService } from '../services/aiAgentService';
 import audioLockService from '../services/audioLockService';
+import { useSummary } from '../context/SummaryContext';
+
+// Allowed scope status options (used by UI and validation)
+const SCOPE_STATUS_OPTIONS = [
+  'Complete',
+  'Incomplete',
+  'Incomplete – Revisit required',
+  'Multi-day scope',
+];
+
+// Normalize free-text/AI strings to one of the allowed scope statuses
+const normalizeScopeStatus = (raw?: string): string => {
+  if (!raw) return '';
+  const r = raw.trim().toLowerCase();
+  // Straight matches first
+  if (r === 'complete' || r === 'completed' || r === 'done' || r === 'finished' || r === 'success' || r === 'yes' || r === 'fully complete' || r === 'fully completed') {
+    return 'Complete';
+  }
+  if (r === 'incomplete' || r === 'not complete' || r === 'not completed' || r === 'no' || r === 'did not complete' || r === 'unfinished') {
+    return 'Incomplete';
+  }
+  // Partial variants and phrases implying a follow-up/revisit
+  if (
+    r.includes('partial') ||
+    r.includes('partially') ||
+    r.includes('revisit') ||
+    r.includes('follow up') || r.includes('follow-up') ||
+    r.includes('come back') || r.includes('return visit') ||
+    r.includes('not fully') || r.includes('in progress')
+  ) {
+    return 'Incomplete – Revisit required';
+  }
+  // Multi-day variants
+  if (r.includes('multi day') || r.includes('multi-day') || r.includes('multi‑day') || r.includes('multi day scope') || r.includes('multi-day scope') || r.includes('continuing') || r.includes('return tomorrow') || r.includes('next day')) {
+    return 'Multi-day scope';
+  }
+  // Unknown => leave blank so UI requires explicit choice
+  return '';
+};
 
 type SummaryScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -134,18 +176,19 @@ export default function SummaryScreen({ navigation, route }: Props) {
   );
   const { scaled } = useFontScale();
   const { colors } = useTheme();
+  const { lastTranscription, setSummary } = useSummary();
   // Initialize CloseoutSummary with proper field mapping
   const initializeCloseoutSummary = (summary: CloseoutSummary): CloseoutSummary => {
     console.log('🔧 Initializing CloseoutSummary from:', summary);
     
-    const result: CloseoutSummary = {
+  const result: CloseoutSummary = {
       // Primary closeout fields
       onsite_contact: summary?.onsite_contact || '',
       support_contact: summary?.support_contact || '',
       work_completed: summary?.work_completed || summary?.taskDescription || '',
       delays: summary?.delays || '',
-      troubleshooting_steps: summary?.troubleshooting_steps || '',
-      scope_completed: summary?.scope_completed || summary?.outcome || '',
+  troubleshooting_steps: summary?.troubleshooting_steps || '',
+  scope_completed: normalizeScopeStatus(summary?.scope_completed || summary?.outcome),
       
       
       // Sign-off and tracking
@@ -188,6 +231,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [hasAutoSent, setHasAutoSent] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [showScopeStatusPicker, setShowScopeStatusPicker] = useState(false);
   // Track recent AI updates (field -> timestamp)
   const [aiFieldUpdates, setAiFieldUpdates] = useState<Record<string, number>>({});
   const [fieldHistory, setFieldHistory] = useState<Record<string, { previous?: string; current: string }>>({});
@@ -402,6 +447,36 @@ export default function SummaryScreen({ navigation, route }: Props) {
     };
   };
 
+  // Detect if the current transcription differs from the one used to generate the last summary
+  const needsRegenerate = React.useMemo(() => {
+    const baseline = (lastTranscription ?? route.params?.transcription ?? '').trim();
+    const current = (editableTranscription ?? '').trim();
+    return baseline !== '' && current !== '' && baseline !== current;
+  }, [lastTranscription, route.params?.transcription, editableTranscription]);
+
+  const handleRegenerate = async () => {
+    if (!editableTranscription?.trim()) return;
+    setIsRegenerating(true);
+    try {
+      const response = await generateSummary(editableTranscription);
+      let newSummary: CloseoutSummary;
+      if (response && typeof response === 'object' && 'summary' in response) {
+        newSummary = (response as any).summary as CloseoutSummary;
+      } else {
+        newSummary = response as CloseoutSummary;
+      }
+      // Normalize with initializer for consistent fields
+      const normalized = initializeCloseoutSummary(newSummary);
+      setEditableSummary(normalized);
+      // Persist in session cache so back/forward preserves it
+      try { setSummary(normalized, editableTranscription || ''); } catch {}
+    } catch (e) {
+      Alert.alert('Error', 'Failed to regenerate summary. Please try again.');
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
   const updateSummaryField = (field: keyof CloseoutSummary, value: string) => {
     setEditableSummary(prev => ({
       ...prev,
@@ -410,6 +485,19 @@ export default function SummaryScreen({ navigation, route }: Props) {
   };
 
   const handleSendEmail = async () => {
+    // Require Scope Status selection before sending email
+    const scopeStatus = (editableSummary.scope_completed || '').trim();
+    if (!scopeStatus || !SCOPE_STATUS_OPTIONS.includes(scopeStatus)) {
+      Alert.alert(
+        'Scope Status required',
+        'Please select a Scope Status before sending the email.',
+        [
+          { text: 'Select Status', onPress: () => setShowScopeStatusPicker(true) },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+      return;
+    }
     try {
       setIsSendingEmail(true);
   // Debug: log work_order and summary before sending
@@ -596,6 +684,23 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }] }>
+      {/* Regeneration banner when transcription changed since last generated summary */}
+      {needsRegenerate && (
+        <View style={[styles.regenBanner, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+          <Text style={[styles.regenBannerText, { color: colors.textPrimary, fontSize: scaled(14) }]}>Transcription changed. Regenerate the summary to update fields.</Text>
+          <TouchableOpacity
+            onPress={handleRegenerate}
+            disabled={isRegenerating}
+            style={[styles.regenButton, { backgroundColor: colors.accent }, isRegenerating && { opacity: 0.7 }]}
+          >
+            {isRegenerating ? (
+              <ActivityIndicator size="small" color={colors.accentContrast} />
+            ) : (
+              <Text style={[styles.regenButtonText, { color: colors.accentContrast, fontSize: scaled(14) }]}>Regenerate</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
       <ScrollView style={styles.scrollContainer} contentContainerStyle={{ paddingBottom: 180 }}>
         {/* CLOSEOUT NOTES SECTION */}
         <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -684,16 +789,21 @@ export default function SummaryScreen({ navigation, route }: Props) {
             highlight={shouldHighlight('troubleshooting_steps')}
           />
 
-          <EditableField
-            label="Was the scope completed successfully?"
-            value={editableSummary.scope_completed || ''}
-            onChangeText={(text) => updateSummaryField('scope_completed', text)}
-            isEditing={true}
-            multiline
-            placeholder="Describe the outcome and completion status..."
-            scaled={scaled}
-            highlight={shouldHighlight('scope_completed')}
-          />
+          {/* Scope Status - dropdown selector */}
+          <View style={styles.fieldContainer}>
+            <Text style={[styles.fieldLabel, { fontSize: scaled(14), color: colors.textSecondary, marginBottom: 8 }]}>Scope Status</Text>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Select scope status"
+              onPress={() => setShowScopeStatusPicker(true)}
+              style={[styles.dropdownBox, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}
+            >
+              <Text style={{ color: colors.textPrimary, fontSize: scaled(16) }}>
+                {editableSummary.scope_completed?.trim() ? editableSummary.scope_completed : 'Select status'}
+              </Text>
+              <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         
@@ -851,6 +961,44 @@ export default function SummaryScreen({ navigation, route }: Props) {
         showDebugInfo={false}
       />
 
+      {/* Scope Status Picker Modal */}
+      <Modal
+        visible={showScopeStatusPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowScopeStatusPicker(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => setShowScopeStatusPicker(false)}
+          style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}
+        >
+          <View style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onStartShouldSetResponder={() => true}
+          >
+            <Text style={[styles.modalTitle, { color: colors.textPrimary, fontSize: scaled(16), borderBottomColor: colors.border }]}>Select Scope Status</Text>
+            {SCOPE_STATUS_OPTIONS.map(opt => {
+              const selected = (editableSummary.scope_completed || '').trim() === opt;
+              return (
+                <TouchableOpacity
+                  key={opt}
+                  style={styles.modalItem}
+                  onPress={() => {
+                    updateSummaryField('scope_completed', opt);
+                    setShowScopeStatusPicker(false);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Select ${opt}`}
+                >
+                  <Text style={{ flex: 1, color: colors.textPrimary, fontSize: scaled(15) }}>{opt}</Text>
+                  {selected && <Ionicons name="checkmark" size={18} color={colors.accent} />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
     </View>
   );
 }
@@ -971,6 +1119,31 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  // Regenerate banner styles
+  regenBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  regenBannerText: {
+    flex: 1,
+    marginRight: 10,
+    fontWeight: '500',
+  },
+  regenButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 110,
+  },
+  regenButtonText: {
+    fontWeight: '700',
+  },
   fieldContainerHighlighted: {
     // container highlight wrapper if needed in future
   },
@@ -985,5 +1158,39 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.5,
     textTransform: 'uppercase'
+  },
+  dropdownBox: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  modalTitle: {
+    fontWeight: '700',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    marginBottom: 6,
+  },
+  modalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
   },
 });

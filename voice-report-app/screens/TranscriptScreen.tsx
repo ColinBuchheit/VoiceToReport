@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -27,6 +27,7 @@ import { AIAgentService } from '../services/aiAgentService';
 import audioLockService from '../services/audioLockService';
 import Checklist from '../components/Checklist';
 import { useTranscription } from '../context/TranscriptionContext';
+import { useSummary } from '../context/SummaryContext';
 
 type TranscriptScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -62,6 +63,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   const { scaled, fontScale } = useFontScale();
   const { colors, isDark } = useTheme();
   const { setTranscription: setGlobalTranscription } = useTranscription();
+  const { lastSummary, lastTranscription, setSummary } = useSummary();
   const [transcription, setTranscription] = useState(route.params.transcription);
   const [isEditing, setIsEditing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -79,6 +81,26 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   const holdProgress = useRef(new Animated.Value(0)).current;
   const holdTimeout = useRef<NodeJS.Timeout | null>(null);
   const HOLD_DURATION = 2000; // 2 seconds
+
+  // Add a forward (Next) button to navigate to Summary without losing input
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={() => {
+            const shouldReuse = lastSummary && (lastTranscription ?? '') === (transcription ?? '');
+            const payload: CloseoutSummary = shouldReuse ? (lastSummary as CloseoutSummary) : {};
+            navigation.navigate('Summary', { transcription, summary: payload });
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Next"
+          style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+        >
+          <Ionicons name="chevron-forward" size={22} color={colors.accent} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, transcription, colors.accent, lastSummary, lastTranscription]);
 
   // Enhanced screen context with comprehensive field mapping
   const screenContext = useMemo((): ScreenContext => {
@@ -204,6 +226,9 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         closeoutSummary = response as CloseoutSummary;
         console.log('✅ Using response as CloseoutSummary directly');
       }
+
+      // Persist generated summary so it can be reused if user navigates back and forward
+      try { setSummary(closeoutSummary, transcription || ''); } catch {}
 
       // Immediately fill to 100% and navigate after a short visual pause
       if (progressInterval.current) {

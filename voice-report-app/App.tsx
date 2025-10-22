@@ -17,6 +17,7 @@ import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { ChecklistProvider } from './context/ChecklistContext';
 import { TranscriptionProvider } from './context/TranscriptionContext';
 import { SettingsProvider } from './context/SettingsContext';
+import { SummaryProvider } from './context/SummaryContext';
 
 // Navigation types to match API structure
 export type RootStackParamList = {
@@ -113,7 +114,9 @@ export default function App() {
         <SettingsProvider>
           <ChecklistProvider>
             <TranscriptionProvider>
-              <ThemedAppRoot />
+              <SummaryProvider>
+                <ThemedAppRoot />
+              </SummaryProvider>
             </TranscriptionProvider>
           </ChecklistProvider>
         </SettingsProvider>
