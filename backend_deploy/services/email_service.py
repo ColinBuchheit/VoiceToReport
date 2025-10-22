@@ -153,7 +153,7 @@ class EmailService:
             technician_email = None
         logo_src = logo_src_override or self._get_logo_base64()
 
-        # Ensure all 17 fields appear in the structured sections
+        # Structured sections in the exact required order
         field_groups = [
             {"title": "Job Details", "fields": [
                 ("work_order", "Work Order #"),
@@ -161,28 +161,25 @@ class EmailService:
                 ("technician_name", "Technician Name"),
             ]},
             {"title": "Service Summary", "fields": [
+                ("scope_completed", "Scope Status"),
+                ("checked_in_with", "Checked In With"),
+                ("check_in_code", "Check In Code"),
                 ("onsite_contact", "On-Site Contact"),
                 ("support_contact", "Support Contact"),
-                ("work_completed", "Work Completed"),
-                ("scope_completed", "Scope Status"),
-            ]},
-            {"title": "Technical Information", "fields": [
-                ("delays", "Delays & Issues"),
-                ("troubleshooting_steps", "Troubleshooting Steps"),
-            ]},
-            {"title": "Closeout Details", "fields": [
                 ("released_by", "Released By"),
                 ("release_code", "Release Code"),
-                ("return_tracking", "Return Tracking"),
             ]},
-            {"title": "Resources", "fields": [
-                ("photos_uploaded", "Photos Uploaded"),
-                ("expenses", "Expenses"),
-                ("materials_used", "Materials Used"),
-            ]},
-            {"title": "Additional Notes", "fields": [
+            {"title": "Technical Information", "fields": [
+                ("work_completed", "Work Completed"),
+                ("troubleshooting_steps", "Troubleshooting Steps"),
+                ("delays", "Delays & Issues"),
                 ("out_of_scope_work", "Out of Scope Work"),
-                ("notes", "Notes"),
+            ]},
+            {"title": "Closeout Details", "fields": [
+                ("return_tracking", "Return Tracking"),
+                ("materials_used", "Materials Used"),
+                ("expenses", "Expenses"),
+                ("photos_uploaded", "Photos Uploaded"),
             ]},
         ]
 
@@ -207,7 +204,11 @@ class EmailService:
             </tr>
             """
             for field_name, label in group["fields"]:
-                value = self._value_for(closeout_data, field_name)
+                # Special-case Technician Name to use the resolved technician profile/name
+                if field_name == "technician_name":
+                    value = tech_name or self._value_for(closeout_data, field_name)
+                else:
+                    value = self._value_for(closeout_data, field_name)
                 value_cmp = value.strip() if isinstance(value, str) else value
                 if value_cmp not in HIDE_VALUES:
                     group_html += f"""
@@ -225,6 +226,25 @@ class EmailService:
                 </td>
             </tr>
                     """
+            # If this is the Service Summary section, append Transcription at the end (once)
+            if group["title"] == "Service Summary":
+                if transcription and str(transcription).strip() and transcription not in {"Not specified", "Not mentioned", "None", "none"}:
+                    group_html += f"""
+            <tr>
+                <td style=\"padding: 8px 0 12px 0;\">
+                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" class=\"field-card\" style=\"width:100%; background-color:#FFFFFF; border-radius:10px; border:1px solid #ECEFF1; box-shadow:0 2px 8px rgba(12,12,12,0.04);\">
+                        <tr>
+                            <td style=\"padding:14px 16px;\">
+                                <div class=\"field-label\" style=\"font-size:12px; font-weight:700; color:#374151; margin-bottom:6px;\">Transcription</div>
+                                <div class=\"field-value\" style=\"font-size:14px; line-height:1.6; color:#0B0B0B;\">{str(transcription).strip()}</div>
+                            </td>
+                            <td width=\"8\" style=\"width:8px;\"></td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+                    """
+
             sections_html += group_html
 
         transcription_html = ""
@@ -257,22 +277,23 @@ class EmailService:
             else:
                 copy_lines.append(f"Technician - {technician_email}")
 
-        # Canonical order and labels
+        # Canonical order and labels (flattened for copy/paste)
         ordered_fields: list[tuple[str, str]] = [
+            ("scope_completed", "Scope Status"),
+            ("checked_in_with", "Checked In With"),
+            ("check_in_code", "Check In Code"),
             ("onsite_contact", "On-Site Contact"),
             ("support_contact", "Support Contact"),
-            ("work_completed", "Work Completed"),
-            ("scope_completed", "Scope Status"),
-            ("troubleshooting_steps", "Troubleshooting Steps"),
-            ("delays", "Delays & Issues"),
             ("released_by", "Released By"),
             ("release_code", "Release Code"),
-            ("return_tracking", "Return Tracking"),
-            ("photos_uploaded", "Photos Uploaded"),
-            ("expenses", "Expenses"),
-            ("materials_used", "Materials Used"),
+            ("work_completed", "Work Completed"),
+            ("troubleshooting_steps", "Troubleshooting Steps"),
+            ("delays", "Delays & Issues"),
             ("out_of_scope_work", "Out of Scope Work"),
-            ("notes", "Notes"),
+            ("return_tracking", "Return Tracking"),
+            ("materials_used", "Materials Used"),
+            ("expenses", "Expenses"),
+            ("photos_uploaded", "Photos Uploaded"),
         ]
 
         # Use _value_for to benefit from synonyms/fallbacks
@@ -380,7 +401,6 @@ class EmailService:
                             </tr>
                             <tr>
                                 <td style=\"padding: 18px 28px 28px 28px;\">\n                                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\">\n                                        {sections_html}
-                                        {transcription_html}
                                         {copy_paste_html}
                                     </table>
                                 </td>

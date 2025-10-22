@@ -22,8 +22,10 @@
       "infoPlist": {
         "CFBundleDisplayName": "BEAR S&T Voice",
         "NSMicrophoneUsageDescription": "Allow Voice Report App to access the microphone to record voice notes and generate summaries.",
-        "NSPhotoLibraryUsageDescription": "Allow Voice Report App to access your photo library to attach screenshots to feedback emails."
-      }
+        "NSPhotoLibraryUsageDescription": "Allow Voice Report App to access your photo library to attach screenshots to feedback emails.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.beartechs.voicereport"
     },
     "android": {
       "adaptiveIcon": {

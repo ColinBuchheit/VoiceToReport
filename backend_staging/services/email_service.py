@@ -1,4 +1,4 @@
-"""backend/services/email_service.py - SLEEK HTML EMAIL FORMAT (Unified)"""
+# backend/services/email_service.py - SLEEK HTML EMAIL FORMAT (Unified)
 import logging
 import smtplib
 import ssl
@@ -17,16 +17,15 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-
 class EmailService:
     """Service for sending closeout report emails"""
-
+    
     def __init__(self):
         self.smtp_server = settings.smtp_server
         self.smtp_port = int(settings.smtp_port)
         self.email_user = settings.email_user
         self.email_password = settings.email_password
-
+        
         # Parse recipients strictly from environment/config (no hard-coded fallback)
         if settings.email_recipients:
             # Split by comma and clean up whitespace
@@ -34,12 +33,12 @@ class EmailService:
         else:
             # No recipients configured; leave empty and let send methods report an error
             self.recipients = []
-
+        
         if self.recipients:
             logger.info(f"Email service initialized with {len(self.recipients)} recipients: {', '.join(self.recipients)}")
         else:
             logger.warning("Email service initialized with 0 recipients. Set EMAIL_RECIPIENTS in environment (comma-separated).")
-
+    
     def _safe_get(self, data: Union[Dict[str, Any], object], key: str, default: str = 'Not specified') -> str:
         """
         Safely get value from either a dictionary or an object with attributes
@@ -98,7 +97,7 @@ class EmailService:
             return default
 
         return default
-
+    
     def get_recipients(self) -> List[str]:
         """Get current list of email recipients"""
         return self.recipients.copy()
@@ -152,7 +151,7 @@ class EmailService:
             technician_email = None
         logo_src = logo_src_override or self._get_logo_base64()
 
-        # Ensure all 17 fields appear in the structured sections
+        # Ensure all fields appear in the structured sections in the required order
         field_groups = [
             {"title": "Job Details", "fields": [
                 ("work_order", "Work Order #"),
@@ -160,39 +159,41 @@ class EmailService:
                 ("technician_name", "Technician Name"),
             ]},
             {"title": "Service Summary", "fields": [
+                ("scope_completed", "Scope Status"),
+                ("checked_in_with", "Checked In With"),
+                ("check_in_code", "Check In Code"),
                 ("onsite_contact", "On-Site Contact"),
                 ("support_contact", "Support Contact"),
-                ("work_completed", "Work Completed"),
-                ("scope_completed", "Scope Status"),
-            ]},
-            {"title": "Technical Information", "fields": [
-                ("delays", "Delays & Issues"),
-                ("troubleshooting_steps", "Troubleshooting Steps"),
-            ]},
-            {"title": "Closeout Details", "fields": [
                 ("released_by", "Released By"),
                 ("release_code", "Release Code"),
-                ("return_tracking", "Return Tracking"),
+                ("transcription", "Transcription"),  # special-case value from argument
             ]},
-            {"title": "Resources", "fields": [
-                ("photos_uploaded", "Photos Uploaded"),
-                ("expenses", "Expenses"),
-                ("materials_used", "Materials Used"),
-            ]},
-            {"title": "Additional Notes", "fields": [
+            {"title": "Technical Information", "fields": [
+                ("work_completed", "Work Completed"),
+                ("troubleshooting_steps", "Troubleshooting Steps"),
+                ("delays", "Delays & Issues"),
                 ("out_of_scope_work", "Out of Scope Work"),
-                ("notes", "Notes"),
+            ]},
+            {"title": "Closeout Details", "fields": [
+                ("return_tracking", "Return Tracking"),
+                ("materials_used", "Materials Used"),
+                ("expenses", "Expenses"),
+                ("photos_uploaded", "Photos Uploaded"),
             ]},
         ]
 
         sections_html = ""
+        # Values to treat as absent in the overall sections
         HIDE_VALUES = {None, "", "Not specified", "Not mentioned", "None"}
         for group in field_groups:
             group_html = ""
             has_content = False
             for field_name, _ in group["fields"]:
                 value = self._value_for(closeout_data, field_name)
-                value_cmp = value.strip() if isinstance(value, str) else value
+                if isinstance(value, str):
+                    value_cmp = value.strip()
+                else:
+                    value_cmp = value
                 if value_cmp not in HIDE_VALUES:
                     has_content = True
                     break
@@ -206,7 +207,11 @@ class EmailService:
             </tr>
             """
             for field_name, label in group["fields"]:
-                value = self._value_for(closeout_data, field_name)
+                # Special-case: transcription value comes from argument, not summary
+                if field_name == 'transcription':
+                    value = transcription
+                else:
+                    value = self._value_for(closeout_data, field_name)
                 value_cmp = value.strip() if isinstance(value, str) else value
                 if value_cmp not in HIDE_VALUES:
                     group_html += f"""
@@ -226,26 +231,8 @@ class EmailService:
                     """
             sections_html += group_html
 
+        # Transcription is only shown within the Service Summary section
         transcription_html = ""
-        if transcription and str(transcription).strip() and transcription != 'Not specified':
-            transcription_html = f"""
-            <tr>
-                <td style=\"padding: 20px 0 12px 0;\">
-                    <h2 class=\"section-title\" style=\"margin:0; font-size:12px; font-weight:700; color:#9CA3AF; text-transform:uppercase; letter-spacing:0.08em;\">Voice Transcription</h2>
-                </td>
-            </tr>
-            <tr>
-                <td style=\"padding: 8px 0 16px 0;\">
-                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"background-color:#FFF9F6; border:1px solid #FFE9DA; border-radius:10px;\">
-                        <tr>
-                            <td style=\"padding:14px 16px;\">
-                                <div style=\"font-size:14px; line-height:1.7; color:#374151; font-style:normal;\">{transcription}</div>
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-            """
 
         # Build a simplified, ordered copy block for easy paste into emails or portals
         copy_lines: list[str] = []
@@ -258,21 +245,23 @@ class EmailService:
             else:
                 copy_lines.append(f"Technician - {technician_email}")
 
-        # Canonical order and labels
+        # Canonical order and labels for copy/paste block (omit Location/WO header badge)
         ordered_fields: list[tuple[str, str]] = [
+            ("scope_completed", "Scope Status"),
+            ("checked_in_with", "Checked In With"),
+            ("check_in_code", "Check In Code"),
             ("onsite_contact", "On-Site Contact"),
             ("support_contact", "Support Contact"),
-            ("work_completed", "Work Completed"),
-            ("scope_completed", "Scope Status"),
-            ("troubleshooting_steps", "Troubleshooting Steps"),
-            ("delays", "Delays & Issues"),
             ("released_by", "Released By"),
             ("release_code", "Release Code"),
-            ("return_tracking", "Return Tracking"),
-            ("photos_uploaded", "Photos Uploaded"),
-            ("expenses", "Expenses"),
-            ("materials_used", "Materials Used"),
+            ("work_completed", "Work Completed"),
+            ("troubleshooting_steps", "Troubleshooting Steps"),
+            ("delays", "Delays & Issues"),
             ("out_of_scope_work", "Out of Scope Work"),
+            ("return_tracking", "Return Tracking"),
+            ("materials_used", "Materials Used"),
+            ("expenses", "Expenses"),
+            ("photos_uploaded", "Photos Uploaded"),
             ("notes", "Notes"),
         ]
 
@@ -284,21 +273,27 @@ class EmailService:
                 # Prefer dash formatting for quick paste
                 copy_lines.append(f"{label} - {value}")
 
-        # Append transcription at end if available
-        if transcription and str(transcription).strip() and str(transcription) not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no']:
-            copy_lines.append("Transcription - " + str(transcription).strip())
+        # Include transcription at the end of the copy/paste block (single-line for easy paste)
+        if isinstance(transcription, str):
+            tx = transcription.strip()
+            if tx:
+                copy_lines.append(f"Transcription - {tx}")
 
         # Use HTML line breaks for better mobile compatibility; sanitize each line to preserve <br>
         sanitized_lines = [line.replace('<', '\u27e8').replace('>', '\u27e9') for line in copy_lines]
         copy_block_text = ("<br><br>".join(sanitized_lines))
         copy_paste_html = f"""
             <tr>
-                <td style=\"padding: 28px 0 12px 0;\">\n                    <h2 class=\"section-title\" style=\"margin:0; font-size:12px; font-weight:700; color:#9CA3AF; text-transform:uppercase; letter-spacing:0.08em;\">Copy/Paste Summary</h2>
+                <td style=\"padding: 28px 0 12px 0;\">
+                    <h2 class=\"section-title\" style=\"margin:0; font-size:12px; font-weight:700; color:#9CA3AF; text-transform:uppercase; letter-spacing:0.08em;\">Copy/Paste Summary</h2>
                 </td>
             </tr>
             <tr>
-                <td style=\"padding: 8px 0 16px 0;\">\n                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"background-color:#F7F7F8; border:1px solid #ECEFF1; border-radius:10px;\">\n                        <tr>
-                            <td style=\"padding:14px 16px;\">\n                                <div style=\"font-family:Menlo,Consolas,'Courier New',monospace; font-size:12px; line-height:1.8; color:#374151;\">{copy_block_text}</div>
+                <td style=\"padding: 8px 0 16px 0;\">
+                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"background-color:#F7F7F8; border:1px solid #ECEFF1; border-radius:10px;\">
+                        <tr>
+                            <td style=\"padding:14px 16px;\">
+                                <div style=\"font-family:Menlo,Consolas,'Courier New',monospace; font-size:12px; line-height:1.8; color:#374151;\">{copy_block_text}</div>
                             </td>
                         </tr>
                     </table>
@@ -316,7 +311,8 @@ class EmailService:
             tech_label = f"<strong>Technician Info:</strong> " + " · ".join(tech_label_parts)
             technician_badge_html = f"""
                 <tr>
-                    <td align=\"center\" style=\"padding-top:14px;\">\n                        <div class=\"tech-badge\" style=\"display:inline-block; background-color:#F7F7F8; color:#374151; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; border:1px solid #ECEFF1;\">
+                    <td align=\"center\" style=\"padding-top:14px;\">
+                        <div class=\"tech-badge\" style=\"display:inline-block; background-color:#F7F7F8; color:#374151; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; border:1px solid #ECEFF1;\">
                             {tech_label}
                         </div>
                     </td>
@@ -328,7 +324,11 @@ class EmailService:
         <html lang=\"en\">
         <head>
             <meta charset=\"UTF-8\">
-            <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n            <meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\">\n            <meta name=\"x-apple-disable-message-reformatting\">\n            <meta name=\"color-scheme\" content=\"light dark\">\n            <meta name=\"supported-color-schemes\" content=\"light dark\">
+            <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+            <meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\">
+            <meta name=\"x-apple-disable-message-reformatting\">
+            <meta name=\"color-scheme\" content=\"light dark\">
+            <meta name=\"supported-color-schemes\" content=\"light dark\">
             <title>Field Service Closeout Report</title>
             <style>
                 :root {{
@@ -358,14 +358,27 @@ class EmailService:
                 }}
             </style>
         </head>
-        <body style=\"margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; -webkit-text-size-adjust: 100%; line-height: 1.5;\">\n            <table role=\"presentation\" class=\"email-bg\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"background-color: #F3F4F6;\">\n                <tr>
-                    <td align=\"center\" style=\"padding: 40px 20px;\">\n                        <table role=\"presentation\" class=\"card-bg\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"max-width: 600px; background-color: #FFFFFF; border-radius: 12px; border: 1px solid #E5E7EB; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);\">\n                            <tr>
-                                <td class=\"header-bg\" style=\"padding: 28px 28px 22px 28px; background-color: #0B0B0B; border-bottom: 1px solid rgba(255,255,255,0.06);\">\n                                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\">\n                                        <tr>
-                                            <td align=\"center\" style=\"padding-bottom: 20px;\">\n                                                <img src=\"{logo_src}\" alt=\"Bear Techs\" width=\"150\" style=\"height: auto; display: block; border: 0;\">\n                                            </td>
+        <body style=\"margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; -webkit-text-size-adjust: 100%; line-height: 1.5;\">
+            <table role=\"presentation\" class=\"email-bg\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"background-color: #F3F4F6;\">
+                <tr>
+                    <td align=\"center\" style=\"padding: 40px 20px;\">
+                        <table role=\"presentation\" class=\"card-bg\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"max-width: 600px; background-color: #FFFFFF; border-radius: 12px; border: 1px solid #E5E7EB; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);\">
+                            <tr>
+                                <td class=\"header-bg\" style=\"padding: 28px 28px 22px 28px; background-color: #0B0B0B; border-bottom: 1px solid rgba(255,255,255,0.06);\">
+                                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\">\n
+                                        <tr>
+                                            <td align=\"center\" style=\"padding-bottom: 20px;\">\n
+                                                <img src=\"{logo_src}\" alt=\"Bear Techs\" width=\"150\" style=\"height: auto; display: block; border: 0;\">\n
+                                            </td>
                                         </tr>
                                         <tr>
-                                            <td align=\"center\">\n                                                <table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"margin: 0 auto;\">\n                                                    <tr>
-                                                        <td style=\"text-align:center;\">\n                                                            <div class=\"wo-badge\" style=\"display: inline-block; background-color: #FF6B35; color: #FFFFFF; padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight:700; letter-spacing:0.01em;\">\n                                                                {location_name if location_name and location_name != 'Not specified' else 'Location'} · WO {work_order}\n                                                            </div>
+                                            <td align=\"center\">\n
+                                                <table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"margin: 0 auto;\">\n
+                                                    <tr>
+                                                        <td style=\"text-align:center;\">\n
+                                                            <div class=\"wo-badge\" style=\"display: inline-block; background-color: #FF6B35; color: #FFFFFF; padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight:700; letter-spacing:0.01em;\">\n
+                                                                {location_name if location_name and location_name != 'Not specified' else 'Location'} · WO {work_order}\n
+                                                            </div>
                                                         </td>
                                                     </tr>
                                                     {technician_badge_html}
@@ -376,18 +389,22 @@ class EmailService:
                                 </td>
                             </tr>
                             <tr>
-                                <td style=\"padding: 14px 28px; background-color: #F7F7F8; border-bottom: 1px solid #ECEFF1;\">\n                                    <span class=\"timestamp-text\" style=\"font-size:13px; color:#9CA3AF;\">Report Generated: {timestamp}</span>
+                                <td style=\"padding: 14px 28px; background-color: #F7F7F8; border-bottom: 1px solid #ECEFF1;\">\n
+                                    <span class=\"timestamp-text\" style=\"font-size:13px; color:#9CA3AF;\">Report Generated: {timestamp}</span>
                                 </td>
                             </tr>
                             <tr>
-                                <td style=\"padding: 18px 28px 28px 28px;\">\n                                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\">\n                                        {sections_html}
-                                        {transcription_html}
+                                <td style=\"padding: 18px 28px 28px 28px;\">\n
+                                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\">\n
+                                        {sections_html}
                                         {copy_paste_html}
                                     </table>
                                 </td>
                             </tr>
                             <tr>
-                                <td class=\"footer-bg\" style=\"padding: 20px 28px; background-color: #F7F7F8; border-top: 1px solid #ECEFF1; text-align: center;\">\n                                    <div class=\"footer-text\" style=\"font-size:12px; color:#9CA3AF; line-height:1.5;\">\n                                        Bear Techs Field Service · Automated Voice-to-Report System
+                                <td class=\"footer-bg\" style=\"padding: 20px 28px; background-color: #F7F7F8; border-top: 1px solid #ECEFF1; text-align: center;\">\n
+                                    <div class=\"footer-text\" style=\"font-size:12px; color:#9CA3AF; line-height:1.5;\">\n
+                                        Bear Techs Field Service · Automated Voice-to-Report System
                                     </div>
                                 </td>
                             </tr>
@@ -399,10 +416,10 @@ class EmailService:
         </html>
         """
         return html_body
-
+    
     def send_closeout_email(self, closeout_data: Union[Dict[str, Any], object], transcription: str, technician_name: str | None = None, technician_email: str | None = None) -> Dict[str, Any]:
         """Send the closeout email to the specified recipients using sleek HTML format."""
-
+        
         try:
             # Validate email configuration
             pwd = self._get_secret_value(self.email_password)
@@ -413,7 +430,7 @@ class EmailService:
                     "message": "Email credentials not configured",
                     "recipients": []
                 }
-
+            
             if not self.recipients:
                 logger.error("No email recipients configured")
                 return {
@@ -421,7 +438,7 @@ class EmailService:
                     "message": "No recipients configured",
                     "recipients": []
                 }
-
+            
             logger.info(f"Sending closeout email to {len(self.recipients)} recipients: {', '.join(self.recipients)}")
 
             # Build subject line similar to staging/deploy
@@ -484,7 +501,7 @@ class EmailService:
                     logger.warning(f"⚠️ Logo file not found at {logo_path}")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to attach inline logo: {e}")
-
+            
             # Send email
             # Use a verified CA bundle for TLS (fixes local TLS errors)
             ctx = ssl.create_default_context(cafile=certifi.where())
@@ -516,14 +533,14 @@ class EmailService:
                     server.ehlo()
                     server.login(self.email_user, pwd)
                     server.send_message(msg)
-
+            
             logger.info(f"Closeout email sent successfully to {len(recipients)} recipients")
             return {
                 "success": True,
                 "message": "Email sent successfully",
                 "recipients": recipients
             }
-
+            
         except Exception as e:
             logger.error(f"Failed to send closeout email: {str(e)}")
             return {
@@ -531,10 +548,10 @@ class EmailService:
                 "message": f"Failed to send email: {str(e)}",
                 "recipients": []
             }
-
+    
     def test_email_connection(self) -> Dict[str, Any]:
         """Test email configuration and connection"""
-
+        
         try:
             pwd = self._get_secret_value(self.email_password)
             if not self.email_user or not pwd:
@@ -542,7 +559,7 @@ class EmailService:
                     "status": "error",
                     "message": "Email credentials not configured - add EMAIL_USER and EMAIL_PASSWORD to .env file"
                 }
-
+            
             # Test SMTP connection with verified CA bundle
             ctx = ssl.create_default_context(cafile=certifi.where())
             try:
@@ -564,7 +581,7 @@ class EmailService:
                 server.starttls(context=ctx)
                 server.ehlo()
                 server.login(self.email_user, pwd)
-
+            
             return {
                 "status": "success",
                 "message": "Email configuration is valid",
@@ -573,10 +590,10 @@ class EmailService:
                 "recipients": self.recipients,
                 "sender": self.email_user
             }
-
+            
         except Exception as e:
             return {
-                "status": "error",
+                "status": "error", 
                 "message": f"Email connection failed: {str(e)}"
             }
 
