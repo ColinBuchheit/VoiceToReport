@@ -25,10 +25,13 @@ import audioLockService from '../services/audioLockService';
 import emailHistoryService, { EmailHistoryItem } from '../services/emailHistoryService';
 import { useTheme } from '../context/ThemeContext';
 import Checklist from '../components/Checklist';
+import DraftSaveButton from '../components/DraftSaveButton';
 import { useChecklist } from '../context/ChecklistContext';
 import { criteriaCategories } from '../components/checklistData';
 import { useTranscription } from '../context/TranscriptionContext';
 import { useSettings } from '../context/SettingsContext';
+import draftService, { DraftItem } from '../services/draftService';
+import { useReportSession } from '../context/ReportSessionContext';
 // Pre-require both logos so Metro bundles them and switching is instant
 const LIGHT_LOGO = require('../assets/bears&t.png');
 const DARK_LOGO = require('../assets/DarkModeLogo.png');
@@ -71,9 +74,13 @@ function HomeScreenInner({ navigation }: Props) {
   const [showHistorySidebar, setShowHistorySidebar] = useState(false);
   const [emailCount, setEmailCount] = useState(0);
   const [showSettings, setShowSettings] = useState(false); // Settings modal visibility
-  const { checkedItems, toggleItem, reset } = useChecklist();
+  const { checkedItems, toggleItem, reset, setAll } = useChecklist();
   const { transcription, setTranscription } = useTranscription();
   const { setSummary } = useSummary();
+  const { currentDraftId, setCurrentDraftId, justExitedDraft, setJustExitedDraft } = useReportSession();
+  const draftId = currentDraftId; // derive for local convenience
+  const [continueDraft, setContinueDraft] = useState<DraftItem | null>(null);
+  const [showContinueBanner, setShowContinueBanner] = useState(false);
   const { showReportProgressBar, showBottomBarBackground } = useSettings();
   const manualInputRef = useRef<TextInput | null>(null);
   // Hold-to-clear state for manual input
@@ -92,10 +99,9 @@ function HomeScreenInner({ navigation }: Props) {
 
   // Function to completely reset all state
   const resetAllState = () => {
-    // Reset checklist state
-  reset();
+    // Do NOT reset checklist here; only Exit Draft should clear it
     setShowChecklist(true);
-  setShowManualInput(false);
+    setShowManualInput(false);
     
     // Reset recording state
     setIsRecording(false);
@@ -254,6 +260,51 @@ function HomeScreenInner({ navigation }: Props) {
     return unsubscribe;
   }, [navigation]);
 
+  // On app/home focus, surface a prompt to resume the most recent draft if it's recent
+  useEffect(() => {
+    (async () => {
+      try {
+        if (justExitedDraft) {
+          // Suppress resume banner immediately after exiting a draft
+          setContinueDraft(null);
+          setShowContinueBanner(false);
+          setJustExitedDraft(false);
+          return;
+        }
+        const latest = await draftService.getLatestDraft();
+        if (!latest) {
+          setContinueDraft(null);
+          setShowContinueBanner(false);
+          return;
+        }
+        // Consider drafts updated within the last 48 hours as "recent"
+        const ageMs = Date.now() - new Date(latest.timestamp).getTime();
+        const THRESHOLD = 48 * 60 * 60 * 1000;
+        if (ageMs <= THRESHOLD) {
+          setContinueDraft(latest);
+          setShowContinueBanner(true);
+        } else {
+          setContinueDraft(null);
+          setShowContinueBanner(false);
+        }
+      } catch (e) {
+        setContinueDraft(null);
+        setShowContinueBanner(false);
+      }
+    })();
+  }, [navigation]);
+
+  // If we just exited a draft, ensure Home resets all state on focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (justExitedDraft) {
+        resetAllState();
+        setJustExitedDraft(false);
+      }
+      return () => {};
+    }, [justExitedDraft])
+  );
+
   // Timer management - handles timer across view switches
   useEffect(() => {
     if (isRecording) {
@@ -287,15 +338,19 @@ function HomeScreenInner({ navigation }: Props) {
     try {
       setIsProcessing(true);
       const result = await transcribeAudio(audioUri);
-      // Sync to global transcription state
-      setTranscription(result.transcription);
+      // Append new transcription to existing text
+      const combined = (transcription && transcription.trim().length > 0)
+        ? `${transcription.trim()}\n${(result.transcription || '').trim()}`
+        : (result.transcription || '');
+      setTranscription(combined);
       
       // Set flag to reset state when returning from the workflow
       persistedState.shouldReset = true;
       
       navigation.navigate('Transcript', {
-        transcription: result.transcription,
+        transcription: combined,
         audioUri,
+        ...(draftId ? { draftId } : {}),
       });
     } catch (error) {
       console.error('Error processing audio:', error);
@@ -312,15 +367,59 @@ function HomeScreenInner({ navigation }: Props) {
     console.log('📧 Selected email transcription length:', email.transcription?.length || 0);
     console.log('📧 Transcription preview:', email.transcription ? email.transcription.slice(0, 100) : 'EMPTY');
     const draftId = (email as any)?._draftId as string | undefined;
+    const isDraft = (email as any)?._isDraft === true;
+    const lastSavedRoute = (email as any)?._lastSavedRoute as ('Home'|'Transcript'|'Summary'|undefined);
+    const checklistFromDraft = (email as any)?.checklist as Record<string, boolean> | undefined;
     // Seed summary context so forward/back preserves it
     try { if (email.summary) setSummary(email.summary, email.transcription || ''); } catch {}
-    navigation.navigate('Summary', {
-      transcription: email.transcription || '',
-      summary: email.summary,
-      ...(draftId ? { draftId } : {}),
-    });
+    if (isDraft && lastSavedRoute) {
+      if (lastSavedRoute === 'Transcript') {
+        if (checklistFromDraft) setAll(checklistFromDraft);
+        navigation.navigate('Transcript', { transcription: email.transcription || '', ...(draftId ? { draftId } : {}) });
+      } else if (lastSavedRoute === 'Home') {
+        // Stay on Home; optionally populate transcription
+        try { setTranscription(email.transcription || ''); } catch {}
+  if (draftId) setCurrentDraftId(draftId);
+        if (checklistFromDraft) setAll(checklistFromDraft);
+      } else {
+        if (checklistFromDraft) setAll(checklistFromDraft);
+        navigation.navigate('Summary', {
+          transcription: email.transcription || '',
+          summary: email.summary,
+          ...(draftId ? { draftId } : {}),
+        });
+      }
+    } else {
+      navigation.navigate('Summary', {
+        transcription: email.transcription || '',
+        summary: email.summary,
+        ...(draftId ? { draftId } : {}),
+      });
+    }
     // Close sidebar after initiating navigation so Summary shows without being covered
     setShowHistorySidebar(false);
+  };
+
+  const handleResumeDraft = (d: DraftItem) => {
+    const route = d.lastSavedRoute || 'Summary';
+    if (route === 'Transcript') {
+      if (d.checklist) setAll(d.checklist);
+      navigation.navigate('Transcript', { transcription: d.transcription || '', draftId: d.id });
+    } else if (route === 'Home') {
+      try { setTranscription(d.transcription || ''); } catch {}
+      setCurrentDraftId(d.id);
+      if (d.checklist) setAll(d.checklist);
+      // remain on Home
+    } else {
+      try { if (d.summary) setSummary(d.summary, d.transcription || ''); } catch {}
+      if (d.checklist) setAll(d.checklist);
+      navigation.navigate('Summary', {
+        transcription: d.transcription || '',
+        summary: d.summary as any,
+        draftId: d.id,
+      });
+    }
+    setShowContinueBanner(false);
   };
 
   // checklist toggling handled via context
@@ -339,7 +438,7 @@ function HomeScreenInner({ navigation }: Props) {
       headerRight: () => (
         <TouchableOpacity
           onPress={() => {
-            navigation.navigate('Transcript', { transcription: transcription || '' });
+            navigation.navigate('Transcript', { transcription: transcription || '', ...(draftId ? { draftId } : {}) });
           }}
           accessibilityRole="button"
           accessibilityLabel="Next"
@@ -349,7 +448,7 @@ function HomeScreenInner({ navigation }: Props) {
         </TouchableOpacity>
       ),
     });
-  }, [navigation, transcription, colors.accent]);
+  }, [navigation, transcription, colors.accent, draftId]);
 
   return (
   <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.container, { backgroundColor: colors.background }]}> 
@@ -409,7 +508,51 @@ function HomeScreenInner({ navigation }: Props) {
               {showManualInput ? 'Hide Text Entry' : 'Show Text Entry'}
             </Text>
           </TouchableOpacity>
+          {/* Compact Save Draft button for quick transcription saves */}
+          <DraftSaveButton
+            compact
+            data={{} as any}
+            draftId={draftId}
+            transcription={transcription}
+            checklist={checkedItems}
+            onSaved={(id) => setCurrentDraftId(id)}
+            style={{ marginLeft: 4 }}
+            disabled={!transcription || !transcription.trim()}
+            currentRoute="Home"
+          />
         </View>
+
+        {/* Continue recent draft banner */}
+        {(!draftId && showContinueBanner && continueDraft) && (
+          <View style={[styles.continueBanner, { backgroundColor: colors.surfaceAlt, borderColor: colors.accent }]}> 
+            <View style={styles.continueBannerTextWrap}>
+              <Text style={[styles.continueBannerTitle, { color: colors.textPrimary }]}>Resume your recent draft?</Text>
+              <Text style={[styles.continueBannerSubtitle, { color: colors.textSecondary }]}>
+                We'll take you back to {continueDraft.lastSavedRoute === 'Transcript' ? 'Transcription' : (continueDraft.lastSavedRoute === 'Home' ? 'Home' : 'Summary')} for WO {continueDraft.workOrder || 'N/A'} at {continueDraft.location || 'Unknown'}
+              </Text>
+            </View>
+            <View style={styles.continueBannerActions}>
+              <TouchableOpacity onPress={() => setShowContinueBanner(false)} style={[styles.continueBannerButton, { borderColor: colors.border }]}>
+                <Text style={[styles.continueBannerButtonText, { color: colors.textSecondary }]}>Dismiss</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => handleResumeDraft(continueDraft)} style={[styles.continueBannerButtonPrimary, { backgroundColor: colors.accent }]}>
+                <Text style={[styles.continueBannerButtonPrimaryText, { color: colors.accentContrast }]}>Resume</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+        {/* Editing Draft banner on Home when in an active draft */}
+        {!!draftId && (
+          <View style={[styles.draftBanner, { borderColor: colors.accent, backgroundColor: colors.surface }]}> 
+            <Text style={[styles.draftBannerText, { color: colors.textPrimary }]}>Editing Draft</Text>
+            <TouchableOpacity
+              onPress={() => { setCurrentDraftId(undefined); setShowContinueBanner(false); resetAllState(); }}
+              style={[styles.draftExitBtn, { borderColor: colors.accent }]}
+            >
+              <Text style={[styles.draftExitBtnText, { color: colors.accent }]}>Exit Draft</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Manual transcription input (collapsible compact when checklist is visible) */}
         {showManualInput && showChecklist && (
@@ -432,7 +575,8 @@ function HomeScreenInner({ navigation }: Props) {
                 style={[styles.useTextButton, { backgroundColor: colors.accent }]}
                 onPress={() => {
                   if (!transcription || transcription.trim().length === 0) return;
-                  navigation.navigate('Transcript', { transcription: transcription.trim() });
+                  // include draftId if continuing an existing draft
+                  navigation.navigate('Transcript', { transcription: transcription.trim(), ...(draftId ? { draftId } : {}) });
                 }}
                 disabled={!transcription || transcription.trim().length === 0}
               >
@@ -495,7 +639,7 @@ function HomeScreenInner({ navigation }: Props) {
                     style={[styles.useTextButton, { backgroundColor: colors.accent }]}
                     onPress={() => {
                       if (!transcription || transcription.trim().length === 0) return;
-                      navigation.navigate('Transcript', { transcription: transcription.trim() });
+                      navigation.navigate('Transcript', { transcription: transcription.trim(), ...(draftId ? { draftId } : {}) });
                     }}
                     disabled={!transcription || transcription.trim().length === 0}
                   >
@@ -776,6 +920,7 @@ function HomeScreenInner({ navigation }: Props) {
         visible={showHistorySidebar}
         onClose={() => setShowHistorySidebar(false)}
         onEmailSelect={handleEmailSelect}
+        currentDraftId={draftId}
       />
 
       {/* Settings Modal */}
@@ -1250,5 +1395,48 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
+
+  // Continue Draft Banner
+  continueBanner: {
+    marginHorizontal: 20,
+    marginTop: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  continueBannerTextWrap: { flex: 1 },
+  continueBannerTitle: { fontSize: 15, fontWeight: '700' },
+  continueBannerSubtitle: { fontSize: 13 },
+  continueBannerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  continueBannerButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  continueBannerButtonText: { fontSize: 13, fontWeight: '600' },
+  continueBannerButtonPrimary: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 },
+  continueBannerButtonPrimaryText: { fontSize: 13, fontWeight: '800' },
+
+  // Editing Draft banner (mirrors Transcript/Summary)
+  draftBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 20,
+    marginTop: 6,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  draftBannerText: { fontWeight: '700' },
+  draftExitBtn: { paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderRadius: 8 },
+  draftExitBtnText: { fontWeight: '700' },
 
 });

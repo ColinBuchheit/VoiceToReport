@@ -18,6 +18,8 @@ import { sendCloseoutEmail, generateSummary } from '../services/api';
 import emailHistoryService from '../services/emailHistoryService';
 import draftService from '../services/draftService';
 import AIAgent from '../components/AIAgent';
+import DraftSaveButton from '../components/DraftSaveButton';
+import useAutoSave from '../hooks/useAutoSave';
 import EmailSuccessPopup from '../components/EmailSuccessPopup';
 import DraftSavedPopup from '../components/DraftSavedPopup';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +30,9 @@ import { useTheme } from '../context/ThemeContext';
 import { AIAgentService } from '../services/aiAgentService';
 import audioLockService from '../services/audioLockService';
 import { useSummary } from '../context/SummaryContext';
+import { useChecklist } from '../context/ChecklistContext';
+import { useReportSession } from '../context/ReportSessionContext';
+import { useTranscription } from '../context/TranscriptionContext';
 
 // Allowed scope status options (used by UI and validation)
 const SCOPE_STATUS_OPTIONS = [
@@ -177,6 +182,9 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const { scaled } = useFontScale();
   const { colors } = useTheme();
   const { lastTranscription, setSummary } = useSummary();
+  const { checkedItems, setAll, reset: resetChecklist } = useChecklist();
+  const { setCurrentDraftId, setJustExitedDraft } = useReportSession();
+  const { setTranscription } = useTranscription();
   // Initialize CloseoutSummary with proper field mapping
   const initializeCloseoutSummary = (summary: CloseoutSummary): CloseoutSummary => {
     console.log('🔧 Initializing CloseoutSummary from:', summary);
@@ -228,6 +236,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const [showDraftSaved, setShowDraftSaved] = useState(false);
+  const [draftId, setDraftId] = useState<string | undefined>(route.params?.draftId);
   const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [hasAutoSent, setHasAutoSent] = useState(false);
@@ -237,6 +246,18 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const [aiFieldUpdates, setAiFieldUpdates] = useState<Record<string, number>>({});
   const [fieldHistory, setFieldHistory] = useState<Record<string, { previous?: string; current: string }>>({});
   const [fieldHistoryMeta, setFieldHistoryMeta] = useState<Record<string, number>>({});
+
+  // Auto-save drafts for safety
+  const { lastSaved, isDirty, saveNow } = useAutoSave(editableSummary, {
+    draftId,
+    workOrder: editableSummary.work_order,
+    location: editableSummary.location,
+    transcription: editableTranscription,
+    enabled: true,
+    interval: 30000,
+    currentRoute: 'Summary',
+    checklist: checkedItems,
+  });
 
   // Highlight window (ms)
   const HIGHLIGHT_WINDOW_MS = 8000;
@@ -522,7 +543,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
       // If this Summary originated from a draft, remove the draft once successfully sent
       try {
-        const did = route.params?.draftId;
+        const did = draftId || route.params?.draftId;
         if (did) {
           await draftService.deleteDraft(did);
         }
@@ -570,15 +591,17 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const handleSaveDraft = async () => {
     try {
       await draftService.addDraft({
-        id: route.params?.draftId,
+        id: draftId,
         workOrder: editableSummary.work_order,
         location: editableSummary.location,
         transcription: editableTranscription,
         summary: editableSummary,
+        lastSavedRoute: 'Summary',
+        checklist: checkedItems,
       });
-  setShowDraftSaved(true);
+      setShowDraftSaved(true);
     } catch (e) {
-  alert('Failed to save draft');
+      alert('Failed to save draft');
     }
   };
 
@@ -684,6 +707,24 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }] }>
+      {/* Editing Draft banner */}
+      {!!draftId && (
+        <View style={[styles.draftBanner, { borderColor: colors.accent, backgroundColor: colors.surface }]}> 
+          <Text style={[styles.draftBannerText, { color: colors.textPrimary }]}>Editing Draft</Text>
+          <TouchableOpacity onPress={() => {
+            setShowSuccessPopup(false);
+            // Fully exit the draft: clear session, transcription, checklist, cached summary
+            try { setTranscription(''); } catch {}
+            try { resetChecklist(); } catch {}
+            try { setSummary({} as any, ''); } catch {}
+            setCurrentDraftId(undefined);
+            setJustExitedDraft(true);
+            navigation.reset({ index: 0, routes: [{ name: 'Home' as any }] });
+          }} style={[styles.draftExitBtn, { borderColor: colors.accent }]}> 
+            <Text style={[styles.draftExitBtnText, { color: colors.accent }]}>Exit Draft</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       {/* Regeneration banner when transcription changed since last generated summary */}
       {needsRegenerate && (
         <View style={[styles.regenBanner, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
@@ -915,7 +956,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
           </View>
         </View>
 
-        {/* SEND/SAVE BUTTONS */}
+        {/* Auto-save status + SEND/SAVE BUTTONS */}
         <View style={styles.actionButtons}>
           <TouchableOpacity
             style={[styles.primaryButton, { backgroundColor: colors.accent }, isSendingEmail && styles.buttonDisabled]}
@@ -928,12 +969,29 @@ export default function SummaryScreen({ navigation, route }: Props) {
               <Text style={[styles.buttonText, { fontSize: scaled(16), color: colors.accentContrast || '#fff' }]}>Send Email Report</Text>
             )}
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.secondaryButton, { backgroundColor: colors.accent }]}
-            onPress={handleSaveDraft}
+          <DraftSaveButton
+            data={editableSummary}
+            draftId={draftId}
+            workOrder={editableSummary.work_order}
+            location={editableSummary.location}
+            transcription={editableTranscription}
+            checklist={checkedItems}
+            onSaved={(id) => { setDraftId(id); setCurrentDraftId(id); setShowDraftSaved(true); }}
+            style={styles.secondaryButton}
             disabled={isSendingEmail}
-          >
-            <Text style={[styles.buttonText, { fontSize: scaled(16), color: colors.accentContrast || '#fff' }]}>Save Draft</Text>
+            currentRoute="Summary"
+          />
+        </View>
+        {/* Save status indicators */}
+        <View style={{ paddingHorizontal: 20, marginTop: 6, flexDirection: 'row', justifyContent: 'space-between' }}>
+          {isDirty ? (
+            <Text style={{ color: colors.textSecondary }}>• Unsaved changes</Text>
+          ) : lastSaved ? (
+            <Text style={{ color: colors.textSecondary }}>Saved {lastSaved.toLocaleTimeString()}</Text>
+          ) : null}
+          {/* Quick save now link */}
+          <TouchableOpacity onPress={() => saveNow().then(d => setDraftId(d.id)).catch(() => {})}>
+            <Text style={{ color: colors.accent, fontWeight: '600' }}>Save now</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -1008,6 +1066,20 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8f9fa',
   },
+  draftBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 20,
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  draftBannerText: { fontWeight: '700' },
+  draftExitBtn: { paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderRadius: 8 },
+  draftExitBtnText: { fontWeight: '700' },
   scrollContainer: {
     flex: 1,
     paddingTop: 20,

@@ -21,6 +21,7 @@ import { useFontScale } from '../context/FontScaleContext';
 import Loader from '../components/Loader';
 import { generateSummary } from '../services/api';
 import AIAgent from '../components/AIAgent';
+import DraftSaveButton from '../components/DraftSaveButton';
 import { ScreenContext, FieldInfo, CloseoutSummary } from '../types/aiAgent';
 import { useTheme } from '../context/ThemeContext';
 import { AIAgentService } from '../services/aiAgentService';
@@ -28,6 +29,8 @@ import audioLockService from '../services/audioLockService';
 import Checklist from '../components/Checklist';
 import { useTranscription } from '../context/TranscriptionContext';
 import { useSummary } from '../context/SummaryContext';
+import { useChecklist } from '../context/ChecklistContext';
+import { useReportSession } from '../context/ReportSessionContext';
 
 type TranscriptScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -64,6 +67,9 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   const { colors, isDark } = useTheme();
   const { setTranscription: setGlobalTranscription } = useTranscription();
   const { lastSummary, lastTranscription, setSummary } = useSummary();
+  const { checkedItems, reset: resetChecklist } = useChecklist();
+  const { setCurrentDraftId, setJustExitedDraft } = useReportSession();
+  const [draftId, setDraftId] = useState<string | undefined>(() => route.params?.draftId);
   const [transcription, setTranscription] = useState(route.params.transcription);
   const [isEditing, setIsEditing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -90,7 +96,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
           onPress={() => {
             const shouldReuse = lastSummary && (lastTranscription ?? '') === (transcription ?? '');
             const payload: CloseoutSummary = shouldReuse ? (lastSummary as CloseoutSummary) : {};
-            navigation.navigate('Summary', { transcription, summary: payload });
+            navigation.navigate('Summary', { transcription, summary: payload, ...(draftId ? { draftId } : {}) });
           }}
           accessibilityRole="button"
           accessibilityLabel="Next"
@@ -100,7 +106,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         </TouchableOpacity>
       ),
     });
-  }, [navigation, transcription, colors.accent, lastSummary, lastTranscription]);
+  }, [navigation, transcription, colors.accent, lastSummary, lastTranscription, draftId]);
 
   // Enhanced screen context with comprehensive field mapping
   const screenContext = useMemo((): ScreenContext => {
@@ -241,6 +247,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
       navigation.navigate('Summary', {
         transcription,
         summary: closeoutSummary,
+        ...(draftId ? { draftId } : {}),
       });
     } catch (error) {
       console.error('❌ Error generating summary:', error);
@@ -500,6 +507,22 @@ export default function TranscriptScreen({ navigation, route }: Props) {
       style={[styles.container, { backgroundColor: colors.background }]} 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
+      {/* Editing Draft banner */}
+      {!!draftId && (
+        <View style={[styles.draftBanner, { borderColor: colors.accent, backgroundColor: colors.surface }]}> 
+          <Text style={[styles.draftBannerText, { color: colors.textPrimary }]}>Editing Draft</Text>
+          <TouchableOpacity onPress={() => {
+            // Fully exit draft: clear session and working state, and reset nav stack
+            setCurrentDraftId(undefined);
+            setJustExitedDraft(true);
+            try { setGlobalTranscription(''); } catch {}
+            try { resetChecklist(); } catch {}
+            navigation.reset({ index: 0, routes: [{ name: 'Home' as any }] });
+          }} style={[styles.draftExitBtn, { borderColor: colors.accent }]}> 
+            <Text style={[styles.draftExitBtnText, { color: colors.accent }]}>Exit Draft</Text>
+          </TouchableOpacity>
+        </View>
+      )}
   <ScrollView style={[styles.scrollContainer]} contentContainerStyle={{ paddingBottom: 180 }}>
         <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <Text style={[styles.title, { fontSize: scaled(24), color: colors.textPrimary }]}>Voice Transcription</Text>
@@ -579,6 +602,17 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
           <View style={styles.sectionHeaderRow}>
             <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Checklist</Text>
+            <DraftSaveButton
+              compact
+              data={(lastSummary && (lastTranscription ?? '') === (transcription ?? '')) ? (lastSummary as CloseoutSummary) : ({ } as CloseoutSummary)}
+              draftId={draftId}
+              transcription={transcription}
+              checklist={checkedItems}
+              onSaved={(id) => { setDraftId(id); setCurrentDraftId(id); }}
+              style={{ paddingHorizontal: 8, paddingVertical: 6 }}
+              disabled={!transcription}
+              currentRoute="Transcript"
+            />
             <TouchableOpacity
               style={[styles.sectionToggleBtn, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
               onPress={() => setShowChecklist(!showChecklist)}
@@ -636,6 +670,20 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#ffffff',
   },
+  draftBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 20,
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  draftBannerText: { fontWeight: '700' },
+  draftExitBtn: { paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderRadius: 8 },
+  draftExitBtnText: { fontWeight: '700' },
   scrollContainer: {
     flex: 1,
   },

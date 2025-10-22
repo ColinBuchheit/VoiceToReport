@@ -10,6 +10,10 @@ export interface DraftItem {
   location?: string;
   transcription?: string;
   summary: CloseoutSummary;
+  // The last app route where this draft was saved from
+  lastSavedRoute?: 'Home' | 'Transcript' | 'Summary';
+  // Optional saved checklist progress for this draft
+  checklist?: Record<string, boolean>;
 }
 
 const STORAGE_KEY = 'email_drafts_v1';
@@ -81,6 +85,8 @@ class DraftService {
       location: draft.location,
       transcription: draft.transcription,
       summary: draft.summary,
+      lastSavedRoute: draft.lastSavedRoute,
+      checklist: draft.checklist,
     };
     // Upsert by id: replace existing entry if present, else insert at top
     const idx = this.cache.findIndex(d => d.id === id);
@@ -116,6 +122,16 @@ class DraftService {
     this.cache = [];
     this.loaded = true;
     await this.persist();
+  }
+
+  /** Returns the most recently edited draft (newest timestamp) or null */
+  async getLatestDraft(): Promise<DraftItem | null> {
+    await this.ensureLoaded();
+    const list = [...this.cache];
+    if (!list.length) return null;
+    // cache is already sorted newest-first by prune(); be defensive
+    list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return list[0] ?? null;
   }
 }
 
