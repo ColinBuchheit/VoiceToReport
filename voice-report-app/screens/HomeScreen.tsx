@@ -76,7 +76,7 @@ function HomeScreenInner({ navigation }: Props) {
   const [showSettings, setShowSettings] = useState(false); // Settings modal visibility
   const { checkedItems, toggleItem, reset, setAll } = useChecklist();
   const { transcription, setTranscription } = useTranscription();
-  const { setSummary } = useSummary();
+  const { setSummary, clearSummary } = useSummary();
   const { currentDraftId, setCurrentDraftId, justExitedDraft, setJustExitedDraft } = useReportSession();
   const draftId = currentDraftId; // derive for local convenience
   const [continueDraft, setContinueDraft] = useState<DraftItem | null>(null);
@@ -375,11 +375,12 @@ function HomeScreenInner({ navigation }: Props) {
     if (isDraft && lastSavedRoute) {
       if (lastSavedRoute === 'Transcript') {
         if (checklistFromDraft) setAll(checklistFromDraft);
+        if (draftId) setCurrentDraftId(draftId);
         navigation.navigate('Transcript', { transcription: email.transcription || '', ...(draftId ? { draftId } : {}) });
       } else if (lastSavedRoute === 'Home') {
         // Stay on Home; optionally populate transcription
         try { setTranscription(email.transcription || ''); } catch {}
-  if (draftId) setCurrentDraftId(draftId);
+        if (draftId) setCurrentDraftId(draftId);
         if (checklistFromDraft) setAll(checklistFromDraft);
       } else {
         if (checklistFromDraft) setAll(checklistFromDraft);
@@ -404,10 +405,11 @@ function HomeScreenInner({ navigation }: Props) {
     const route = d.lastSavedRoute || 'Summary';
     if (route === 'Transcript') {
       if (d.checklist) setAll(d.checklist);
-      navigation.navigate('Transcript', { transcription: d.transcription || '', draftId: d.id });
+        setCurrentDraftId(d.id);
+        navigation.navigate('Transcript', { transcription: d.transcription || '', draftId: d.id });
     } else if (route === 'Home') {
       try { setTranscription(d.transcription || ''); } catch {}
-      setCurrentDraftId(d.id);
+        setCurrentDraftId(d.id);
       if (d.checklist) setAll(d.checklist);
       // remain on Home
     } else {
@@ -546,7 +548,16 @@ function HomeScreenInner({ navigation }: Props) {
           <View style={[styles.draftBanner, { borderColor: colors.accent, backgroundColor: colors.surface }]}> 
             <Text style={[styles.draftBannerText, { color: colors.textPrimary }]}>Editing Draft</Text>
             <TouchableOpacity
-              onPress={() => { setCurrentDraftId(undefined); setShowContinueBanner(false); resetAllState(); }}
+              onPress={() => {
+                // Fully exit draft from Home: clear session + all working state
+                setCurrentDraftId(undefined);
+                setJustExitedDraft(true);
+                setShowContinueBanner(false);
+                try { setTranscription(''); } catch {}
+                try { clearSummary(); } catch {}
+                try { reset(); } catch {}
+                resetAllState();
+              }}
               style={[styles.draftExitBtn, { borderColor: colors.accent }]}
             >
               <Text style={[styles.draftExitBtnText, { color: colors.accent }]}>Exit Draft</Text>

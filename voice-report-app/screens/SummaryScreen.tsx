@@ -237,6 +237,12 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const [showDraftSaved, setShowDraftSaved] = useState(false);
   const [draftId, setDraftId] = useState<string | undefined>(route.params?.draftId);
+  // Ensure session marks active draft if navigated with draftId
+  useEffect(() => {
+    if (route.params?.draftId) {
+      setCurrentDraftId(route.params.draftId);
+    }
+  }, [route.params?.draftId]);
   const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [hasAutoSent, setHasAutoSent] = useState(false);

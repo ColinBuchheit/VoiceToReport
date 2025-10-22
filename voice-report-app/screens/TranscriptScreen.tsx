@@ -70,6 +70,12 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   const { checkedItems, reset: resetChecklist } = useChecklist();
   const { setCurrentDraftId, setJustExitedDraft } = useReportSession();
   const [draftId, setDraftId] = useState<string | undefined>(() => route.params?.draftId);
+  // Ensure session knows we are editing this draft if navigated with a draftId
+  useEffect(() => {
+    if (route.params?.draftId) {
+      setCurrentDraftId(route.params.draftId);
+    }
+  }, [route.params?.draftId]);
   const [transcription, setTranscription] = useState(route.params.transcription);
   const [isEditing, setIsEditing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
