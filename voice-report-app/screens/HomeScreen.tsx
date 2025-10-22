@@ -363,6 +363,45 @@ function HomeScreenInner({ navigation }: Props) {
     }
   };
 
+  // Helper to compare checklists
+  const equalChecklist = (a?: Record<string, boolean>, b?: Record<string, boolean>) => {
+    const ak = Object.keys(a || {});
+    const bk = Object.keys(b || {});
+    if (ak.length !== bk.length) return false;
+    for (const k of ak) {
+      if (!!(a as any)[k] !== !!(b as any)[k]) return false;
+    }
+    return true;
+  };
+  // Track whether there are unsaved changes on Home to enable/disable Save
+  const [isDirty, setIsDirty] = useState(false);
+  const [saveSignal, setSaveSignal] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const text = (transcription || '').trim();
+        let dirty = false;
+        if (!draftId) {
+          dirty = text.length > 0 || Object.values(checkedItems || {}).some(Boolean);
+        } else {
+          const saved = await draftService.getDraftById(draftId);
+          if (!saved) {
+            dirty = text.length > 0 || Object.values(checkedItems || {}).some(Boolean);
+          } else {
+            const sameText = (saved.transcription || '').trim() === text;
+            const sameChecklist = equalChecklist(saved.checklist, checkedItems);
+            dirty = !(sameText && sameChecklist);
+          }
+        }
+        if (!cancelled) setIsDirty(dirty);
+      } catch {
+        if (!cancelled) setIsDirty(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [draftId, transcription, checkedItems, saveSignal]);
+
   const handleEmailSelect = (email: EmailHistoryItem) => {
     console.log('📧 Selected email transcription length:', email.transcription?.length || 0);
     console.log('📧 Transcription preview:', email.transcription ? email.transcription.slice(0, 100) : 'EMPTY');
@@ -517,9 +556,9 @@ function HomeScreenInner({ navigation }: Props) {
             draftId={draftId}
             transcription={transcription}
             checklist={checkedItems}
-            onSaved={(id) => setCurrentDraftId(id)}
+            onSaved={(id) => { setCurrentDraftId(id); setSaveSignal(x => x + 1); }}
             style={{ marginLeft: 4 }}
-            disabled={!transcription || !transcription.trim()}
+            disabled={!isDirty}
             currentRoute="Home"
           />
         </View>
@@ -548,15 +587,67 @@ function HomeScreenInner({ navigation }: Props) {
           <View style={[styles.draftBanner, { borderColor: colors.accent, backgroundColor: colors.surface }]}> 
             <Text style={[styles.draftBannerText, { color: colors.textPrimary }]}>Editing Draft</Text>
             <TouchableOpacity
-              onPress={() => {
-                // Fully exit draft from Home: clear session + all working state
-                setCurrentDraftId(undefined);
-                setJustExitedDraft(true);
-                setShowContinueBanner(false);
-                try { setTranscription(''); } catch {}
-                try { clearSummary(); } catch {}
-                try { reset(); } catch {}
-                resetAllState();
+              onPress={async () => {
+                // If there are unsaved changes on Home (transcription/checklist), offer to save
+                const maybeDraftId = draftId;
+                const text = (transcription || '').trim();
+                let hasUnsaved = false;
+                try {
+                  if (maybeDraftId) {
+                    const saved = await draftService.getDraftById(maybeDraftId);
+                    if (saved) {
+                      const savedText = (saved.transcription || '').trim();
+                      const equalChecklist = (a?: Record<string, boolean>, b?: Record<string, boolean>) => {
+                        const ak = Object.keys(a || {});
+                        const bk = Object.keys(b || {});
+                        if (ak.length !== bk.length) return false;
+                        for (const k of ak) { if (!!(a as any)[k] !== !!(b as any)[k]) return false; }
+                        return true;
+                      };
+                      hasUnsaved = savedText !== text || !equalChecklist(saved.checklist, checkedItems);
+                    } else {
+                      hasUnsaved = text.length > 0 || Object.values(checkedItems || {}).some(Boolean);
+                    }
+                  } else {
+                    hasUnsaved = text.length > 0 || Object.values(checkedItems || {}).some(Boolean);
+                  }
+                } catch { hasUnsaved = true; }
+
+                const exitNow = () => {
+                  setCurrentDraftId(undefined);
+                  setJustExitedDraft(true);
+                  setShowContinueBanner(false);
+                  try { setTranscription(''); } catch {}
+                  try { clearSummary(); } catch {}
+                  try { reset(); } catch {}
+                  resetAllState();
+                };
+
+                if (hasUnsaved) {
+                  Alert.alert(
+                    'Unsaved changes',
+                    'Do you want to save your changes before exiting?',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Discard', style: 'destructive', onPress: () => exitNow() },
+                      { text: 'Save', onPress: async () => {
+                          try {
+                            await draftService.addDraft({
+                              id: maybeDraftId,
+                              transcription: text,
+                              summary: {} as any,
+                              lastSavedRoute: 'Home',
+                              checklist: checkedItems,
+                            });
+                          } catch {}
+                          exitNow();
+                        }
+                      },
+                    ]
+                  );
+                } else {
+                  exitNow();
+                }
               }}
               style={[styles.draftExitBtn, { borderColor: colors.accent }]}
             >

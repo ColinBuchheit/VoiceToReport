@@ -1,5 +1,5 @@
 // voice-report-app/screens/SummaryScreen.tsx - UPDATED with Email Success Popup
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -252,6 +252,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const [aiFieldUpdates, setAiFieldUpdates] = useState<Record<string, number>>({});
   const [fieldHistory, setFieldHistory] = useState<Record<string, { previous?: string; current: string }>>({});
   const [fieldHistoryMeta, setFieldHistoryMeta] = useState<Record<string, number>>({});
+  // Signal for external saves (e.g., DraftSaveButton) to refresh isDirty immediately
+  const [saveSignal, setSaveSignal] = useState(0);
 
   // Auto-save drafts for safety
   const { lastSaved, isDirty, saveNow } = useAutoSave(editableSummary, {
@@ -263,7 +265,59 @@ export default function SummaryScreen({ navigation, route }: Props) {
     interval: 30000,
     currentRoute: 'Summary',
     checklist: checkedItems,
+    externalSaveSignal: saveSignal,
   });
+
+  // Hydrate from saved draft if params are missing
+  useEffect(() => {
+    (async () => {
+      try {
+        const missingSummary = !route.params?.summary || Object.values(route.params?.summary || {}).every(v => (v ?? '').toString().trim() === '');
+        const missingTrans = !route.params?.transcription || (route.params?.transcription || '').trim() === '';
+        if ((missingSummary || missingTrans) && draftId) {
+          const d = await draftService.getDraftById(draftId);
+          if (d) {
+            if (missingSummary && d.summary) setEditableSummary(initializeCloseoutSummary(d.summary));
+            if (missingTrans && d.transcription) setEditableTranscription(d.transcription);
+            // If checklist isn't present in context (empty), seed from draft
+            if (d.checklist) {
+              try { setAll(d.checklist); } catch {}
+            }
+          }
+        }
+      } catch {}
+    })();
+  }, [draftId]);
+
+  // Customize back button to go to Transcript when in a draft session
+  useLayoutEffect(() => {
+    if (!draftId) return;
+    navigation.setOptions({
+      headerLeft: () => (
+        <TouchableOpacity
+          onPress={async () => {
+            try {
+              // Prefer current editable transcription; if empty, hydrate from saved draft
+              let text = (editableTranscription || '').trim();
+              if (!text) {
+                const d = await draftService.getDraftById(draftId);
+                if (d?.transcription) text = d.transcription;
+              }
+              // Replace Summary with Transcript so back from Transcript goes to Home
+              // @ts-ignore navigation.replace is available on native stack
+              navigation.replace('Transcript', { transcription: text, draftId });
+            } catch {
+              // @ts-ignore
+              navigation.replace('Transcript', { transcription: editableTranscription || '', draftId });
+            }
+          }}
+          style={{ paddingHorizontal: 10, paddingVertical: 6 }}
+        >
+          <Ionicons name="chevron-back" size={22} color={colors.accent} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, draftId, editableTranscription, colors.accent]);
 
   // Highlight window (ms)
   const HIGHLIGHT_WINDOW_MS = 8000;
@@ -718,14 +772,29 @@ export default function SummaryScreen({ navigation, route }: Props) {
         <View style={[styles.draftBanner, { borderColor: colors.accent, backgroundColor: colors.surface }]}> 
           <Text style={[styles.draftBannerText, { color: colors.textPrimary }]}>Editing Draft</Text>
           <TouchableOpacity onPress={() => {
-            setShowSuccessPopup(false);
-            // Fully exit the draft: clear session, transcription, checklist, cached summary
-            try { setTranscription(''); } catch {}
-            try { resetChecklist(); } catch {}
-            try { setSummary({} as any, ''); } catch {}
-            setCurrentDraftId(undefined);
-            setJustExitedDraft(true);
-            navigation.reset({ index: 0, routes: [{ name: 'Home' as any }] });
+            const doExit = () => {
+              setShowSuccessPopup(false);
+              try { setTranscription(''); } catch {}
+              try { resetChecklist(); } catch {}
+              try { setSummary({} as any, ''); } catch {}
+              setCurrentDraftId(undefined);
+              setJustExitedDraft(true);
+              navigation.reset({ index: 0, routes: [{ name: 'Home' as any }] });
+            };
+
+            if (isDirty) {
+              Alert.alert(
+                'Unsaved changes',
+                'Do you want to save your changes before exiting?',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Discard', style: 'destructive', onPress: () => doExit() },
+                  { text: 'Save', onPress: async () => { try { const d = await saveNow(); setDraftId(d.id); } catch {}; doExit(); } },
+                ]
+              );
+            } else {
+              doExit();
+            }
           }} style={[styles.draftExitBtn, { borderColor: colors.accent }]}> 
             <Text style={[styles.draftExitBtnText, { color: colors.accent }]}>Exit Draft</Text>
           </TouchableOpacity>
@@ -982,23 +1051,19 @@ export default function SummaryScreen({ navigation, route }: Props) {
             location={editableSummary.location}
             transcription={editableTranscription}
             checklist={checkedItems}
-            onSaved={(id) => { setDraftId(id); setCurrentDraftId(id); setShowDraftSaved(true); }}
+            onSaved={(id) => { setDraftId(id); setCurrentDraftId(id); setShowDraftSaved(true); setSaveSignal(x => x + 1); }}
             style={styles.secondaryButton}
-            disabled={isSendingEmail}
+            disabled={!isDirty || isSendingEmail}
             currentRoute="Summary"
           />
         </View>
-        {/* Save status indicators */}
-        <View style={{ paddingHorizontal: 20, marginTop: 6, flexDirection: 'row', justifyContent: 'space-between' }}>
+        {/* Save status indicator (single source of truth: the Save button above) */}
+        <View style={{ paddingHorizontal: 20, marginTop: 6 }}>
           {isDirty ? (
             <Text style={{ color: colors.textSecondary }}>• Unsaved changes</Text>
           ) : lastSaved ? (
             <Text style={{ color: colors.textSecondary }}>Saved {lastSaved.toLocaleTimeString()}</Text>
           ) : null}
-          {/* Quick save now link */}
-          <TouchableOpacity onPress={() => saveNow().then(d => setDraftId(d.id)).catch(() => {})}>
-            <Text style={{ color: colors.accent, fontWeight: '600' }}>Save now</Text>
-          </TouchableOpacity>
         </View>
       </ScrollView>
 

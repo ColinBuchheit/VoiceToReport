@@ -6,6 +6,7 @@ import { CloseoutSummary } from '../types/aiAgent';
 export interface DraftItem {
   id: string;            // uuid
   timestamp: string;     // ISO string
+  title?: string;
   workOrder?: string;
   location?: string;
   transcription?: string;
@@ -81,6 +82,7 @@ class DraftService {
     const item: DraftItem = {
       id,
       timestamp,
+      title: draft.title,
       workOrder: draft.workOrder,
       location: draft.location,
       transcription: draft.transcription,
@@ -132,6 +134,13 @@ class DraftService {
     // cache is already sorted newest-first by prune(); be defensive
     list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return list[0] ?? null;
+  }
+
+  /** Returns a draft by id or null if not found */
+  async getDraftById(id: string): Promise<DraftItem | null> {
+    await this.ensureLoaded();
+    const d = this.cache.find(x => x.id === id);
+    return d ? { ...d } : null;
   }
 }
 

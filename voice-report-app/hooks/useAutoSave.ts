@@ -14,6 +14,8 @@ interface AutoSaveOptions {
   currentRoute?: 'Home' | 'Transcript' | 'Summary';
   // Optional checklist progress to persist with draft
   checklist?: Record<string, boolean>;
+  // Optional signal to force recomputing dirty state after an external save
+  externalSaveSignal?: number;
 }
 
 export function useAutoSave(
@@ -24,15 +26,55 @@ export function useAutoSave(
   const [isDirty, setIsDirty] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Mark dirty when data changes
-  useEffect(() => {
-    setIsDirty(true);
-    // Reset debounce on data change
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
+  const normalizeStr = (v?: any) => ((v ?? '') as string).toString().trim();
+  const summariesEqual = (a?: CloseoutSummary, b?: CloseoutSummary) => {
+    const ak = Object.keys(a || {});
+    const bk = Object.keys(b || {});
+    const keys = Array.from(new Set([...ak, ...bk]));
+    for (const k of keys) {
+      if (normalizeStr((a as any)?.[k]) !== normalizeStr((b as any)?.[k])) return false;
     }
-  }, [data]);
+    return true;
+  };
+  const equalChecklist = (a?: Record<string, boolean>, b?: Record<string, boolean>) => {
+    const ak = Object.keys(a || {});
+    const bk = Object.keys(b || {});
+    if (ak.length !== bk.length) return false;
+    for (const k of ak) { if (!!(a as any)[k] !== !!(b as any)[k]) return false; }
+    return true;
+  };
+
+  // Compute dirtiness by comparing against saved draft (or empty baseline)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const text = normalizeStr(options?.transcription);
+        const anyChecklist = Object.values(options?.checklist || {}).some(Boolean);
+        if (!options?.draftId) {
+          const anySummary = Object.values(data || {}).some(v => normalizeStr(v) !== '');
+          const dirty = anySummary || text.length > 0 || anyChecklist;
+          if (!cancelled) setIsDirty(dirty);
+          return;
+        }
+        const saved = await draftService.getDraftById(options.draftId);
+        if (!saved) {
+          const anySummary = Object.values(data || {}).some(v => normalizeStr(v) !== '');
+          const dirty = anySummary || text.length > 0 || anyChecklist;
+          if (!cancelled) setIsDirty(dirty);
+          return;
+        }
+        const sameSummary = summariesEqual(saved.summary as any, data);
+        const sameText = normalizeStr(saved.transcription) === text;
+        const sameChecklist = equalChecklist(saved.checklist, options?.checklist);
+        if (!cancelled) setIsDirty(!(sameSummary && sameText && sameChecklist));
+      } catch (e) {
+        if (!cancelled) setIsDirty(true);
+      }
+    })();
+    return () => { cancelled = true; };
+    // Re-evaluate when inputs that affect dirtiness change
+  }, [options?.draftId, options?.transcription, options?.checklist, options?.externalSaveSignal, data]);
 
   // Auto-save with debounce
   useEffect(() => {
