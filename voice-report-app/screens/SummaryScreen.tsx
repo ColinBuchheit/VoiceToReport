@@ -807,42 +807,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
     console.log('═══════════════════════════════════════════════════════');
   };
 
-  // Build a single block of text for easy copy/paste sharing
-  const buildCopyPasteSummary = (): string => {
-    const s = editableSummary;
-    const lines: string[] = [];
-    lines.push('JOB DETAILS');
-    if (s.work_order) lines.push(`Work Order #: ${s.work_order}`);
-    if (s.location) lines.push(`Location: ${s.location}`);
-    if (s.technician_name) lines.push(`Technician Name: ${s.technician_name}`);
-    lines.push('');
-
-    lines.push('SERVICE SUMMARY');
-    if (s.scope_completed) lines.push(`Scope Status: ${s.scope_completed}`);
-    if (s.checked_in_with) lines.push(`Checked In With: ${s.checked_in_with}`);
-    if (s.check_in_code) lines.push(`Check In Code: ${s.check_in_code}`);
-    if (s.onsite_contact) lines.push(`On-Site Contact: ${s.onsite_contact}`);
-    if (s.support_contact) lines.push(`Support Contact: ${s.support_contact}`);
-    if (s.released_by) lines.push(`Released By: ${s.released_by}`);
-    if (s.release_code) lines.push(`Release Code: ${s.release_code}`);
-    if (editableTranscription) lines.push(`Transcription: ${editableTranscription}`);
-    lines.push('');
-
-    lines.push('TECHNICAL INFORMATION');
-    if (s.work_completed) lines.push(`Work Completed: ${s.work_completed}`);
-    if (s.troubleshooting_steps) lines.push(`Troubleshooting Steps: ${s.troubleshooting_steps}`);
-    if (s.delays) lines.push(`Delays & Issues: ${s.delays}`);
-    if (s.out_of_scope_work) lines.push(`Out of Scope Work: ${s.out_of_scope_work}`);
-    lines.push('');
-
-    lines.push('CLOSEOUT DETAILS');
-    if (s.return_tracking) lines.push(`Return Tracking: ${s.return_tracking}`);
-    if (s.materials_used) lines.push(`Materials Used: ${s.materials_used}`);
-    if (s.expenses) lines.push(`Expenses: ${s.expenses}`);
-    if (s.photos_uploaded) lines.push(`Photos Uploaded: ${s.photos_uploaded}`);
-
-    return lines.join('\n');
-  };
+  // (Removed) Copy/Paste summary block was previously displayed here.
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }] }>
@@ -1143,24 +1108,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
           />
         </View>
 
-        {/* COPY/PASTE SUMMARY SECTION */}
-        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { fontSize: scaled(18), color: colors.textPrimary, borderBottomColor: colors.border }]}>Copy/Paste Summary</Text>
-          <Text
-            selectable
-            style={{
-              color: colors.textPrimary,
-              backgroundColor: colors.surfaceAlt,
-              borderColor: colors.border,
-              borderWidth: 1,
-              borderRadius: 8,
-              padding: 12,
-              lineHeight: 20,
-            }}
-          >
-            {buildCopyPasteSummary()}
-          </Text>
-        </View>
+        {/* Copy/Paste Summary section removed (email includes an auto-generated version). */}
 
         {/* Auto-save status + SEND/SAVE BUTTONS */}
         <View style={styles.actionButtons}>
