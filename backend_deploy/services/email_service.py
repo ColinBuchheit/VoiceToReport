@@ -1,7 +1,9 @@
 # backend/services/email_service.py - SLEEK PROFESSIONAL DESIGN
+"""backend/services/email_service.py - SLEEK HTML EMAIL FORMAT (Unified)"""
 import logging
 import smtplib
 import ssl
+import certifi
 import base64
 import os
 from email.mime.text import MIMEText
@@ -16,38 +18,94 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+
 class EmailService:
     """Service for sending closeout report emails"""
-    
+
     def __init__(self):
         self.smtp_server = settings.smtp_server
         self.smtp_port = int(settings.smtp_port)
         self.email_user = settings.email_user
         self.email_password = settings.email_password
-        
+
+        # Parse recipients strictly from environment/config (no hard-coded fallback)
         if settings.email_recipients:
+            # Split by comma and clean up whitespace
             self.recipients = [email.strip() for email in settings.email_recipients.split(',') if email.strip()]
         else:
+            # No recipients configured; leave empty and let send methods report an error
             self.recipients = []
-        
-        logger.info(f"Email service initialized with {len(self.recipients)} recipients: {', '.join(self.recipients)}")
-    
+
+        if self.recipients:
+            logger.info(f"Email service initialized with {len(self.recipients)} recipients: {', '.join(self.recipients)}")
+        else:
+            logger.warning("Email service initialized with 0 recipients. Set EMAIL_RECIPIENTS in environment (comma-separated).")
+
     def _safe_get(self, data: Union[Dict[str, Any], object], key: str, default: str = 'Not specified') -> str:
-        """Safely get value from either a dictionary or an object with attributes"""
+        """
+        Safely get value from either a dictionary or an object with attributes
+        """
         try:
             if isinstance(data, dict):
-                value = data.get(key, default)
+                return data.get(key, default)
             else:
-                value = getattr(data, key, default)
-            
-            if not value or (isinstance(value, str) and not value.strip()):
-                return default
-            return value.strip() if isinstance(value, str) else str(value)
+                # Handle Pydantic objects or other objects with attributes
+                return getattr(data, key, default)
         except (AttributeError, TypeError):
             return default
-    
+
+    def _get_secret_value(self, maybe_secret: Any) -> str | None:
+        """Return the plain string for SecretStr or str; None if empty/None."""
+        try:
+            # Pydantic v2 SecretStr
+            if hasattr(maybe_secret, "get_secret_value"):
+                value = maybe_secret.get_secret_value()
+            else:
+                value = maybe_secret
+        except Exception:
+            value = None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    def _value_for(self, data: Union[Dict[str, Any], object], key: str, default: str = 'Not specified') -> str:
+        """
+        Get a field value with sensible fallbacks for known synonyms.
+        - work_completed <= taskDescription
+        - scope_completed <= outcome
+        - notes <= additional_notes
+        - work_order <= workOrder/work_order_number
+        """
+        # Primary
+        v = self._safe_get(data, key, None)
+        if v and v != 'Not specified':
+            return v
+
+        # Fallbacks for specific fields
+        if key == 'work_completed':
+            v2 = self._safe_get(data, 'taskDescription', None)
+            return v2 if v2 else default
+        if key == 'scope_completed':
+            v2 = self._safe_get(data, 'outcome', None)
+            return v2 if v2 else default
+        if key == 'notes':
+            v2 = self._safe_get(data, 'additional_notes', None)
+            return v2 if v2 else default
+        if key == 'work_order':
+            for alt in ['workOrder', 'work_order_number']:
+                v2 = self._safe_get(data, alt, None)
+                if v2 and v2 != 'Not specified':
+                    return v2
+            return default
+
+        return default
+
+    def get_recipients(self) -> List[str]:
+        """Get current list of email recipients"""
+        return self.recipients.copy()
+
     def _get_logo_base64(self) -> str:
-        """Load and encode the local logo as base64"""
+        """Load and encode the local logo as base64 (fallback to placeholder)."""
         try:
             logo_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'bears&t.png')
             if os.path.exists(logo_path):
@@ -61,138 +119,86 @@ class EmailService:
         except Exception as e:
             logger.error(f"❌ Failed to load logo: {e}")
             return "https://via.placeholder.com/200x80/000000/FF6B35?text=Bear+Techs"
-    
-    def get_recipients(self) -> List[str]:
-        """Get current list of email recipients"""
-        return self.recipients.copy()
 
-    def _value_for(self, data: Union[Dict[str, Any], object], key: str, default: str = 'Not specified') -> str:
-        """Get a field value with sensible fallbacks for known synonyms."""
-        v = self._safe_get(data, key, None)
-        if v and v != 'Not specified':
-            return v
-        if key == 'work_completed':
-            v2 = self._safe_get(data, 'taskDescription', None)
-            return v2 if v2 else default
-        if key == 'scope_completed':
-            v2 = self._safe_get(data, 'outcome', None)
-            return v2 if v2 else default
-        if key == 'notes' or key == 'additional_notes':
-            # prefer 'notes' but allow 'additional_notes'
-            for alt in ['notes', 'additional_notes']:
-                v2 = self._safe_get(data, alt, None)
-                if v2 and v2 != 'Not specified':
-                    return v2
-            return default
-        if key == 'work_order':
-            for alt in ['workOrder', 'work_order_number']:
-                v2 = self._safe_get(data, alt, None)
-                if v2 and v2 != 'Not specified':
-                    return v2
-            return default
-        return default
-    
-    def format_closeout_email_html(self, closeout_data: Union[Dict[str, Any], object], transcription: str, technician_name: str = None, technician_email: str = None, logo_src_override: str = None) -> str:
-        """Format closeout data into a sleek, professional HTML email inspired by Stripe/Notion"""
-        
+    def format_closeout_email_html(
+        self,
+        closeout_data: Union[Dict[str, Any], object],
+        transcription: str,
+        technician_name: str | None = None,
+        technician_email: str | None = None,
+        logo_src_override: str | None = None,
+    ) -> str:
+        """Format closeout data into a sleek, professional HTML email."""
+
         timestamp = datetime.now().strftime("%B %d, %Y")
 
-        # Get work order
+        # Extract work order with fallbacks
         work_order = None
         for field_name in ['work_order', 'workOrder', 'work_order_number']:
-            work_order = self._safe_get(closeout_data, field_name, None)
-            if work_order and work_order != 'Not specified':
+            val = self._safe_get(closeout_data, field_name, None)
+            if val and val != 'Not specified':
+                work_order = val
                 break
-
         if not work_order or work_order == 'Not specified':
             work_order = 'Not Specified'
 
-        logger.info(f"📋 Work Order for email: '{work_order}'")
-
         location_name = self._safe_get(closeout_data, 'location', None)
         tech_name = technician_name or self._safe_get(closeout_data, 'technician_name', None)
-        # Normalize placeholders
         if tech_name in (None, '', 'Not specified', 'Not mentioned'):
             tech_name = None
 
-        # Clean technician email
         if technician_email:
             technician_email = technician_email.strip()
         if technician_email in (None, '', 'Not specified', 'Not mentioned'):
             technician_email = None
         logo_src = logo_src_override or self._get_logo_base64()
 
-    # Define field groups with clean organization
+        # Ensure all 17 fields appear in the structured sections
         field_groups = [
-            {
-                "title": "Job Details",
-                "fields": [
-                    ("work_order", "Work Order #"),
-                    ("location", "Location"),
-                    ("technician_name", "Technician Name"),
-                ],
-            },
-            {
-                "title": "Service Summary",
-                "fields": [
-                    ("onsite_contact", "On-Site Contact"),
-                    ("support_contact", "Support Contact"),
-                    ("work_completed", "Work Completed"),
-                    ("scope_completed", "Scope Status"),
-                ]
-            },
-            {
-                "title": "Technical Information",
-                "fields": [
-                    ("delays", "Delays & Issues"),
-                    ("troubleshooting_steps", "Troubleshooting Steps"),
-                ]
-            },
-            {
-                "title": "Closeout Details",
-                "fields": [
-                    ("released_by", "Released By"),
-                    ("release_code", "Release Code"),
-                    ("return_tracking", "Return Tracking"),
-                ]
-            },
-            {
-                "title": "Resources",
-                "fields": [
-                    ("photos_uploaded", "Photos Uploaded"),
-                    ("expenses", "Expenses"),
-                    ("materials_used", "Materials Used"),
-                ]
-            },
-            {
-                "title": "Additional Notes",
-                "fields": [
-                    ("out_of_scope_work", "Out of Scope Work"),
-                    ("notes", "Notes"),
-                ]
-            },
+            {"title": "Job Details", "fields": [
+                ("work_order", "Work Order #"),
+                ("location", "Location"),
+                ("technician_name", "Technician Name"),
+            ]},
+            {"title": "Service Summary", "fields": [
+                ("onsite_contact", "On-Site Contact"),
+                ("support_contact", "Support Contact"),
+                ("work_completed", "Work Completed"),
+                ("scope_completed", "Scope Status"),
+            ]},
+            {"title": "Technical Information", "fields": [
+                ("delays", "Delays & Issues"),
+                ("troubleshooting_steps", "Troubleshooting Steps"),
+            ]},
+            {"title": "Closeout Details", "fields": [
+                ("released_by", "Released By"),
+                ("release_code", "Release Code"),
+                ("return_tracking", "Return Tracking"),
+            ]},
+            {"title": "Resources", "fields": [
+                ("photos_uploaded", "Photos Uploaded"),
+                ("expenses", "Expenses"),
+                ("materials_used", "Materials Used"),
+            ]},
+            {"title": "Additional Notes", "fields": [
+                ("out_of_scope_work", "Out of Scope Work"),
+                ("notes", "Notes"),
+            ]},
         ]
-        
-        # Build field sections with modern card style (accent left border, subtle shadow)
+
         sections_html = ""
         HIDE_VALUES = {None, "", "Not specified", "Not mentioned", "None"}
         for group in field_groups:
             group_html = ""
             has_content = False
-
-            # Check if this group has content
             for field_name, _ in group["fields"]:
-                # use value_for to take advantage of fallbacks
                 value = self._value_for(closeout_data, field_name)
                 value_cmp = value.strip() if isinstance(value, str) else value
                 if value_cmp not in HIDE_VALUES:
                     has_content = True
                     break
-
             if not has_content:
                 continue
-
-            # Section title
             group_html += f"""
             <tr>
                 <td style="padding: 28px 0 12px 0;">
@@ -200,8 +206,6 @@ class EmailService:
                 </td>
             </tr>
             """
-
-            # Fields as cards
             for field_name, label in group["fields"]:
                 value = self._value_for(closeout_data, field_name)
                 value_cmp = value.strip() if isinstance(value, str) else value
@@ -211,44 +215,40 @@ class EmailService:
                 <td style="padding: 8px 0 12px 0;">
                     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" class="field-card" style="width:100%; background-color:#FFFFFF; border-radius:10px; border:1px solid #ECEFF1; box-shadow:0 2px 8px rgba(12,12,12,0.04);">
                         <tr>
-                            <td style="padding:14px 16px;">
-                                <div class="field-label" style="font-size:12px; font-weight:700; color:#374151; margin-bottom:6px;">{label}</div>
-                                <div class="field-value" style="font-size:14px; line-height:1.6; color:#0B0B0B;">{value}</div>
+                            <td style=\"padding:14px 16px;\">
+                                <div class=\"field-label\" style=\"font-size:12px; font-weight:700; color:#374151; margin-bottom:6px;\">{label}</div>
+                                <div class=\"field-value\" style=\"font-size:14px; line-height:1.6; color:#0B0B0B;\">{value}</div>
                             </td>
-                            <td width="8" style="width:8px;"></td>
+                            <td width=\"8\" style=\"width:8px;\"></td>
                         </tr>
                     </table>
                 </td>
             </tr>
                     """
-
             sections_html += group_html
-        
-        # Build transcription section
+
         transcription_html = ""
-        if transcription and transcription.strip() and transcription != 'Not specified':
+        if transcription and str(transcription).strip() and transcription != 'Not specified':
             transcription_html = f"""
             <tr>
-                <td style="padding: 20px 0 12px 0;">
-                    <h2 class="section-title" style="margin:0; font-size:12px; font-weight:700; color:#9CA3AF; text-transform:uppercase; letter-spacing:0.08em;">Voice Transcription</h2>
+                <td style=\"padding: 20px 0 12px 0;\">
+                    <h2 class=\"section-title\" style=\"margin:0; font-size:12px; font-weight:700; color:#9CA3AF; text-transform:uppercase; letter-spacing:0.08em;\">Voice Transcription</h2>
                 </td>
             </tr>
             <tr>
-                <td style="padding: 8px 0 16px 0;">
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#FFF9F6; border:1px solid #FFE9DA; border-radius:10px;">
-                        <tr>
-                            <td style="padding:14px 16px;">
-                                <div style="font-size:14px; line-height:1.7; color:#374151; font-style:normal;">{transcription}</div>
+                <td style=\"padding: 8px 0 16px 0;\">
+                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"background-color:#FFF9F6; border:1px solid #FFE9DA; border-radius:10px;\">\n                        <tr>
+                            <td style=\"padding:14px 16px;\">\n                                <div style=\"font-size:14px; line-height:1.7; color:#374151; font-style:normal;\">{transcription}</div>
                             </td>
                         </tr>
                     </table>
                 </td>
             </tr>
             """
-        
+
         # Build a simplified, ordered copy block for easy paste into emails or portals
-        copy_lines = []
-        # Technician (optional)
+        copy_lines: list[str] = []
+        # Technician line (optional)
         if tech_name or technician_email:
             if tech_name and technician_email:
                 copy_lines.append(f"Technician - {tech_name} ({technician_email})")
@@ -257,7 +257,8 @@ class EmailService:
             else:
                 copy_lines.append(f"Technician - {technician_email}")
 
-        ordered_fields = [
+        # Canonical order and labels
+        ordered_fields: list[tuple[str, str]] = [
             ("onsite_contact", "On-Site Contact"),
             ("support_contact", "Support Contact"),
             ("work_completed", "Work Completed"),
@@ -274,31 +275,29 @@ class EmailService:
             ("notes", "Notes"),
         ]
 
+        # Use _value_for to benefit from synonyms/fallbacks
         for field_name, label in ordered_fields:
             value = self._value_for(closeout_data, field_name)
-            # Skip fields with "Not mentioned", "None", or "Not specified"
+            # Skip fields with placeholders or explicit "None"
             if value and value not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no']:
+                # Prefer dash formatting for quick paste
                 copy_lines.append(f"{label} - {value}")
 
-        if transcription and transcription.strip() and transcription not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no']:
-            copy_lines.append("Transcription - " + transcription.strip())
+        # Append transcription at end if available
+        if transcription and str(transcription).strip() and str(transcription) not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no']:
+            copy_lines.append("Transcription - " + str(transcription).strip())
 
-        # Use HTML line breaks for better mobile compatibility; sanitize lines to preserve <br>
+        # Use HTML line breaks for better mobile compatibility; sanitize each line to preserve <br>
         sanitized_lines = [line.replace('<', '\u27e8').replace('>', '\u27e9') for line in copy_lines]
         copy_block_text = ("<br><br>".join(sanitized_lines))
-
         copy_paste_html = f"""
             <tr>
-                <td style=\"padding: 28px 0 12px 0;\"> 
-                    <h2 class=\"section-title\" style=\"margin:0; font-size:12px; font-weight:700; color:#9CA3AF; text-transform:uppercase; letter-spacing:0.08em;\">Copy/Paste Summary</h2>
+                <td style=\"padding: 28px 0 12px 0;\">\n                    <h2 class=\"section-title\" style=\"margin:0; font-size:12px; font-weight:700; color:#9CA3AF; text-transform:uppercase; letter-spacing:0.08em;\">Copy/Paste Summary</h2>
                 </td>
             </tr>
             <tr>
-                <td style=\"padding: 8px 0 16px 0;\"> 
-                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"background-color:#F7F7F8; border:1px solid #ECEFF1; border-radius:10px;\"> 
-                        <tr>
-                            <td style=\"padding:14px 16px;\"> 
-                                <div style=\"font-family:Menlo,Consolas,'Courier New',monospace; font-size:12px; line-height:1.8; color:#374151;\">{copy_block_text}</div>
+                <td style=\"padding: 8px 0 16px 0;\">\n                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"background-color:#F7F7F8; border:1px solid #ECEFF1; border-radius:10px;\">\n                        <tr>
+                            <td style=\"padding:14px 16px;\">\n                                <div style=\"font-family:Menlo,Consolas,'Courier New',monospace; font-size:12px; line-height:1.8; color:#374151;\">{copy_block_text}</div>
                             </td>
                         </tr>
                     </table>
@@ -306,20 +305,17 @@ class EmailService:
             </tr>
         """
 
-        # Header technician badge (if available)
         technician_badge_html = ""
         if tech_name or technician_email:
-            tech_label_parts = []
+            tech_label_parts: list[str] = []
             if tech_name:
                 tech_label_parts.append(tech_name)
             if technician_email:
                 tech_label_parts.append(f"<span style=\"color:#6B7280;\">{technician_email}</span>")
-            # Build labeled technician info string
             tech_label = f"<strong>Technician Info:</strong> " + " · ".join(tech_label_parts)
             technician_badge_html = f"""
                 <tr>
-                    <td align=\"center\" style=\"padding-top:14px;\">
-                        <div class=\"tech-badge\" style=\"display:inline-block; background-color:#F7F7F8; color:#374151; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; border:1px solid #ECEFF1;\">
+                    <td align=\"center\" style=\"padding-top:14px;\">\n                        <div class=\"tech-badge\" style=\"display:inline-block; background-color:#F7F7F8; color:#374151; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; border:1px solid #ECEFF1;\">
                             {tech_label}
                         </div>
                     </td>
@@ -328,23 +324,16 @@ class EmailService:
 
         html_body = f"""
         <!DOCTYPE html>
-        <html lang="en">
+        <html lang=\"en\">
         <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <meta http-equiv="X-UA-Compatible" content="IE=edge">
-            <meta name="x-apple-disable-message-reformatting">
-            <meta name="color-scheme" content="light dark">
-            <meta name="supported-color-schemes" content="light dark">
+            <meta charset=\"UTF-8\">
+            <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n            <meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\">\n            <meta name=\"x-apple-disable-message-reformatting\">\n            <meta name=\"color-scheme\" content=\"light dark\">\n            <meta name=\"supported-color-schemes\" content=\"light dark\">
             <title>Field Service Closeout Report</title>
             <style>
-                /* Core color scheme: Black / White / Orange */
                 :root {{
                     color-scheme: light dark;
                     supported-color-schemes: light dark;
                 }}
-
-                /* Desktop / client-friendly adjustments */
                 .section-title {{ color: #9CA3AF; }}
                 .field-card {{ background-color: #FFFFFF; border:1px solid #ECEFF1; }}
                 .field-label {{ color: #374151; }}
@@ -353,7 +342,6 @@ class EmailService:
                 .footer-text {{ color: #9CA3AF; }}
                 .wo-badge {{ background-color: #FF6B35; color:#FFFFFF; }}
                 .tech-badge {{ background-color:#F7F7F8; color:#374151; border:1px solid #ECEFF1; }}
-
                 @media (prefers-color-scheme: dark) {{
                     .email-bg {{ background-color:#080808 !important; }}
                     .card-bg {{ background-color:#0B0B0B !important; border-color:#1A1A1A !important; color:#E6E6E6 !important; }}
@@ -369,29 +357,14 @@ class EmailService:
                 }}
             </style>
         </head>
-        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; -webkit-text-size-adjust: 100%; line-height: 1.5;">
-            <table role="presentation" class="email-bg" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #F3F4F6;">
-                <tr>
-                    <td align="center" style="padding: 40px 20px;">
-                        <table role="presentation" class="card-bg" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width: 600px; background-color: #FFFFFF; border-radius: 12px; border: 1px solid #E5E7EB; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);">
-                            
-                            <!-- Header -->
-                            <tr>
-                                    <td class="header-bg" style="padding: 28px 28px 22px 28px; background-color: #0B0B0B; border-bottom: 1px solid rgba(255,255,255,0.06);">
-                                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                                        <tr>
-                                            <td align="center" style="padding-bottom: 20px;">
-                                                <img src="{logo_src}" alt="Bear Techs" width="150" style="height: auto; display: block; border: 0;">
-                                            </td>
+        <body style=\"margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; -webkit-text-size-adjust: 100%; line-height: 1.5;\">\n            <table role=\"presentation\" class=\"email-bg\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"background-color: #F3F4F6;\">\n                <tr>
+                    <td align=\"center\" style=\"padding: 40px 20px;\">\n                        <table role=\"presentation\" class=\"card-bg\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"max-width: 600px; background-color: #FFFFFF; border-radius: 12px; border: 1px solid #E5E7EB; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);\">\n                            <tr>
+                                <td class=\"header-bg\" style=\"padding: 28px 28px 22px 28px; background-color: #0B0B0B; border-bottom: 1px solid rgba(255,255,255,0.06);\">\n                                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\">\n                                        <tr>
+                                            <td align=\"center\" style=\"padding-bottom: 20px;\">\n                                                <img src=\"{logo_src}\" alt=\"Bear Techs\" width=\"150\" style=\"height: auto; display: block; border: 0;\">\n                                            </td>
                                         </tr>
                                         <tr>
-                                            <td align="center">
-                                                <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin: 0 auto;">
-                                                    <tr>
-                                                        <td style="text-align:center;">
-                                                            <div class="wo-badge" style="display: inline-block; background-color: #FF6B35; color: #FFFFFF; padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight:700; letter-spacing:0.01em;">
-                                                                {location_name if location_name and location_name != 'Not specified' else 'Location'} · WO {work_order}
-                                                            </div>
+                                            <td align=\"center\">\n                                                <table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"margin: 0 auto;\">\n                                                    <tr>
+                                                        <td style=\"text-align:center;\">\n                                                            <div class=\"wo-badge\" style=\"display: inline-block; background-color: #FF6B35; color: #FFFFFF; padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight:700; letter-spacing:0.01em;\">\n                                                                {location_name if location_name and location_name != 'Not specified' else 'Location'} · WO {work_order}\n                                                            </div>
                                                         </td>
                                                     </tr>
                                                     {technician_badge_html}
@@ -401,30 +374,19 @@ class EmailService:
                                     </table>
                                 </td>
                             </tr>
-
-                            <!-- Timestamp Bar -->
                             <tr>
-                                <td style="padding: 14px 28px; background-color: #F7F7F8; border-bottom: 1px solid #ECEFF1;">
-                                    <span class="timestamp-text" style="font-size:13px; color:#9CA3AF;">Report Generated: {timestamp}</span>
+                                <td style=\"padding: 14px 28px; background-color: #F7F7F8; border-bottom: 1px solid #ECEFF1;\">\n                                    <span class=\"timestamp-text\" style=\"font-size:13px; color:#9CA3AF;\">Report Generated: {timestamp}</span>
                                 </td>
                             </tr>
-
-                            <!-- Main Content -->
                             <tr>
-                                <td style="padding: 18px 28px 28px 28px;">
-                                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-                                        {sections_html}
+                                <td style=\"padding: 18px 28px 28px 28px;\">\n                                    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\">\n                                        {sections_html}
                                         {transcription_html}
                                         {copy_paste_html}
                                     </table>
                                 </td>
                             </tr>
-
-                            <!-- Footer -->
                             <tr>
-                                <td class="footer-bg" style="padding: 20px 28px; background-color: #F7F7F8; border-top: 1px solid #ECEFF1; text-align: center;">
-                                    <div class="footer-text" style="font-size:12px; color:#9CA3AF; line-height:1.5;">
-                                        Bear Techs Field Service · Automated Voice-to-Report System
+                                <td class=\"footer-bg\" style=\"padding: 20px 28px; background-color: #F7F7F8; border-top: 1px solid #ECEFF1; text-align: center;\">\n                                    <div class=\"footer-text\" style=\"font-size:12px; color:#9CA3AF; line-height:1.5;\">\n                                        Bear Techs Field Service · Automated Voice-to-Report System
                                     </div>
                                 </td>
                             </tr>
@@ -436,42 +398,65 @@ class EmailService:
         </html>
         """
         return html_body
-    
-    def send_closeout_email(self, closeout_data: Union[Dict[str, Any], object], transcription: str, technician_name: str = None, technician_email: str = None) -> Dict[str, Any]:
-        """Send the closeout email to the specified recipients"""
-        
+
+    def send_closeout_email(self, closeout_data: Union[Dict[str, Any], object], transcription: str, technician_name: str | None = None, technician_email: str | None = None) -> Dict[str, Any]:
+        """Send the closeout email to the specified recipients using sleek HTML format."""
+
         try:
-            if not self.email_user or not self.email_password:
-                logger.error("Email credentials not configured")
-                return {"success": False, "message": "Email credentials not configured", "recipients": []}
-            
+            # Validate email configuration
+            pwd = self._get_secret_value(self.email_password)
+            if not self.email_user or not pwd:
+                logger.error("Email credentials not configured - check EMAIL_USER and EMAIL_PASSWORD in .env file")
+                return {
+                    "success": False,
+                    "message": "Email credentials not configured",
+                    "recipients": []
+                }
+
             if not self.recipients:
                 logger.error("No email recipients configured")
-                return {"success": False, "message": "No recipients configured", "recipients": []}
-            
-            logger.info(f"Sending closeout email to {len(self.recipients)} recipients")
-            
-            # Get work order
+                return {
+                    "success": False,
+                    "message": "No recipients configured",
+                    "recipients": []
+                }
+
+            logger.info(f"Sending closeout email to {len(self.recipients)} recipients: {', '.join(self.recipients)}")
+
+            # Build subject line similar to staging/deploy
+            timestamp = datetime.now().strftime("%Y-%m-%d")
             work_order = None
             for field_name in ['work_order', 'workOrder', 'work_order_number']:
-                work_order = self._safe_get(closeout_data, field_name, None)
-                if work_order and work_order != 'Not specified':
+                val = self._safe_get(closeout_data, field_name, None)
+                if val and val != 'Not specified':
+                    work_order = val
                     break
-            
             if not work_order or work_order == 'Not specified':
                 work_order = 'Not Specified'
-            
-            logger.info(f"📋 Subject line work order: '{work_order}'")
-            
-            # Build subject line
-            timestamp = datetime.now().strftime("%Y-%m-%d")
             location_name = self._safe_get(closeout_data, 'location', None)
-            subject = (f"{location_name} - WO {work_order}" if location_name and location_name != 'Not specified' 
+            subject = (f"{location_name} - WO {work_order}" if location_name and location_name != 'Not specified'
                        else f"WO {work_order} - {timestamp}")
 
-            logger.info(f"📧 Email Subject: {subject}")
+            # Create multipart/related message
+            msg = MIMEMultipart('related')
+            msg['From'] = self.email_user
+            recipients = list(self.recipients)
+            if technician_email:
+                try:
+                    te = technician_email.strip()
+                    if te and te not in recipients:
+                        recipients.append(te)
+                except Exception:
+                    pass
+            msg['To'] = ', '.join(recipients)
+            try:
+                msg['Date'] = format_datetime(datetime.now())
+            except Exception:
+                msg['Date'] = datetime.now().strftime('%a, %d %b %Y %H:%M:%S')
+            msg['Subject'] = subject
+            msg['X-Template-Version'] = 'v2-html-2025-10-11'
 
-            # Generate HTML with inline logo reference
+            # Generate HTML body (reference inline logo by CID)
             html_body = self.format_closeout_email_html(
                 closeout_data,
                 transcription,
@@ -480,29 +465,11 @@ class EmailService:
                 logo_src_override='cid:bear_logo'
             )
 
-            # Create multipart message
-            msg = MIMEMultipart('related')
-            msg['From'] = self.email_user
-            final_recipients = self.recipients.copy()
-            if technician_email:
-                # avoid duplicate
-                if technician_email not in final_recipients:
-                    final_recipients.append(technician_email)
-            msg['To'] = ', '.join(final_recipients)
-            try:
-                msg['Date'] = format_datetime(datetime.now())
-            except Exception:
-                msg['Date'] = datetime.now().strftime('%a, %d %b %Y %H:%M:%S')
-            msg['Subject'] = subject
-            msg['X-Template-Version'] = 'v2-html-2025-10-11'
-
-            # Attach HTML
             alternative = MIMEMultipart('alternative')
-            html_part = MIMEText(html_body, 'html')
-            alternative.attach(html_part)
+            alternative.attach(MIMEText(html_body, 'html'))
             msg.attach(alternative)
 
-            # Attach inline logo
+            # Attach inline logo if available
             try:
                 logo_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'bears&t.png')
                 if os.path.exists(logo_path):
@@ -516,165 +483,154 @@ class EmailService:
                     logger.warning(f"⚠️ Logo file not found at {logo_path}")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to attach inline logo: {e}")
-            
+
             # Send email
-            context = ssl.create_default_context()
-            # Support explicit TLS (587) and implicit TLS/SSL (465)
+            # Use a verified CA bundle for TLS (fixes local TLS errors)
+            ctx = ssl.create_default_context(cafile=certifi.where())
+            # Optionally load additional CA if provided (corp VPN/proxy)
+            try:
+                ca_bundle = getattr(settings, "smtp_ca_bundle", None)
+                if ca_bundle:
+                    ctx.load_verify_locations(cafile=ca_bundle)
+            except Exception as ca_err:
+                logger.warning(f"Could not load custom CA bundle: {ca_err}")
+            # Dev-only insecure toggle (local testing when corp proxy breaks TLS)
+            try:
+                if getattr(settings, "smtp_tls_insecure", False):
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    logger.warning("SMTP TLS verification DISABLED for local testing (smtp_tls_insecure=true)")
+            except Exception:
+                pass
+            # Support STARTTLS (587) and SMTPS (465)
             if str(self.smtp_port) == '465':
-                with smtplib.SMTP_SSL(self.smtp_server, int(self.smtp_port), timeout=20, context=context) as server:
-                    server.set_debuglevel(1)
-                    logger.info(f"📧 Connecting via SMTPS (SSL) {self.smtp_server}:{self.smtp_port} ...")
-                    code, banner = server.ehlo()
-                    logger.info(f"📧 EHLO (SSL): {code} {banner}")
-                    logger.info("🔑 Logging in to SMTP server (SSL)...")
-                    server.login(self.email_user, self.email_password)
-                    logger.info("📤 Sending email message via SMTPS...")
+                with smtplib.SMTP_SSL(self.smtp_server, int(self.smtp_port), timeout=30, context=ctx) as server:
+                    server.ehlo()
+                    server.login(self.email_user, pwd)
                     server.send_message(msg)
             else:
-                # STARTTLS flow (typically port 587)
-                with smtplib.SMTP(self.smtp_server, int(self.smtp_port), timeout=20) as server:
-                    server.set_debuglevel(1)
-                    logger.info(f"📧 Connecting to SMTP {self.smtp_server}:{self.smtp_port} ...")
-                    code, banner = server.ehlo()
-                    logger.info(f"📧 EHLO: {code} {banner}")
-                    code, tls_resp = server.starttls(context=context)
-                    logger.info(f"🔐 STARTTLS: {code} {tls_resp}")
-                    code, post_ehlo = server.ehlo()
-                    logger.info(f"📧 EHLO (post-TLS): {code} {post_ehlo}")
-                    logger.info("🔑 Logging in to SMTP server...")
-                    server.login(self.email_user, self.email_password)
-                    logger.info("📤 Sending email message via SMTP...")
+                with smtplib.SMTP(self.smtp_server, int(self.smtp_port), timeout=30) as server:
+                    server.ehlo()
+                    server.starttls(context=ctx)
+                    server.ehlo()
+                    server.login(self.email_user, pwd)
                     server.send_message(msg)
-                logger.info(f"✅ Email sent successfully to {len(final_recipients)} recipients (including technician CC if provided)")
-            
+
+            logger.info(f"Closeout email sent successfully to {len(recipients)} recipients")
             return {
                 "success": True,
                 "message": "Email sent successfully",
-                "recipients": final_recipients
+                "recipients": recipients
             }
-            
-        except smtplib.SMTPAuthenticationError as e:
-            logger.error(f"SMTP auth failed: {e}")
-            hint = ("Authentication failed. If using Gmail, enable 'App Passwords' with 2FA and use that password, "
-                    "or ensure 'Less secure app access' (deprecated) is not required.")
-            return {
-                "success": False,
-                "message": f"SMTP authentication failed: {str(e)}. {hint}",
-                "recipients": []
-            }
-        except smtplib.SMTPServerDisconnected as e:
-            logger.error(f"SMTP server disconnected unexpectedly: {e}")
-            return {
-                "success": False,
-                "message": "SMTP server disconnected unexpectedly during send (STARTTLS or idle timeout).",
-                "recipients": []
-            }
-        except (smtplib.SMTPConnectError, smtplib.SMTPHeloError, smtplib.SMTPException, TimeoutError) as e:
-            logger.error(f"SMTP error: {e}")
-            return {
-                "success": False,
-                "message": f"SMTP error while sending email: {str(e)}",
-                "recipients": []
-            }
+
         except Exception as e:
-            logger.error(f"Failed to send email: {e}")
+            logger.error(f"Failed to send closeout email: {str(e)}")
             return {
                 "success": False,
                 "message": f"Failed to send email: {str(e)}",
                 "recipients": []
             }
-    
+
     def test_email_connection(self) -> Dict[str, Any]:
-        """Test the email configuration and connection"""
+        """Test email configuration and connection"""
+
         try:
-            if not self.email_user or not self.email_password:
+            pwd = self._get_secret_value(self.email_password)
+            if not self.email_user or not pwd:
                 return {
                     "status": "error",
-                    "message": "Email credentials not configured"
+                    "message": "Email credentials not configured - add EMAIL_USER and EMAIL_PASSWORD to .env file"
                 }
 
-            context = ssl.create_default_context()
-            with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=15) as server:
-                code, banner = server.ehlo()
-                logger.info(f"📧 Test EHLO: {code} {banner}")
-                code, tls_resp = server.starttls(context=context)
-                logger.info(f"🔐 Test STARTTLS: {code} {tls_resp}")
-                code, post = server.ehlo()
-                logger.info(f"📧 Test EHLO (post-TLS): {code} {post}")
-                server.login(self.email_user, self.email_password)
+            # Test SMTP connection with verified CA bundle
+            ctx = ssl.create_default_context(cafile=certifi.where())
+            try:
+                ca_bundle = getattr(settings, "smtp_ca_bundle", None)
+                if ca_bundle:
+                    ctx.load_verify_locations(cafile=ca_bundle)
+            except Exception as ca_err:
+                logger.warning(f"Could not load custom CA bundle: {ca_err}")
+            # Dev-only insecure toggle (local testing when corp proxy breaks TLS)
+            try:
+                if getattr(settings, "smtp_tls_insecure", False):
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    logger.warning("SMTP TLS verification DISABLED for local testing (smtp_tls_insecure=true)")
+            except Exception:
+                pass
+            with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=30) as server:
+                server.ehlo()
+                server.starttls(context=ctx)
+                server.ehlo()
+                server.login(self.email_user, pwd)
 
             return {
                 "status": "success",
                 "message": "Email configuration is valid",
                 "smtp_server": self.smtp_server,
                 "smtp_port": self.smtp_port,
-                "recipients": self.recipients
+                "recipients": self.recipients,
+                "sender": self.email_user
             }
+
         except Exception as e:
-            logger.error(f"Email connection test failed: {e}")
             return {
                 "status": "error",
-                "message": f"Email connection test failed: {str(e)}"
+                "message": f"Email connection failed: {str(e)}"
             }
 
-    def send_bug_report(self, description: str, reporter_email: str | None = None, images: List[Dict[str, str]] | None = None) -> Dict[str, Any]:
-        """Send a bug report email to the configured bug report recipient.
-
-        images: list of dicts with keys {filename: str, content_type: str, data_base64: str}
-        """
+    def send_bug_report(self, description: str, reporter_email: str | None = None, images: list[Dict[str, Any]] | None = None) -> Dict[str, Any]:
+        """Send a bug report email to the configured recipient, with optional image attachments."""
         try:
-            if not self.email_user or not self.email_password:
-                return {"success": False, "message": "Email credentials not configured"}
+            pwd = self._get_secret_value(self.email_password)
+            if not self.email_user or not pwd:
+                return {"success": False, "message": "Email credentials not configured", "recipients": []}
 
-            to_addr = getattr(settings, 'bug_report_recipient', None) or 'colin.buchheit@beartechs.com'
-
-            subject = "VoiceToReport - Bug Report"
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
-            reporter_line = f"Reporter: {reporter_email}\n" if reporter_email else ""
-            text_body = f"A new bug report was submitted.\n\n{reporter_line}Time: {timestamp}\n\nDescription:\n{description or '(no description)'}\n"
+            recipient = getattr(settings, "bug_report_recipient", None) or self.email_user
+            recipients = [recipient]
 
             msg = MIMEMultipart()
-            msg['From'] = self.email_user
-            msg['To'] = to_addr
-            msg['Subject'] = subject
-            msg.attach(MIMEText(text_body, 'plain'))
+            msg["From"] = self.email_user
+            msg["To"] = ", ".join(recipients)
+            msg["Subject"] = "Bug Report from Voice-to-Report App"
+
+            body_lines = [
+                "A new bug report was submitted.",
+                "",
+                f"Reporter: {reporter_email or 'unknown'}",
+                "",
+                "Description:",
+                description or "(no description)",
+            ]
+            msg.attach(MIMEText("\n".join(body_lines), "plain"))
 
             # Attach images if provided
-            for idx, img in enumerate(images or []):
+            for img in (images or []):
                 try:
-                    filename = img.get('filename') or f'screenshot-{idx+1}.jpg'
-                    content_type = img.get('content_type') or 'image/jpeg'
-                    data_b64 = img.get('data_base64') or ''
+                    filename = img.get("filename") or "screenshot.png"
+                    content_type = img.get("content_type") or "application/octet-stream"
+                    data_b64 = img.get("data_base64")
+                    if not data_b64:
+                        continue
                     raw = base64.b64decode(data_b64)
-
-                    maintype, subtype = content_type.split('/', 1) if '/' in content_type else ('image', 'jpeg')
-                    if maintype == 'image':
-                        part = MIMEImage(raw, _subtype=subtype)
-                    else:
-                        part = MIMEBase(maintype, subtype)
-                        part.set_payload(raw)
-                        encoders.encode_base64(part)
-                    part.add_header('Content-Disposition', 'attachment', filename=filename)
+                    maintype, _, subtype = content_type.partition("/")
+                    part = MIMEBase(maintype or "application", subtype or "octet-stream")
+                    part.set_payload(raw)
+                    encoders.encode_base64(part)
+                    part.add_header("Content-Disposition", f"attachment; filename=\"{filename}\"")
                     msg.attach(part)
-                except Exception as e:
-                    logger.warning(f"Failed to attach image {idx}: {e}")
+                except Exception as attach_err:
+                    logger.warning(f"Failed to attach image to bug report: {attach_err}")
 
-            # Send email
-            context = ssl.create_default_context()
-            if str(self.smtp_port) == '465':
-                with smtplib.SMTP_SSL(self.smtp_server, int(self.smtp_port), timeout=20, context=context) as server:
-                    server.ehlo()
-                    server.login(self.email_user, self.email_password)
-                    server.send_message(msg)
-            else:
-                with smtplib.SMTP(self.smtp_server, int(self.smtp_port), timeout=20) as server:
-                    server.ehlo()
-                    server.starttls(context=context)
-                    server.ehlo()
-                    server.login(self.email_user, self.email_password)
-                    server.send_message(msg)
+            ctx = ssl.create_default_context(cafile=certifi.where())
+            with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=30) as server:
+                server.ehlo()
+                server.starttls(context=ctx)
+                server.ehlo()
+                server.login(self.email_user, pwd)
+                server.send_message(msg)
 
-            return {"success": True, "message": "Bug report sent"}
+            return {"success": True, "message": "Bug report sent", "recipients": recipients}
         except Exception as e:
             logger.error(f"Failed to send bug report: {e}")
-            return {"success": False, "message": f"Failed to send bug report: {str(e)}"}
+            return {"success": False, "message": str(e), "recipients": []}

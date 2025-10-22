@@ -25,7 +25,7 @@ export const API_CONFIG = {
   ],
   
   // Current ngrok URL (null if not available)
-  NGROK_URL: null,
+  NGROK_URL: null as string | null,
   
   // Local network IP
   LOCAL_IP: '192.168.1.171',

@@ -17,6 +17,8 @@ class CloseoutSummary(BaseModel):
     # Closeout Notes
     onsite_contact: Optional[str] = "Not mentioned"
     support_contact: Optional[str] = "Not mentioned"
+    checked_in_with: Optional[str] = "Not mentioned"
+    check_in_code: Optional[str] = "Not mentioned"
     work_completed: Optional[str] = "Not mentioned"
     delays: Optional[str] = "Not mentioned"
     troubleshooting_steps: Optional[str] = "Not mentioned"
