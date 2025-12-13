@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
+import audioLockService from '../services/audioLockService';
 
 interface RecorderProps {
   onRecordingComplete: (uri: string) => void;
@@ -300,53 +301,24 @@ export default function Recorder({
 
   const toggleRecording = async () => {
     if (isProcessing) return;
-    
-    // Platform-specific haptic feedback
-    if (Platform.OS === 'ios') {
-      Vibration.vibrate(80);
-    } else {
-      Vibration.vibrate([0, 50, 50, 50]);
-    }
-    
-    // Ripple effect
-    rippleAnim.setValue(0);
-    Animated.timing(rippleAnim, {
-      toValue: 1,
-      duration: 800,
-      useNativeDriver: true,
-    }).start();
 
-    // Enhanced press feedback
+    // Haptic feedback and press animation
+    Vibration.vibrate(50);
+    rippleAnim.setValue(0);
+    Animated.timing(rippleAnim, { toValue: 1, duration: 800, useNativeDriver: true }).start();
     Animated.sequence([
       Animated.parallel([
-        Animated.timing(scaleAnim, {
-          toValue: 0.88,
-          duration: 120,
-          useNativeDriver: true,
-        }),
-        Animated.timing(shadowAnim, {
-          toValue: 0.3,
-          duration: 120,
-          useNativeDriver: false,
-        }),
+        Animated.timing(scaleAnim, { toValue: 0.88, duration: 120, useNativeDriver: true }),
+        Animated.timing(shadowAnim, { toValue: 0.3, duration: 120, useNativeDriver: false }),
       ]),
       Animated.parallel([
-        Animated.spring(scaleAnim, {
-          toValue: 1,
-          tension: 120,
-          friction: 6,
-          useNativeDriver: true,
-        }),
-        Animated.timing(shadowAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: false,
-        }),
+        Animated.spring(scaleAnim, { toValue: 1, tension: 120, friction: 6, useNativeDriver: true }),
+        Animated.timing(shadowAnim, { toValue: 1, duration: 300, useNativeDriver: false }),
       ]),
     ]).start();
 
     if (isRecording) {
-      // Stop recording
+      // ===== STOP RECORDING =====
       try {
         if (recording) {
           await recording.stopAndUnloadAsync();
@@ -358,35 +330,99 @@ export default function Recorder({
         }
         setIsRecording(false);
         setRecordingDuration(0);
+        await audioLockService.releaseLock('home-recorder');
       } catch (error) {
         console.error('Failed to stop recording:', error);
         Alert.alert('Error', 'Failed to stop recording');
+        await audioLockService.releaseLock('home-recorder');
       }
-    } else {
-      // Start recording
-      try {
-        const { status } = await Audio.requestPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert('Permission required', 'Please enable microphone access');
-          return;
+      return;
+    }
+
+    // ===== START RECORDING =====
+    // Check permission first to avoid Android dialog race
+    const { status: initialStatus } = await Audio.getPermissionsAsync();
+    if (initialStatus !== 'granted') {
+      const { status: requestedStatus } = await Audio.requestPermissionsAsync();
+      if (requestedStatus !== 'granted') {
+        Alert.alert('Permission Required', 'Microphone access is required to record audio. Please enable it in settings.');
+        return;
+      }
+
+      if (Platform.OS === 'android') {
+        // Give Android a moment to settle after permission dialog
+        await new Promise(resolve => setTimeout(resolve, 300));
+        try {
+          await Audio.setAudioModeAsync({
+            allowsRecordingIOS: false,
+            playsInSilentModeIOS: true,
+            shouldDuckAndroid: false,
+            playThroughEarpieceAndroid: false,
+            staysActiveInBackground: false,
+          });
+        } catch (e) {
+          console.warn('Initial audio mode reset failed (non-fatal):', e);
         }
-
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-        });
-
-        const newRecording = new Audio.Recording();
-        await newRecording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-        await newRecording.startAsync();
-        
-        setRecording(newRecording);
-        setIsRecording(true);
-        setRecordingDuration(0);
-      } catch (error) {
-        console.error('Failed to start recording:', error);
-        Alert.alert('Error', 'Failed to start recording');
       }
+    }
+
+    try {
+      // Acquire audio lock
+      const lockAcquired = await audioLockService.acquireLock('home-recorder');
+      if (!lockAcquired) {
+        Alert.alert('Microphone Busy', 'Another recording is in progress. Please stop it first.');
+        return;
+      }
+
+      // Configure audio mode for recording
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+        staysActiveInBackground: false,
+      });
+
+      // Create and start recording — use Android speech-optimized options
+      const isAndroid = Platform.OS === 'android';
+      const outputFormat = (Audio as any).RECORDING_OPTION_ANDROID_OUTPUT_FORMAT_MPEG_4 ?? 2; // MPEG_4 fallback
+      const audioEncoder = (Audio as any).RECORDING_OPTION_ANDROID_AUDIO_ENCODER_AAC ?? 3; // AAC fallback
+      const audioSource = (Audio as any).RECORDING_OPTION_ANDROID_AUDIO_SOURCE_VOICE_RECOGNITION
+        ?? (Audio as any).RECORDING_OPTION_ANDROID_AUDIO_SOURCE_MIC
+        ?? 6; // VOICE_RECOGNITION (6) fallback
+
+      const ANDROID_OPTIONS: Audio.RecordingOptions = {
+        android: {
+          extension: '.m4a',
+          outputFormat,
+          audioEncoder,
+          sampleRate: 44100,
+          numberOfChannels: 1,
+          bitRate: 128000,
+          audioSource,
+        },
+        ios: Audio.RecordingOptionsPresets.HIGH_QUALITY.ios,
+        web: Audio.RecordingOptionsPresets.HIGH_QUALITY.web,
+        isMeteringEnabled: false,
+      } as Audio.RecordingOptions;
+
+      const options = isAndroid ? ANDROID_OPTIONS : Audio.RecordingOptionsPresets.HIGH_QUALITY;
+
+      const { recording: newRecording } = await Audio.Recording.createAsync(options);
+
+      setRecording(newRecording);
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      // Duration timer is managed by parent (HomeScreen) when isRecording changes
+    } catch (error) {
+      console.error('❌ Failed to start recording:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      Alert.alert('Recording Error', `Failed to start recording: ${errorMessage}\n\nPlease try again.`);
+      await audioLockService.releaseLock('home-recorder');
+      setIsRecording(false);
+      setRecording(null);
+      // Parent (HomeScreen) also clears any timer it owns
     }
   };
 

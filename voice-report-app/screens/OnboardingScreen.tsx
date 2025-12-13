@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Image, Animated, Easing } from 'react-native';
 import userProfileService, { UserProfile } from '../services/userProfileService';
 import { useTheme } from '../context/ThemeContext';
+import { useFontScale } from '../context/FontScaleContext';
 const LIGHT_LOGO = require('../assets/bears&t.png');
 const DARK_LOGO = require('../assets/DarkModeLogo.png');
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -15,6 +16,7 @@ interface Props { navigation: OnboardingNav; }
 
 export default function OnboardingScreen({ navigation }: Props) {
   const { colors, isDark } = useTheme();
+  const { scaled } = useFontScale();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [workEmail, setWorkEmail] = useState('');
@@ -107,7 +109,7 @@ export default function OnboardingScreen({ navigation }: Props) {
   };
 
   if (loading) {
-    return <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.accent} /><Text style={[styles.loadingText, { color: colors.textPrimary }]}>Loading...</Text></View>;
+    return <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.accent} /><Text style={[styles.loadingText, { color: colors.textPrimary, fontSize: scaled(14) }]}>Loading...</Text></View>;
   }
 
   return (

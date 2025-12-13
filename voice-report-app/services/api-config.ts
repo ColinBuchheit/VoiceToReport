@@ -1,24 +1,34 @@
 // Auto-generated API configuration
 // This file is automatically updated by ngrok_manager.py
-// Last updated: 2025-10-10 15:34:22
+// Last updated: 2025-12-13 11:40:15
 
 import { Platform } from 'react-native';
+
+// Env override support for Azure/prod
+const ENV_URLS_RAW: string | undefined = process.env.EXPO_PUBLIC_BACKEND_URLS as any;
+const ENV_URL_SINGLE: string | undefined = process.env.EXPO_PUBLIC_BACKEND_URL as any;
+const RESOLVED_ENV_URLS: string[] | null = (() => {
+  const urls = (ENV_URLS_RAW?.split(/[\s,]+/)?.filter(Boolean) ?? []) as string[];
+  if (urls.length > 0) return urls;
+  if (ENV_URL_SINGLE && ENV_URL_SINGLE.trim().length > 0) return [ENV_URL_SINGLE.trim()];
+  return null;
+})();
 
 // API Configuration
 export const API_CONFIG = {
   // Backend URLs in order of preference
   BACKEND_URLS: [
-    'https://8dfbd9cfc15a.ngrok-free.app',
-    'http://192.168.1.75:8000',
+    'https://f56bb2c8b8e6.ngrok-free.app',
+    'http://192.168.68.58:8000',
     'http://localhost:8000',
     'http://10.0.2.2:8000'
   ],
   
   // Current ngrok URL (null if not available)
-  NGROK_URL: 'https://8dfbd9cfc15a.ngrok-free.app',
+  NGROK_URL: 'https://f56bb2c8b8e6.ngrok-free.app',
   
   // Local network IP
-  LOCAL_IP: '192.168.1.75',
+  LOCAL_IP: '192.168.68.58',
   LOCAL_PORT: 8000,
   
   // Connection settings
@@ -35,6 +45,15 @@ export const API_CONFIG = {
     DEFAULT_FORMAT: 'm4a',
   },
 };
+
+// If env overrides are provided, force those
+if (RESOLVED_ENV_URLS && RESOLVED_ENV_URLS.length > 0) {
+  const normalized = RESOLVED_ENV_URLS.map((u) => u.replace(/\/$/, ''));
+  API_CONFIG.BACKEND_URLS = normalized;
+  // @ts-ignore
+  API_CONFIG.NGROK_URL = null;
+  console.log('[api-config] Using backend URL(s) from env:', normalized);
+}
 
 // FIXED: Helper function with critical ngrok header
 export const testBackendConnection = async (url: string): Promise<boolean> => {

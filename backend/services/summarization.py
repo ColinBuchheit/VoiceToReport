@@ -55,6 +55,25 @@ class SummarizationService:
         result = self._get_empty_summary()
         text_lower = transcription.lower()
 
+        # Normalize common explicit negatives up front to map to "None" for key fields
+        # We only set to "None" if not otherwise positively identified later in patterns
+        negative_map_checks = {
+            'delays': [r'\bno\s+(delays?|issues?|problems?)\b', r'\bno issues\b', r'\bno delays\b'],
+            'photos_uploaded': [r'\bno\s+(photos?|pictures?|images?)\b', r"didn't\s+take\s+any\s+photos", r'\b0\s+photos?\b'],
+            'materials_used': [r'\bno\s+(materials?|parts?|equipment)\b', r"didn't\s+use\s+any\s+(materials?|parts?)"],
+            'out_of_scope_work': [r'\bno\s+(out\s+of\s+scope|extra\s+work|additional\s+work)\b'],
+            'release_code': [r'\bno\s+(release|authorization|auth|confirmation|ticket)\s*(code|number)?\b', r'\bno\s+code\s+(provided|given)\b'],
+            'troubleshooting_steps': [r'\bno\s+(troubleshooting|diagnostics?)\s+(needed|required|performed|necessary)\b', r'\bnothing\s+to\s+troubleshoot\b'],
+            'return_tracking': [r'\bno\s+(returns?|return\s+shipment|shipping|tracking)\b'],
+            'expenses': [r'\bno\s+(expenses?|costs?|charges?)\b', r'\bzero\s+expenses?\b', r"didn't\s+spend\s+anything"],
+        }
+        for field, patterns in negative_map_checks.items():
+            try:
+                if any(re.search(pat, text_lower) for pat in patterns):
+                    result[field] = "None"
+            except re.error:
+                pass
+
         # LOCATION extraction (reintroduced & improved)
         # Heuristics: capture site/store/location names while avoiding delay phrases.
         # We try several targeted patterns and pick the first high-confidence match.
@@ -119,6 +138,35 @@ class SummarizationService:
                 result['onsite_contact'] = contact
                 logger.info(f"Found onsite contact: {result['onsite_contact']}")
                 break
+
+        # CHECKED IN WITH
+        checked_in_patterns = [
+            r'checked\s*-?in\s+with\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
+            r'check\s*-?in\s+with\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
+            r'checked\s*-?in\s+at\s+(?:the\s+)?(front desk|reception|security|service desk)'
+        ]
+        for pattern in checked_in_patterns:
+            m = re.search(pattern, transcription, re.IGNORECASE)
+            if m:
+                try:
+                    grp = m.group(1) if m.lastindex and m.lastindex >= 1 else None
+                    result['checked_in_with'] = (grp or '').strip().title()
+                except Exception:
+                    pass
+                logger.info(f"Found checked_in_with: {result.get('checked_in_with')}")
+                break
+
+        # CHECK-IN CODE
+        check_in_code_patterns = [
+            r'(?:check\s*-?in|checkin|check\s+in)\s+(?:code|number|id)\s*(?:is|was|:)?\s*([A-Za-z0-9\-]{3,})',
+            r'(?:code)\s*(?:for\s*)?(?:check\s*-?in|checkin)\s*(?:is|was|:)?\s*([A-Za-z0-9\-]{3,})'
+        ]
+        for pattern in check_in_code_patterns:
+            m = re.search(pattern, transcription, re.IGNORECASE)
+            if m:
+                result['check_in_code'] = m.group(1).strip()
+                logger.info(f"Found check_in_code: {result['check_in_code']}")
+                break
         
         # SUPPORT CONTACT - look for IT/support/contractor mentions
         support_patterns = [
@@ -175,21 +223,25 @@ class SummarizationService:
             match = re.search(pattern, text_lower)
             if match:
                 num_photos = match.group(1)
-                result['photos_uploaded'] = f"{num_photos} photos"
+                if str(num_photos) == '0':
+                    result['photos_uploaded'] = "None"
+                else:
+                    result['photos_uploaded'] = f"{num_photos} photos"
                 logger.info(f"Found photos: {result['photos_uploaded']}")
                 break
         
         # EXPENSES
         expense_patterns = [
             r'expenses?:\s*([^.\n]+)',
-            r'(?:parking|gas|meals?|tolls?)[\s:]+\$?(\d+(?:\.\d{2})?)',
-            r'no\s+(?:expenses?|parking|tolls)',
+            r'(?:parking|gas|meals?|tolls?|costs?|charges?)[\s:]+\$?(\d+(?:\.\d{2})?)',
+            r'no\s+(?:expenses?|parking|tolls|costs|charges)',
+            r'zero\s+expenses?',
         ]
         
         for pattern in expense_patterns:
             match = re.search(pattern, text_lower)
             if match:
-                if 'no expense' in match.group(0).lower() or 'none' in match.group(0).lower():
+                if any(term in match.group(0).lower() for term in ['no expense', 'no expenses', 'no cost', 'no costs', 'no charge', 'no charges', 'zero expense', 'zero expenses', 'none']):
                     result['expenses'] = "None"
                 else:
                     result['expenses'] = match.group(0).strip()
@@ -217,6 +269,15 @@ class SummarizationService:
             result['scope_completed'] = "No"
         elif 'partial' in text_lower:
             result['scope_completed'] = "Partially"
+
+        # RELEASED BY - include synonym: "checked out with <name>"
+        try:
+            m = re.search(r'checked\s*-?out\s+with\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)', transcription, re.IGNORECASE)
+            if m:
+                result['released_by'] = m.group(1).strip()
+                logger.info(f"Found released_by via checkout synonym: {result['released_by']}")
+        except re.error:
+            pass
         
         return result
     
@@ -233,19 +294,25 @@ IMPORTANT RULES:
 2. troubleshooting_steps: List ONLY diagnostic and troubleshooting actions (tested, checked, tried different ports, etc.).
 3. location: Extract ONLY the actual site/location name (store, facility, company site). Do NOT include delay phrases or time info.
 4. Keep each field distinct - do not mix content between fields.
-5. If a field is not clearly stated, return "Not mentioned" exactly.
+5. If a field is not discussed at all, return "Not mentioned" exactly.
+6. Distinguish explicit negatives from missing info:
+    - If the user clearly states there were none of something (e.g., "no expenses", "no delays", "no photos", "no materials", "no return shipment"), return the exact string "None" for that field.
+    - Only use "Not mentioned" when the field isn’t discussed.
+    - Do not use synonyms like "N/A" or "NA"; use exactly "None" or "Not mentioned" per the rules above.
 
 EXTRACT THESE FIELDS:
 
 1. onsite_contact: Name of person met at site (just the name)
 2. support_contact: Name of support/IT person (just the name)
-3. location: Actual site / store / facility name
-4. work_completed: Tasks actually completed (e.g., "Installed new AP, configured settings, verified connectivity")
-5. delays: Any delays and their causes
-6. troubleshooting_steps: Diagnostic steps taken (e.g., "Tested cable, checked power, tried different port")
-7. scope_completed: Was work finished? (Yes/No/Partially)
-8. released_by: Who signed off
-9. release_code: Authorization, confirmation, or reference code/number
+3. checked_in_with: Who you checked in with (name or desk like Front Desk)
+4. check_in_code: The check-in code if mentioned
+5. location: Actual site / store / facility name
+6. work_completed: Tasks actually completed (e.g., "Installed new AP, configured settings, verified connectivity")
+7. delays: Any delays and their causes
+8. troubleshooting_steps: Diagnostic steps taken (e.g., "Tested cable, checked power, tried different port")
+9. scope_completed: Was work finished? (Yes/No/Partially)
+10. released_by: Who signed off (treat phrases like "checked out with <name>" as this field)
+11. release_code: Authorization, confirmation, or reference code/number
    
     \u26a0\ufe0f CRITICAL - EXTRACTION RULES (Read Carefully):
    
@@ -299,47 +366,82 @@ EXTRACT THESE FIELDS:
     - Letter-number: "E-04721", "MC-2024-1587"
     - Complex: "WM-AUTH-9847", "OG-2024-CH-17"
     - Alphanumeric: "AUTH9847", "MC20241587"
-10. return_tracking: Shipping/tracking info
-11. expenses: Money spent (parking, etc.)
-12. materials_used: Parts/equipment used
-13. out_of_scope_work: Extra work beyond original scope
-14. work_order: Work order number if mentioned
-15. photos_uploaded: Number of photos taken
+12. return_tracking: Shipping/tracking info
+13. expenses: Money spent (parking, etc.)
+14. materials_used: Parts/equipment used
+15. out_of_scope_work: Extra work beyond original scope
+16. work_order: Work order number if mentioned
+17. photos_uploaded: Number of photos taken
 
 Return ONLY this JSON (no markdown):
 {{
-  "onsite_contact": "value or Not mentioned",
-  "support_contact": "value or Not mentioned",
-    "location": "value or Not mentioned",
-  "work_completed": "value or Not mentioned",
-  "delays": "value or Not mentioned",
-  "troubleshooting_steps": "value or Not mentioned",
-  "scope_completed": "Yes/No/Partially or Not mentioned",
-  "released_by": "value or Not mentioned",
-  "release_code": "value or Not mentioned",
-  "return_tracking": "value or Not mentioned",
-  "expenses": "value or Not mentioned",
-  "materials_used": "value or Not mentioned",
-  "out_of_scope_work": "value or Not mentioned",
-    "work_order": "value or Not mentioned",
-  "photos_uploaded": "value or Not mentioned"
+    "onsite_contact": "value or None or Not mentioned",
+    "support_contact": "value or None or Not mentioned",
+    "checked_in_with": "value or None or Not mentioned",
+    "check_in_code": "value or None or Not mentioned",
+    "location": "value or None or Not mentioned",
+    "work_completed": "value or None or Not mentioned",
+    "delays": "value or None or Not mentioned",
+    "troubleshooting_steps": "value or None or Not mentioned",
+    "scope_completed": "Yes/No/Partially or Not mentioned",
+    "released_by": "value or None or Not mentioned",
+    "release_code": "value or None or Not mentioned",
+    "return_tracking": "value or None or Not mentioned",
+    "expenses": "value or None or Not mentioned",
+    "materials_used": "value or None or Not mentioned",
+    "out_of_scope_work": "value or None or Not mentioned",
+    "work_order": "value or None or Not mentioned",
+    "photos_uploaded": "value or None or Not mentioned"
 }}"""
 
-            logger.info("Calling GPT for enhanced extraction...")
-            response = self.client.chat.completions.create(
-                model=settings.gpt_model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a precise data extractor. Extract information exactly as requested. Keep work_completed separate from troubleshooting_steps."
-                    },
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            
-            response_text = response.choices[0].message.content.strip()
+            logger.info("Calling GPT for enhanced extraction with fallback and JSON response...")
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a precise data extractor. Extract information exactly as requested. Keep work_completed separate from troubleshooting_steps."
+                },
+                {"role": "user", "content": prompt}
+            ]
+
+            # Preferred models in order: configured model or gpt-5, then gpt-4o as fallback
+            preferred_models: List[str] = []
+            if getattr(settings, 'gpt_model', None):
+                preferred_models.append(settings.gpt_model)
+            if 'gpt-5' not in preferred_models:
+                preferred_models.append('gpt-5')
+            if 'gpt-4o' not in preferred_models:
+                preferred_models.append('gpt-4o')
+
+            last_err: Optional[Exception] = None
+            response_text: Optional[str] = None
+            for model_name in preferred_models:
+                try:
+                    logger.info(f"🔁 Trying model: {model_name}")
+                    # Some models (e.g., gpt-5) do not support overriding temperature. Omit it for those.
+                    create_kwargs = {
+                        "model": model_name,
+                        "messages": messages,
+                        "response_format": {"type": "json_object"},
+                    }
+                    # Include temperature only when supported (avoid for gpt-5 family)
+                    if not str(model_name).lower().startswith("gpt-5"):
+                        create_kwargs["temperature"] = getattr(settings, 'gpt_temperature', 0.3)
+
+                    completion = self.client.chat.completions.create(**create_kwargs)
+                    candidate = (completion.choices[0].message.content or '').strip()
+                    if not candidate:
+                        raise ValueError("Empty completion content")
+                    response_text = candidate
+                    logger.info(f"✅ Model {model_name} produced {len(response_text)} chars")
+                    break
+                except Exception as e:
+                    last_err = e
+                    logger.warning(f"Model {model_name} failed, trying next if available: {e}")
+
+            if response_text is None:
+                raise last_err or RuntimeError("All model attempts failed")
             logger.info(f"GPT response length: {len(response_text)}")
-            
+
             # Parse response
             return self._parse_gpt_response(response_text)
             
@@ -416,6 +518,8 @@ Return ONLY this JSON (no markdown):
         return {
             "onsite_contact": "Not mentioned",
             "support_contact": "Not mentioned",
+            "checked_in_with": "Not mentioned",
+            "check_in_code": "Not mentioned",
             "location": "Not mentioned",
             "work_completed": "Not mentioned",
             "delays": "Not mentioned",

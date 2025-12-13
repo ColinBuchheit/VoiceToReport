@@ -7,7 +7,7 @@ interface FontScaleContextValue {
   scaled: (base: number) => number; // helper to scale a number inline
 }
 
-const DEFAULT_SCALE = 1;
+const DEFAULT_SCALE = 0.95;
 const STORAGE_KEY = 'ui_font_scale_v1';
 
 const FontScaleContext = createContext<FontScaleContextValue | undefined>(undefined);

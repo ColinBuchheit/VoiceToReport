@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Modal, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, TextInput, Alert, Image, Keyboard, TouchableWithoutFeedback, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, Modal, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, TextInput, Alert, Image, Keyboard, TouchableWithoutFeedback, KeyboardAvoidingView, Platform, Switch } from 'react-native';
 import * as MailComposer from 'expo-mail-composer';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
@@ -8,6 +8,7 @@ import { useFontScale } from '../context/FontScaleContext';
 import userProfileService from '../services/userProfileService';
 import { useTheme, ThemeMode } from '../context/ThemeContext';
 import { submitBugReport } from '../services/api';
+import { useSettings } from '../context/SettingsContext';
 
 interface SettingsModalProps {
   visible: boolean;
@@ -23,6 +24,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
   const [error, setError] = useState('');
   const { fontScale, setFontScale, scaled } = useFontScale();
   const { mode, setMode, colors, isDark } = useTheme();
+  const { showReportProgressBar, setShowReportProgressBar, showBottomBarBackground, setShowBottomBarBackground } = useSettings();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [attachments, setAttachments] = useState<string[]>([]);
@@ -159,57 +161,60 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
     }
     setSendingFeedback(true);
     try {
-      // Use backend submission so it works in production without relying on a mail app
+      // Get user profile for reporter email
       const profile = await userProfileService.getProfile();
       const reporterEmail = profile?.workEmail || undefined;
+
+      console.log('📧 Submitting bug report to backend...');
+
+      // Submit to backend
       const res = await submitBugReport({ description: message, reporterEmail, imageUris: attachments });
-      if (res && (res.success === true || res.success === undefined)) {
-        // On success: clear form, show success popup, then close feedback modal
+
+      console.log('📧 Bug report response:', res);
+
+      // If backend succeeded, clear and exit (do NOT fall through to mail composer)
+      if (res && res.success === true) {
+        console.log('✅ Bug report sent via backend');
         setFeedbackText('');
         setAttachments([]);
-        Alert.alert('Thanks!', 'Your bug report was sent.');
+        Alert.alert('Thanks!', 'Your bug report was sent successfully.');
         setFeedbackOpen(false);
         return;
       }
-      // fallback to mail composer if backend returns failure
+
+      // Otherwise, backend failed -> trigger fallback
+      console.warn('⚠️ Backend bug report failed, falling back to mail composer');
+      throw new Error('Backend submission failed');
+
+    } catch (backendError) {
+      // Backend call failed - try mail composer as fallback
+      console.warn('Backend error:', backendError);
+      console.log('📧 Attempting mail composer fallback...');
+
       const available = await MailComposer.isAvailableAsync();
-      if (available) {
-        await MailComposer.composeAsync({
-          recipients: ['colin.buchheit@beartechs.com'],
-          subject: 'Bug Report / Recommendation',
-          body: message,
-          attachments,
-          isHtml: false,
-        });
-  setFeedbackText('');
-  setAttachments([]);
-  Alert.alert('Thanks!', 'Your bug report was sent.');
-  setFeedbackOpen(false);
-      } else {
-        Alert.alert('Error', 'Could not send bug report. Please email colin.buchheit@beartechs.com.');
+      if (!available) {
+        Alert.alert(
+          'Error',
+          'Could not send bug report. Please email colin.buchheit@beartechs.com directly.'
+        );
+        return;
       }
-    } catch (e) {
-      // If backend call fails, offer email composer fallback
-      try {
-        const available = await MailComposer.isAvailableAsync();
-        if (available) {
-          await MailComposer.composeAsync({
-            recipients: ['colin.buchheit@beartechs.com'],
-            subject: 'Bug Report / Recommendation',
-            body: message,
-            attachments,
-            isHtml: false,
-          });
-          setFeedbackText('');
-          setAttachments([]);
-          Alert.alert('Thanks!', 'Your bug report was sent.');
-          setFeedbackOpen(false);
-        } else {
-          Alert.alert('Error', 'Failed to send bug report. Please email colin.buchheit@beartechs.com.');
-        }
-      } catch {
-        Alert.alert('Error', 'Failed to start email composer.');
-      }
+
+      // Open mail composer
+      await MailComposer.composeAsync({
+        recipients: ['colin.buchheit@beartechs.com'],
+        subject: 'Bug Report / Recommendation',
+        body: message,
+        attachments,
+        isHtml: false,
+      });
+
+      // User has now sent via their mail app, clear the form
+      setFeedbackText('');
+      setAttachments([]);
+      Alert.alert('Thanks!', 'Your bug report was sent.');
+      setFeedbackOpen(false);
+
     } finally {
       setSendingFeedback(false);
     }
@@ -239,7 +244,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
           {!loaded ? (
             <View style={styles.settingsLoadingContainer}>
               <ActivityIndicator size="large" color={colors.accent} />
-              <Text style={[styles.settingsLoadingText, { color: colors.textSecondary }]}>Loading profile...</Text>
+              <Text style={[styles.settingsLoadingText, { color: colors.textSecondary, fontSize: scaled(14) }]}>Loading profile...</Text>
             </View>
           ) : (
             <ScrollView
@@ -307,7 +312,25 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
                 <Text style={{ fontSize: scaled(12), color: colors.textSecondary, marginTop: 6 }}>Use system to follow your device setting automatically.</Text>
               </View>
               <View style={styles.settingsSection}>
-                <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13), color: colors.textSecondary }]}>Accessibility</Text>
+                <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13), color: colors.textSecondary }]}>Layout & Accessibility</Text>
+                <View style={[styles.settingsItem, { borderBottomColor: colors.border }]}> 
+                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), color: colors.textPrimary }]}>Show Report Progress Bar</Text>
+                  <Switch
+                    value={showReportProgressBar}
+                    onValueChange={setShowReportProgressBar}
+                    thumbColor={showReportProgressBar ? colors.accent : (isDark ? '#888' : '#f4f3f4')}
+                    trackColor={{ false: isDark ? '#444' : '#ccc', true: colors.accent }}
+                  />
+                </View>
+                <View style={[styles.settingsItem, { borderBottomColor: colors.border }]}> 
+                  <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), color: colors.textPrimary }]}>Show Bottom Bar Background</Text>
+                  <Switch
+                    value={showBottomBarBackground}
+                    onValueChange={setShowBottomBarBackground}
+                    thumbColor={showBottomBarBackground ? colors.accent : (isDark ? '#888' : '#f4f3f4')}
+                    trackColor={{ false: isDark ? '#444' : '#ccc', true: colors.accent }}
+                  />
+                </View>
                 <View style={styles.settingsItemNoBorder}>
                   <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), flex: 1, color: colors.textPrimary }]}>Font Size</Text>
                   <Text style={{ fontSize: scaled(14), color: colors.textSecondary, width: 50, textAlign: 'right' }}>{(fontScale).toFixed(2)}x</Text>
@@ -362,7 +385,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onClose }) => {
                 <Text style={[styles.settingsSectionTitle, { fontSize: scaled(13), color: colors.textSecondary }]}>About</Text>
                 <View style={[styles.settingsItem, { borderBottomColor: colors.border }]}>
                   <Text style={[styles.settingsItemLabel, { fontSize: scaled(16), color: colors.textPrimary }]}>Version</Text>
-                  <Text style={[styles.settingsItemValue, { fontSize: scaled(16), color: colors.textSecondary }]}>2.0.0</Text>
+                  <Text style={[styles.settingsItemValue, { fontSize: scaled(16), color: colors.textSecondary }]}>2.34</Text>
                 </View>
               </View>
             </ScrollView>

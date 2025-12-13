@@ -25,7 +25,14 @@ from services.transcription import TranscriptionService
 from services.summarization import SummarizationService
 from services.email_service import EmailService
 from services.voice_agent import VoiceAgentService
-from config import settings
+# Try Azure config first, fall back to local config on any failure
+try:
+    import config_azure as _config_azure
+    settings = _config_azure.settings
+    print("✅ Using Azure configuration")
+except Exception:
+    from config import settings
+    print("ℹ️ Using local configuration")
 
 # Load environment variables
 load_dotenv()
@@ -40,6 +47,11 @@ def cors_origin_validator(origin: str) -> bool:
     """
     if not origin:
         return False
+
+    # NEW: Allow Azure domains
+    if ".azurewebsites.net" in origin:
+        logger.info(f"✅ Allowing Azure origin: {origin}")
+        return True
     
     # Allow ngrok domains (they change dynamically)
     ngrok_patterns = [".ngrok.io", ".ngrok-free.app", ".ngrok.app"]
@@ -132,15 +144,31 @@ async def cors_middleware(request: Request, call_next):
     return response
 
 # Initialize OpenAI client using settings
-openai_client = None
-if settings.openai_api_key:
+def _get_openai_api_key() -> str | None:
+    """Extract OpenAI API key as a plain string from settings or environment."""
+    val = getattr(settings, "openai_api_key", None)
     try:
-        openai_client = OpenAI(api_key=settings.openai_api_key)
+        # Support SecretStr from pydantic
+        if val is not None and hasattr(val, "get_secret_value"):
+            val = val.get_secret_value()
+    except Exception:
+        pass
+    # Normalize blanks
+    if isinstance(val, str) and not val.strip():
+        val = None
+    # Fallback to environment
+    return val or os.getenv("OPENAI_API_KEY")
+
+openai_client = None
+_api_key = _get_openai_api_key()
+if _api_key:
+    try:
+        openai_client = OpenAI(api_key=_api_key)
         logger.info("OpenAI client initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize OpenAI client: {e}")
 else:
-    logger.warning("OpenAI API key not found")
+    logger.warning("OpenAI API key not found (OPENAI_API_KEY)")
 
 # Initialize services with proper error handling
 try:
@@ -361,6 +389,8 @@ async def send_email_endpoint(request: SendEmailRequest):
 
         logger.info(f"📥 Received summary.work_order (raw): {summary_dict.get('work_order') if isinstance(summary_dict, dict) else getattr(request.summary, 'work_order', None)}")
         logger.info(f"📥 Received summary payload: {summary_dict}")
+        if request.attachments:
+            logger.info(f"📎 Received {len(request.attachments)} attachment(s)")
 
         # Send email with summary and transcription
         result = email_service.send_closeout_email(
@@ -368,6 +398,7 @@ async def send_email_endpoint(request: SendEmailRequest):
             request.transcription,
             None,
             request.technician_email,
+            request.attachments,
         )
         
         if result.get("success", False):

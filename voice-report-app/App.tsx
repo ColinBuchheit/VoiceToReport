@@ -14,6 +14,11 @@ import { ActivityIndicator, View } from 'react-native';
 import { CloseoutSummary } from './types/aiAgent'; // FIXED: Import from correct types file
 import { FontScaleProvider } from './context/FontScaleContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
+import { ChecklistProvider } from './context/ChecklistContext';
+import { TranscriptionProvider } from './context/TranscriptionContext';
+import { SettingsProvider } from './context/SettingsContext';
+import { SummaryProvider } from './context/SummaryContext';
+import { ReportSessionProvider } from './context/ReportSessionContext';
 
 // Navigation types to match API structure
 export type RootStackParamList = {
@@ -22,6 +27,8 @@ export type RootStackParamList = {
   Transcript: {
     transcription: string;
     audioUri?: string;
+    /** When present, this screen is editing an existing draft */
+    draftId?: string;
   };
   Summary: {
     transcription: string;
@@ -107,7 +114,17 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <ThemedAppRoot />
+        <SettingsProvider>
+          <ChecklistProvider>
+            <TranscriptionProvider>
+              <SummaryProvider>
+                <ReportSessionProvider>
+                  <ThemedAppRoot />
+                </ReportSessionProvider>
+              </SummaryProvider>
+            </TranscriptionProvider>
+          </ChecklistProvider>
+        </SettingsProvider>
       </ThemeProvider>
     </SafeAreaProvider>
   );

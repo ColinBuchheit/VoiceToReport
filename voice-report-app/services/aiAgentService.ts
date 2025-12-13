@@ -2,7 +2,9 @@
 import { File, Paths } from 'expo-file-system'; // ✅ Modern API for file objects & paths
 import * as FileSystemLegacy from 'expo-file-system/legacy'; // ✅ Legacy API for base64 operations
 import { Audio, AVPlaybackStatus } from 'expo-av';
+import audioLockService from './audioLockService';
 import { VoiceCommand, VoiceCommandResponse, ScreenContext } from '../types/aiAgent';
+import { Platform } from 'react-native';
 
 // Import the API configuration
 let API_CONFIG: {
@@ -27,7 +29,6 @@ try {
 
 export class AIAgentService {
   private static instance: AIAgentService;
-  private recording: Audio.Recording | null = null;
   private sound: Audio.Sound | null = null;
   
   // Enhanced connection management
@@ -43,54 +44,11 @@ export class AIAgentService {
   }
 
   async startListening(): Promise<Audio.Recording> {
-    // Request permissions with better error handling
-    const { status } = await Audio.requestPermissionsAsync();
-    if (status !== 'granted') {
-      throw new Error('Microphone permission is required for voice commands. Please enable it in your device settings.');
-    }
-
-    // Set audio mode for recording
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-      shouldDuckAndroid: true,
-      playThroughEarpieceAndroid: false,
-    });
-
-    // Use high quality recording for better transcription
-    const { recording } = await Audio.Recording.createAsync(
-      Audio.RecordingOptionsPresets.HIGH_QUALITY
-    );
-
-    this.recording = recording;
-    console.log('✅ AI Agent recording started with HIGH_QUALITY preset');
-    return recording;
+    throw new Error('Recording is now handled directly in AIAgent component');
   }
 
   async stopListening(): Promise<string | null> {
-    if (!this.recording) return null;
-
-    try {
-      await this.recording.stopAndUnloadAsync();
-      const uri = this.recording.getURI();
-      
-      // Reset audio mode
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-      });
-
-      console.log('✅ AI Agent recording stopped successfully');
-      console.log('📁 Audio URI:', uri);
-      
-      this.recording = null;
-      return uri;
-    } catch (error) {
-      console.error('❌ Error stopping AI agent recording:', error);
-      this.recording = null;
-      throw new Error('Failed to stop recording. Please try again.');
-    }
+    throw new Error('Recording is now handled directly in AIAgent component');
   }
 
   // Enhanced backend connection with better caching
@@ -142,6 +100,15 @@ export class AIAgentService {
     AIAgentService.workingBackendUrl = null;
     AIAgentService.lastConnectionTest = now;
     return null;
+  }
+
+  // Debug helper: expose cached backend data and candidates for diagnostics
+  getBackendDebugInfo(): { cachedUrl: string | null; lastTestMs: number; candidates: string[] } {
+    return {
+      cachedUrl: AIAgentService.workingBackendUrl,
+      lastTestMs: AIAgentService.lastConnectionTest,
+      candidates: API_CONFIG.BACKEND_URLS || [],
+    };
   }
 
   // Voice command processing with hybrid FileSystem API
@@ -393,16 +360,23 @@ export class AIAgentService {
   // Cleanup method for proper resource management
   async cleanup(): Promise<void> {
     try {
-      // Stop any active recording
-      if (this.recording) {
-        await this.recording.stopAndUnloadAsync();
-        this.recording = null;
-      }
-
       // Stop any active sound playback
       if (this.sound) {
         await this.sound.unloadAsync();
         this.sound = null;
+      }
+
+      // Reset audio mode to a neutral state so mic is free across screens
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+          shouldDuckAndroid: false,
+          playThroughEarpieceAndroid: false,
+        });
+      } catch (e) {
+        console.warn('Audio mode reset in cleanup failed (non-fatal):', e);
       }
 
       console.log('✅ AI Agent cleanup completed');

@@ -1,5 +1,5 @@
-// voice-report-app/screens/TranscriptScreen.tsx - COMPLETE FIXED VERSION
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+
+import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -15,14 +15,23 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RouteProp } from '@react-navigation/native';
+import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
 import { useFontScale } from '../context/FontScaleContext';
 import Loader from '../components/Loader';
 import { generateSummary } from '../services/api';
 import AIAgent from '../components/AIAgent';
+import DraftSaveButton from '../components/DraftSaveButton';
 import { ScreenContext, FieldInfo, CloseoutSummary } from '../types/aiAgent';
 import { useTheme } from '../context/ThemeContext';
+import { AIAgentService } from '../services/aiAgentService';
+import audioLockService from '../services/audioLockService';
+import Checklist from '../components/Checklist';
+import { useTranscription } from '../context/TranscriptionContext';
+import { useSummary } from '../context/SummaryContext';
+import { useChecklist } from '../context/ChecklistContext';
+import draftService from '../services/draftService';
+import { useReportSession } from '../context/ReportSessionContext';
 
 type TranscriptScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -36,11 +45,127 @@ interface Props {
 }
 
 export default function TranscriptScreen({ navigation, route }: Props) {
-  const { scaled } = useFontScale();
+  // Cleanup mic/audio when leaving this screen
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('🟢 TranscriptScreen focused');
+      return () => {
+        console.log('🧹 TranscriptScreen blur cleanup queued');
+        Promise.resolve().then(async () => {
+          try {
+            const aiService = AIAgentService.getInstance();
+            await aiService.cleanup();
+            await audioLockService.forceRelease();
+            console.log('✅ TranscriptScreen cleanup complete');
+          } catch (e) {
+            console.warn('⚠️ TranscriptScreen cleanup error:', e);
+          }
+        });
+      };
+    }, [])
+  );
+  const { scaled, fontScale } = useFontScale();
   const { colors, isDark } = useTheme();
+  const { setTranscription: setGlobalTranscription } = useTranscription();
+  const { lastSummary, lastTranscription, setSummary } = useSummary();
+  const { checkedItems, reset: resetChecklist } = useChecklist();
+  const { setCurrentDraftId, setJustExitedDraft } = useReportSession();
+  const [draftId, setDraftId] = useState<string | undefined>(() => route.params?.draftId);
   const [transcription, setTranscription] = useState(route.params.transcription);
+  // Ensure session knows we are editing this draft if navigated with a draftId
+  useEffect(() => {
+    if (route.params?.draftId) {
+      setCurrentDraftId(route.params.draftId);
+    }
+  }, [route.params?.draftId]);
+
+  // Helper to compare checklists
+  const equalChecklist = (a?: Record<string, boolean>, b?: Record<string, boolean>) => {
+    const ak = Object.keys(a || {});
+    const bk = Object.keys(b || {});
+    if (ak.length !== bk.length) return false;
+    for (const k of ak) {
+      if (!!(a as any)[k] !== !!(b as any)[k]) return false;
+    }
+    return true;
+  };
+
+  const hasUnsavedChanges = async (): Promise<boolean> => {
+    const text = (transcription || '').trim();
+    if (!draftId) {
+      // If nothing saved yet, consider any content as unsaved changes
+      const anyChecklist = Object.values(checkedItems || {}).some(Boolean);
+      return text.length > 0 || anyChecklist;
+    }
+    try {
+      const saved = await draftService.getDraftById(draftId);
+      if (!saved) {
+        const anyChecklist = Object.values(checkedItems || {}).some(Boolean);
+        return text.length > 0 || anyChecklist;
+      }
+      const savedText = (saved.transcription || '').trim();
+      const sameText = savedText === text;
+      const sameChecklist = equalChecklist(saved.checklist, checkedItems);
+      return !(sameText && sameChecklist);
+    } catch {
+      return true;
+    }
+  };
+
+  // Track dirtiness to control Save button enabled/disabled state
+  const [isDirty, setIsDirty] = useState(false);
+  const [saveSignal, setSaveSignal] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const dirty = await hasUnsavedChanges();
+        if (!cancelled) setIsDirty(dirty);
+      } catch {
+        if (!cancelled) setIsDirty(true);
+      }
+    })();
+    return () => { cancelled = true; };
+    // Re-evaluate whenever relevant inputs change
+  }, [draftId, transcription, checkedItems, saveSignal]);
+
+  const performExit = () => {
+    // Fully exit draft: clear session and working state, and reset nav stack
+    setCurrentDraftId(undefined);
+    setJustExitedDraft(true);
+    try { setGlobalTranscription(''); } catch {}
+    try { resetChecklist(); } catch {}
+    navigation.reset({ index: 0, routes: [{ name: 'Home' as any }] });
+  };
+
+  const handleExitPress = async () => {
+    const unsaved = await hasUnsavedChanges();
+    if (!unsaved) return performExit();
+    Alert.alert(
+      'Unsaved changes',
+      'Do you want to save your changes to the draft before exiting?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: () => performExit() },
+        { text: 'Save', onPress: async () => {
+            try {
+              await draftService.addDraft({
+                id: draftId,
+                transcription,
+                summary: {} as CloseoutSummary,
+                lastSavedRoute: 'Transcript',
+                checklist: checkedItems,
+              });
+            } catch {}
+            performExit();
+          }
+        },
+      ]
+    );
+  };
   const [isEditing, setIsEditing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showChecklist, setShowChecklist] = useState(true);
   const [estimateSeconds, setEstimateSeconds] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [progressPercent, setProgressPercent] = useState<number>(0);
@@ -54,6 +179,26 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   const holdProgress = useRef(new Animated.Value(0)).current;
   const holdTimeout = useRef<NodeJS.Timeout | null>(null);
   const HOLD_DURATION = 2000; // 2 seconds
+
+  // Add a forward (Next) button to navigate to Summary without losing input
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={() => {
+            const shouldReuse = lastSummary && (lastTranscription ?? '') === (transcription ?? '');
+            const payload: CloseoutSummary = shouldReuse ? (lastSummary as CloseoutSummary) : {};
+            navigation.navigate('Summary', { transcription, summary: payload, ...(draftId ? { draftId } : {}) });
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Next"
+          style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+        >
+          <Ionicons name="chevron-forward" size={22} color={colors.accent} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, transcription, colors.accent, lastSummary, lastTranscription, draftId]);
 
   // Enhanced screen context with comprehensive field mapping
   const screenContext = useMemo((): ScreenContext => {
@@ -122,7 +267,25 @@ export default function TranscriptScreen({ navigation, route }: Props) {
       timestamp: new Date().toISOString(),
       screenContextMode: isEditing ? 'edit' : 'preview'
     });
+    // Keep global transcription in sync so Home's manual input reflects updates when returning
+    try { setGlobalTranscription(transcription || ''); } catch {}
   }, [transcription, isEditing]);
+
+  // If transcription is missing but we have a draft id, hydrate from saved draft
+  useEffect(() => {
+    (async () => {
+      try {
+        if ((!transcription || transcription.trim() === '') && draftId) {
+          const d = await draftService.getDraftById(draftId);
+          if (d && d.transcription && d.transcription.trim().length) {
+            setTranscription(d.transcription);
+          }
+        }
+      } catch (e) {
+        // non-blocking
+      }
+    })();
+  }, [draftId]);
 
   const handleGenerateSummary = async () => {
     // Heuristic progress simulation based on transcription length
@@ -178,6 +341,9 @@ export default function TranscriptScreen({ navigation, route }: Props) {
         console.log('✅ Using response as CloseoutSummary directly');
       }
 
+      // Persist generated summary so it can be reused if user navigates back and forward
+      try { setSummary(closeoutSummary, transcription || ''); } catch {}
+
       // Immediately fill to 100% and navigate after a short visual pause
       if (progressInterval.current) {
         clearInterval(progressInterval.current);
@@ -189,6 +355,7 @@ export default function TranscriptScreen({ navigation, route }: Props) {
       navigation.navigate('Summary', {
         transcription,
         summary: closeoutSummary,
+        ...(draftId ? { draftId } : {}),
       });
     } catch (error) {
       console.error('❌ Error generating summary:', error);
@@ -356,63 +523,80 @@ export default function TranscriptScreen({ navigation, route }: Props) {
     const etaText = formatETA(estimateSeconds, elapsedSeconds);
 
     // Shimmer translateX from -30% to 100%
+    // UI scale helpers derived from font scale
+    const ui = {
+      cardPadding: Math.max(14, scaled(20)),
+      cardRadius: Math.max(12, scaled(16)),
+      iconWrap: Math.max(44, scaled(56)),
+      iconRadius: Math.max(22, Math.round(scaled(56) / 2)),
+      sectionMargin: Math.max(8, scaled(12)),
+      chipPadV: Math.max(4, Math.round(6 * fontScale)),
+      chipPadH: Math.max(8, Math.round(10 * fontScale)),
+      chipGap: Math.max(2, Math.round(4 * fontScale)),
+      connectorW: Math.max(12, Math.round(18 * fontScale)),
+      connectorH: Math.max(1, Math.round(1 * fontScale)),
+      progressH: Math.max(10, scaled(12)),
+      shimmerW: Math.max(70, Math.round(90 * fontScale)),
+      topIconHaloOffset: Math.max(4, Math.round(6 * fontScale)),
+    };
+
     const shimmerTranslate = shimmerAnim.interpolate({
       inputRange: [0, 1],
-      outputRange: [-60, 260], // pixels across container; works for most widths
+      outputRange: [-60 * fontScale, 260 * fontScale],
     });
     const pulseScale = pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
     const pulseOpacity = pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.2] });
 
     return (
       <SafeAreaView style={{flex:1, backgroundColor: colors.background}}>
-        <ScrollView contentContainerStyle={{flexGrow:1, justifyContent:'center', alignItems:'center', padding:24}}>
-        <View style={{width:'100%', maxWidth: 720, backgroundColor: colors.surface, borderRadius:16, padding:20, alignItems:'center', elevation:3, borderWidth:1, borderColor: colors.border}}>
+  <ScrollView contentContainerStyle={{flexGrow:1, justifyContent:'center', alignItems:'center', padding: scaled(24)}}>
+  <View style={{width:'100%', maxWidth: 720, backgroundColor: colors.surface, borderRadius: ui.cardRadius, padding: ui.cardPadding, alignItems:'center', elevation:3, borderWidth:1, borderColor: colors.border}}>
           {/* Icon with pulse */}
-          <View style={{marginBottom: 12}}>
+          <View style={{marginBottom: ui.sectionMargin}}>
             <Animated.View style={{
               position:'absolute',
-              top: -6,
-              left: -6,
-              right: -6,
-              bottom: -6,
-              borderRadius: 40,
+              top: -ui.topIconHaloOffset,
+              left: -ui.topIconHaloOffset,
+              right: -ui.topIconHaloOffset,
+              bottom: -ui.topIconHaloOffset,
+              borderRadius: Math.round(ui.iconWrap / 2),
               backgroundColor: colors.accent,
               opacity: pulseOpacity,
               transform: [{ scale: pulseScale }],
             }} />
-            <View style={{width:56, height:56, borderRadius:28, backgroundColor: isDark ? '#2a2d34' : '#fff7f2', alignItems:'center', justifyContent:'center', borderWidth:1, borderColor: isDark ? colors.border : '#ffd7c0'}}>
+            <View style={{width:ui.iconWrap, height:ui.iconWrap, borderRadius: Math.round(ui.iconWrap/2), backgroundColor: isDark ? '#2a2d34' : '#fff7f2', alignItems:'center', justifyContent:'center', borderWidth:1, borderColor: isDark ? colors.border : '#ffd7c0'}}>
               <Ionicons name={stepIndex === 0 ? 'cloud-upload-outline' : stepIndex === 1 ? 'document-text-outline' : 'checkmark-done-outline'} size={scaled(28)} color={colors.accent} />
             </View>
           </View>
 
-          <Text style={{fontSize: scaled(18), fontWeight:'700', marginBottom:4, color: colors.textPrimary, textAlign: 'center'}}>Generating Closeout{dots}</Text>
-          <Text style={{color: colors.textSecondary, marginBottom:14, fontSize: scaled(14), textAlign: 'center'}}>{phase}{etaText ? ` • ${etaText}` : ''}</Text>
+          <Text style={{fontSize: scaled(18), fontWeight:'700', marginBottom: Math.max(2, Math.round(4 * fontScale)), color: colors.textPrimary, textAlign: 'center'}}>Generating Closeout{dots}</Text>
+          <Text style={{color: colors.textSecondary, marginBottom: ui.sectionMargin, fontSize: scaled(14), textAlign: 'center'}}>{phase}{etaText ? ` • ${etaText}` : ''}</Text>
 
           {/* Step chips */}
-          <View style={{flexDirection:'row', alignItems:'center', marginBottom:14, flexWrap:'wrap', justifyContent:'center'}}>
+          <View style={{flexDirection:'row', alignItems:'center', marginBottom: ui.sectionMargin, flexWrap:'wrap', justifyContent:'center'}}>
             {[{label:'Upload', icon:'cloud-upload-outline'}, {label:'Summarize', icon:'document-text-outline'}, {label:'Finalize', icon:'checkmark-done-outline'}].map((s, i) => {
               const active = i === stepIndex;
               const done = i < stepIndex;
               return (
                 <View key={s.label} style={{flexDirection:'row', alignItems:'center'}}>
-                  <View style={{flexDirection:'row', alignItems:'center', paddingVertical:6, paddingHorizontal:10, borderRadius:999, borderWidth:1, marginHorizontal:4,
+                  <View style={{flexDirection:'row', alignItems:'center', paddingVertical: ui.chipPadV, paddingHorizontal: ui.chipPadH, borderRadius:999, borderWidth:1, marginHorizontal: Math.max(3, Math.round(4 * fontScale)),
                     backgroundColor: active ? (isDark ? colors.accent : '#FFEDE5') : (done ? (isDark ? '#1f2a' : '#f4f6f8') : 'transparent'),
                     borderColor: active ? colors.accent : colors.border}}
                   >
                     <Ionicons name={s.icon as any} size={scaled(14)} color={active ? (isDark ? colors.accentContrast : colors.accent) : (done ? colors.textSecondary : colors.textSecondary)} />
                     <Text style={{marginLeft:6, fontSize: scaled(12), fontWeight: active ? '700' : '600', color: active ? (isDark ? colors.accentContrast : colors.textPrimary) : colors.textSecondary}}>{s.label}</Text>
                   </View>
-                  {i < 2 && <View style={{width: 18, height: 1, backgroundColor: colors.border, marginHorizontal: 2}} />}
+                  {i < 2 && <View style={{width: ui.connectorW, height: ui.connectorH, backgroundColor: colors.border, marginHorizontal: Math.max(2, Math.round(2 * fontScale))}} />}
                 </View>
               );
             })}
           </View>
 
           {/* Progress bar with shimmer */}
-          <View style={{height:14, width:'100%', backgroundColor: isDark ? '#2b2f36' : '#f0f2f5', borderRadius:8, overflow:'hidden', marginBottom:10, borderWidth:1, borderColor: colors.border}}>
+          <View style={{height: ui.progressH, width:'100%', backgroundColor: isDark ? '#2b2f36' : '#f0f2f5', borderRadius: Math.max(6, Math.round(8 * fontScale)), overflow:'hidden', marginBottom: Math.max(8, Math.round(10 * fontScale)), borderWidth:1, borderColor: colors.border}}>
             <View style={{height:'100%', width:`${progressPercent}%`, backgroundColor: colors.accent}} />
             <Animated.View style={{
-              position:'absolute', top:0, bottom:0, width:90,
+              position:'absolute', top:0, bottom:0, width: ui.shimmerW,
               transform:[{ translateX: shimmerTranslate }, { skewX: '-12deg' }],
               backgroundColor: 'rgba(255,255,255,0.25)'
             }} />
@@ -434,17 +618,40 @@ export default function TranscriptScreen({ navigation, route }: Props) {
   <ScrollView style={[styles.scrollContainer]} contentContainerStyle={{ paddingBottom: 180 }}>
         <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <Text style={[styles.title, { fontSize: scaled(24), color: colors.textPrimary }]}>Voice Transcription</Text>
-          <TouchableOpacity
-            style={[styles.editButton, { backgroundColor: isEditing ? colors.accent : colors.surfaceAlt, borderColor: colors.border }, isEditing && { } ]}
-            onPress={handleModeToggle}
-          >
-            <Text style={[styles.editButtonText, { fontSize: scaled(14), color: isEditing ? colors.accentContrast : colors.textPrimary }]}>
-              {isEditing ? 'Done' : 'Edit'}
-            </Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TouchableOpacity
+              style={[styles.editButton, { backgroundColor: isEditing ? colors.accent : colors.surfaceAlt, borderColor: colors.border }]}
+              onPress={handleModeToggle}
+            >
+              <Text style={[styles.editButtonText, { fontSize: scaled(14), color: isEditing ? colors.accentContrast : colors.textPrimary }]}>
+                {isEditing ? 'Done' : 'Edit'}
+              </Text>
+            </TouchableOpacity>
+            <DraftSaveButton
+              compact
+              data={(lastSummary && (lastTranscription ?? '') === (transcription ?? '')) ? (lastSummary as CloseoutSummary) : ({ } as CloseoutSummary)}
+              draftId={draftId}
+              transcription={transcription}
+              checklist={checkedItems}
+              onSaved={(id) => { setDraftId(id); setCurrentDraftId(id); setSaveSignal(x => x + 1); }}
+              style={{ paddingHorizontal: 8, paddingVertical: 6 }}
+              disabled={!isDirty}
+              currentRoute="Transcript"
+            />
+          </View>
         </View>
 
-        <View style={[styles.transcriptionCard, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+        {/* Editing Draft banner below header */}
+        {!!draftId && (
+          <View style={[styles.draftBanner, { borderColor: colors.accent, backgroundColor: colors.surface }]}> 
+            <Text style={[styles.draftBannerText, { color: colors.textPrimary }]}>Editing Draft</Text>
+            <TouchableOpacity onPress={handleExitPress} style={[styles.draftExitBtn, { borderColor: colors.accent }]}> 
+              <Text style={[styles.draftExitBtnText, { color: colors.accent }]}>Exit Draft</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <View style={[styles.transcriptionCard, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}> 
           {isEditing ? (
             <TextInput
               style={[styles.transcriptionInput, { fontSize: scaled(16), lineHeight: scaled(24), color: colors.textPrimary }]}
@@ -505,6 +712,25 @@ export default function TranscriptScreen({ navigation, route }: Props) {
             </Text>
           </TouchableOpacity>
         </View>
+
+        {/* Checklist section (expandable) */}
+        <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+          <View style={styles.sectionHeaderRow}>
+            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Checklist</Text>
+            <TouchableOpacity
+              style={[styles.sectionToggleBtn, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
+              onPress={() => setShowChecklist(!showChecklist)}
+            >
+              <Text style={{ color: colors.textPrimary, fontWeight: '600' }}>{showChecklist ? 'Hide' : 'Show'}</Text>
+            </TouchableOpacity>
+          </View>
+          {showChecklist && (
+            <>
+              <View style={{ height: 12 }} />
+              <Checklist contentPaddingBottom={24} />
+            </>
+          )}
+        </View>
       </ScrollView>
 
       {/* AI Agent */}
@@ -548,6 +774,20 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#ffffff',
   },
+  draftBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 20,
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  draftBannerText: { fontWeight: '700' },
+  draftExitBtn: { paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderRadius: 8 },
+  draftExitBtnText: { fontWeight: '700' },
   scrollContainer: {
     flex: 1,
   },
@@ -586,6 +826,33 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e9ecef',
     minHeight: 200,
+  },
+  sectionCard: {
+    marginHorizontal: 20,
+    marginBottom: 12,
+    padding: 14,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  sectionToggleBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
   },
   transcriptionInput: {
     fontSize: 16,

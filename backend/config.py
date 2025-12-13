@@ -1,14 +1,15 @@
-# backend/config.py - UPDATED VERSION (keeping your structure, fixing CORS)
+# backend/config.py - UPDATED VERSION (keeping your structure, fixing CORS and OPENAI key handling)
 import os
-from typing import List, Union
-from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from typing import List, Union, Optional
+from pydantic import field_validator, Field, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     """Application configuration using Pydantic settings"""
     
     # OpenAI Configuration
-    openai_api_key: str
+    # Keep optional to avoid startup crashes if missing locally; still treated as secret
+    openai_api_key: Optional[SecretStr] = Field(default=None, alias="OPENAI_API_KEY")
     
     # Server Configuration
     port: int = 8000
@@ -26,16 +27,18 @@ class Settings(BaseSettings):
     supported_audio_formats: Union[str, List[str]] = "m4a,mp4,wav,mp3,webm"
     
     # GPT Configuration
-    gpt_model: str = "gpt-4-turbo-preview"
+    gpt_model: str = "gpt-5"
     gpt_max_tokens: int = 500
     gpt_temperature: float = 0.3
     
     # Email Configuration
     email_user: str = ""
-    email_password: str = ""
-    email_recipients: str = "colbol42@gmail.com"  # Your existing email
-    smtp_server: str = "smtp.gmail.com"
+    email_password: Optional[SecretStr] = None
+    email_recipients: str = ""  # Configure via EMAIL_RECIPIENTS env var (comma-separated)
+    smtp_server: str = "smtp.mail.yahoo.com"
     smtp_port: str = "587"
+    smtp_ca_bundle: Optional[str] = None
+    smtp_tls_insecure: bool = False
     
     # Bug report recipient
     bug_report_recipient: str = "colin.buchheit@beartechs.com"
@@ -88,10 +91,14 @@ class Settings(BaseSettings):
         # Use dynamic CORS if no specific origins are configured
         return len(self.get_allowed_origins_list()) == 0
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+    # Pydantic v2 settings config
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        populate_by_name=True,
+        case_sensitive=False,
+        extra="ignore",
+    )
 
 # Global settings instance
 settings = Settings()

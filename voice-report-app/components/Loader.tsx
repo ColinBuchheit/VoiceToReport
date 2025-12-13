@@ -1,4 +1,4 @@
-// Updated Loader component with BearS&T theming
+// Updated Loader component with BearS&T theming and font scaling
 import React from 'react';
 import {
   View,
@@ -6,17 +6,21 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
+import { useFontScale } from '../context/FontScaleContext';
+import { useTheme } from '../context/ThemeContext';
 
 interface LoaderProps {
   message?: string;
 }
 
 export default function Loader({ message = 'Loading...' }: LoaderProps) {
+  const { scaled } = useFontScale();
+  const { colors } = useTheme();
   return (
-    <View style={styles.container}>
-      <View style={styles.loaderCard}>
-        <ActivityIndicator size="large" color="#FF6B35" />
-        <Text style={styles.message}>{message}</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.loaderCard, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+        <ActivityIndicator size="large" color={colors.accent} />
+        <Text style={[styles.message, { color: colors.textPrimary, fontSize: scaled(16) }]}>{message}</Text>
       </View>
     </View>
   );
@@ -27,15 +31,15 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF', // White background
+    backgroundColor: '#FFFFFF', // themed dynamically
   },
   loaderCard: {
-    backgroundColor: '#F8F9FA', // Very light gray background
+    backgroundColor: '#F8F9FA', // themed dynamically
     borderRadius: 12,
     padding: 30,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#E5E7EB', // themed dynamically
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -44,8 +48,8 @@ const styles = StyleSheet.create({
   },
   message: {
     marginTop: 16,
-    fontSize: 16,
-    color: '#000000', // Black text
+    fontSize: 16, // scaled dynamically
+    color: '#000000', // themed dynamically
     fontWeight: '500',
     textAlign: 'center',
     maxWidth: 320,
