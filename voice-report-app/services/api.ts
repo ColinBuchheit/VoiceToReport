@@ -3,7 +3,7 @@ import axios, { AxiosError } from 'axios';
 import { File } from 'expo-file-system';
 import * as FileSystemLegacy from 'expo-file-system/legacy';
 import { API_CONFIG } from './api-config';
-import { TranscriptionResponse, SummaryResponse, EmailResponse, CloseoutSummary, ApiError, BugReportRequest, BugReportResponse, BugImagePayload } from '../types/api';
+import { TranscriptionResponse, SummaryResponse, EmailResponse, CloseoutSummary, ApiError, BugReportRequest, BugReportResponse, BugImagePayload, EmailAttachment } from '../types/api';
 
 // =============================================================================
 // BACKEND CONNECTION MANAGEMENT
@@ -183,23 +183,68 @@ export async function generateSummary(transcription: string): Promise<CloseoutSu
   }
 }
 
+// Lightweight attachment input (URI reference, no base64 stored)
+interface AttachmentInput {
+  uri: string;
+  name: string;
+  mimeType: string;
+}
+
 /**
  * Send closeout email with summary and transcription
- * Timeout: 30 seconds
+ * Reads attachment base64 data ONLY at send time (not stored in drafts)
+ * Timeout: 60 seconds
  */
 export async function sendCloseoutEmail({
   summary,
   transcription,
   technicianEmail,
+  attachments,
 }: {
   summary: CloseoutSummary;
   transcription: string;
   technicianEmail?: string;
+  attachments?: AttachmentInput[];
 }): Promise<EmailResponse> {
   const workingBackendUrl = await getWorkingBackend();
 
   try {
     console.log(`📧 Sending closeout email using: ${workingBackendUrl}`);
+    
+    // Convert attachment URIs to base64 ONLY now, at send time
+    const emailAttachments: EmailAttachment[] = [];
+    if (attachments?.length) {
+      console.log(`📎 Reading ${attachments.length} attachment(s) for email...`);
+      
+      for (const att of attachments) {
+        try {
+          // Check if file still exists
+          const fileInfo = await FileSystemLegacy.getInfoAsync(att.uri);
+          if (!fileInfo.exists) {
+            console.warn(`⚠️ Attachment file not found, skipping: ${att.name}`);
+            continue;
+          }
+          
+          // Read base64 only now
+          const base64Data = await FileSystemLegacy.readAsStringAsync(att.uri, {
+            encoding: FileSystemLegacy.EncodingType.Base64,
+          });
+          
+          emailAttachments.push({
+            filename: att.name,
+            content_type: att.mimeType,
+            data_base64: base64Data,
+          });
+          
+          console.log(`✅ Read attachment: ${att.name}`);
+        } catch (err) {
+          console.error(`❌ Failed to read attachment ${att.name}:`, err);
+          // Continue with other attachments
+        }
+      }
+      
+      console.log(`📎 Prepared ${emailAttachments.length} attachment(s) for email`);
+    }
     
     const response = await axios.post(
       `${workingBackendUrl}/send-email`,
@@ -207,8 +252,9 @@ export async function sendCloseoutEmail({
         summary: summary,
         transcription: transcription,
         technician_email: technicianEmail,
+        attachments: emailAttachments,
       },
-      createRequestConfig(30000) // 30 seconds for email
+      createRequestConfig(60000) // 60 seconds for email with attachments
     );
 
     console.log('✅ Closeout email sent successfully');

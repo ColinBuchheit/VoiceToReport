@@ -3,6 +3,23 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CloseoutSummary } from '../types/aiAgent';
 
+// Lightweight attachment for drafts - stores URI reference (no base64)
+// User can view file if it still exists on device
+export interface DraftAttachment {
+  uri: string;           // File URI on device
+  name: string;          // Original filename
+  size: number;          // File size in bytes
+  mimeType: string;      // MIME type
+  // NO base64 stored - read only when sending email
+}
+
+// Metadata-only attachment for sent email history - no file data at all
+export interface AttachmentMetadata {
+  name: string;          // Original filename
+  size: number;          // File size in bytes
+  mimeType: string;      // MIME type
+}
+
 export interface DraftItem {
   id: string;            // uuid
   timestamp: string;     // ISO string
@@ -15,6 +32,8 @@ export interface DraftItem {
   lastSavedRoute?: 'Home' | 'Transcript' | 'Summary';
   // Optional saved checklist progress for this draft
   checklist?: Record<string, boolean>;
+  // File attachments (PDFs, photos, documents)
+  attachments?: DraftAttachment[];
 }
 
 const STORAGE_KEY = 'email_drafts_v1';
@@ -118,6 +137,7 @@ class DraftService {
       summary: draft.summary ?? prev?.summary as any,
       lastSavedRoute: draft.lastSavedRoute ?? prev?.lastSavedRoute,
       checklist: draft.checklist ?? prev?.checklist,
+      attachments: draft.attachments ?? prev?.attachments,
     };
 
     // Upsert by id: replace existing entry if present, else insert at top

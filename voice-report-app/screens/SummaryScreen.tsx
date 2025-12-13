@@ -22,6 +22,7 @@ import DraftSaveButton from '../components/DraftSaveButton';
 import useAutoSave from '../hooks/useAutoSave';
 import EmailSuccessPopup from '../components/EmailSuccessPopup';
 import DraftSavedPopup from '../components/DraftSavedPopup';
+import AttachmentDropZone, { Attachment } from '../components/AttachmentDropZone';
 import { Ionicons } from '@expo/vector-icons';
 import { CloseoutSummary, ScreenContext } from '../types/aiAgent';
 import { useFontScale } from '../context/FontScaleContext';
@@ -274,6 +275,8 @@ export default function SummaryScreen({ navigation, route }: Props) {
   const [fieldHistoryMeta, setFieldHistoryMeta] = useState<Record<string, number>>({});
   // Signal for external saves (e.g., DraftSaveButton) to refresh isDirty immediately
   const [saveSignal, setSaveSignal] = useState(0);
+  // File attachments for email
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   // Auto-save drafts for safety
   const { lastSaved, isDirty, saveNow } = useAutoSave(editableSummary, {
@@ -285,6 +288,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
     interval: 30000,
     currentRoute: 'Summary',
     checklist: checkedItems,
+    attachments: attachments,
     externalSaveSignal: saveSignal,
   });
 
@@ -294,14 +298,22 @@ export default function SummaryScreen({ navigation, route }: Props) {
       try {
         const missingSummary = !route.params?.summary || Object.values(route.params?.summary || {}).every(v => (v ?? '').toString().trim() === '');
         const missingTrans = !route.params?.transcription || (route.params?.transcription || '').trim() === '';
-        if ((missingSummary || missingTrans) && draftId) {
+        
+        // Always try to restore attachments when we have a draftId
+        if (draftId) {
           const d = await draftService.getDraftById(draftId);
           if (d) {
+            // Restore summary/transcription only if missing from route params
             if (missingSummary && d.summary) setEditableSummary(initializeCloseoutSummary(d.summary));
             if (missingTrans && d.transcription) setEditableTranscription(d.transcription);
             // If checklist isn't present in context (empty), seed from draft
             if (d.checklist) {
               try { setAll(d.checklist); } catch {}
+            }
+            // Always restore attachments from draft (they're not passed via route params)
+            if (d.attachments && d.attachments.length > 0 && attachments.length === 0) {
+              console.log('📎 Restoring attachments from draft:', d.attachments.length);
+              setAttachments(d.attachments);
             }
           }
         }
@@ -317,6 +329,19 @@ export default function SummaryScreen({ navigation, route }: Props) {
         <TouchableOpacity
           onPress={async () => {
             try {
+              // Save current state (including attachments) to draft before navigating
+              await draftService.addDraft({
+                id: draftId,
+                workOrder: editableSummary.work_order,
+                location: editableSummary.location,
+                transcription: editableTranscription,
+                summary: editableSummary,
+                lastSavedRoute: 'Transcript',
+                checklist: checkedItems,
+                attachments: attachments,
+              });
+              console.log('📎 Saved attachments before navigating back:', attachments.length);
+              
               // Prefer current editable transcription; if empty, hydrate from saved draft
               let text = (editableTranscription || '').trim();
               if (!text) {
@@ -337,7 +362,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
         </TouchableOpacity>
       ),
     });
-  }, [navigation, draftId, editableTranscription, colors.accent]);
+  }, [navigation, draftId, editableTranscription, editableSummary, checkedItems, attachments, colors.accent]);
 
   // Highlight window (ms)
   const HIGHLIGHT_WINDOW_MS = 8000;
@@ -602,11 +627,22 @@ export default function SummaryScreen({ navigation, route }: Props) {
   };
 
   const handleSendEmail = async () => {
+    // Require Work Order Number before sending email
+    const workOrder = (editableSummary.work_order || '').trim();
+    if (!workOrder) {
+      Alert.alert(
+        'Work Order Required',
+        'Please enter a Work Order Number before sending the email.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     // Require Scope Status selection before sending email
     const scopeStatus = (editableSummary.scope_completed || '').trim();
     if (!scopeStatus || !SCOPE_STATUS_OPTIONS.includes(scopeStatus)) {
       Alert.alert(
-        'Scope Status required',
+        'Scope Status Required',
         'Please select a Scope Status before sending the email.',
         [
           { text: 'Select Status', onPress: () => setShowScopeStatusPicker(true) },
@@ -627,10 +663,16 @@ export default function SummaryScreen({ navigation, route }: Props) {
         techEmail = profile?.workEmail;
       } catch {}
 
+      // Pass lightweight attachment references - API will read base64 at send time
+      if (attachments.length > 0) {
+        console.log(`📎 Including ${attachments.length} attachment(s) in email`);
+      }
+
       const emailResponse = await sendCloseoutEmail({
         summary: editableSummary,
         transcription: editableTranscription,
         technicianEmail: techEmail,
+        attachments: attachments, // Pass URI references, API handles base64 reading
       });
       
       // Show success popup instead of Alert
@@ -648,10 +690,19 @@ export default function SummaryScreen({ navigation, route }: Props) {
       }
 
       // Persist to local email history (non-blocking)
+      // Store only metadata for attachments (filename, size, mimeType) - no file data
       (async () => {
         try {
           console.log('💾 Saving email with transcription length:', editableTranscription?.length || 0);
           console.log('💾 Transcription preview:', editableTranscription ? editableTranscription.slice(0, 100) : 'EMPTY');
+          
+          // Convert attachments to metadata-only for history
+          const attachmentMetadata = attachments.map(att => ({
+            name: att.name,
+            size: att.size,
+            mimeType: att.mimeType,
+          }));
+          
           await emailHistoryService.addEmail({
             recipients: emailResponse.recipients || [],
             workOrder: editableSummary.work_order,
@@ -662,8 +713,12 @@ export default function SummaryScreen({ navigation, route }: Props) {
               ...editableSummary,
             },
             rawBody: JSON.stringify({ summary: editableSummary, transcription: editableTranscription }),
+            attachments: attachmentMetadata.length > 0 ? attachmentMetadata : undefined,
           });
           console.log('🗂️ Email added to local history');
+          if (attachmentMetadata.length > 0) {
+            console.log(`📎 Saved ${attachmentMetadata.length} attachment metadata to history`);
+          }
         } catch (historyErr) {
           console.warn('Failed to add email to history:', historyErr);
         }
@@ -700,6 +755,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
         summary: editableSummary,
         lastSavedRoute: 'Summary',
         checklist: checkedItems,
+        attachments: attachments,
       });
       setShowDraftSaved(true);
     } catch (e) {
@@ -850,6 +906,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
                           summary: editableSummary,
                           lastSavedRoute: 'Summary',
                           checklist: checkedItems,
+                          attachments: attachments,
                         });
                         setDraftId(d.id);
                       } catch {}
@@ -1110,6 +1167,16 @@ export default function SummaryScreen({ navigation, route }: Props) {
 
         {/* Copy/Paste Summary section removed (email includes an auto-generated version). */}
 
+        {/* ATTACHMENTS SECTION */}
+        <View style={[styles.sectionContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <AttachmentDropZone
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
+            maxFiles={10}
+            maxSizeMB={10}
+          />
+        </View>
+
         {/* Auto-save status + SEND/SAVE BUTTONS */}
         <View style={styles.actionButtons}>
           <TouchableOpacity
@@ -1130,6 +1197,7 @@ export default function SummaryScreen({ navigation, route }: Props) {
             location={editableSummary.location}
             transcription={editableTranscription}
             checklist={checkedItems}
+            attachments={attachments}
             onSaved={(id) => { setDraftId(id); setCurrentDraftId(id); setShowDraftSaved(true); setSaveSignal(x => x + 1); }}
             style={styles.secondaryButton}
             disabled={!isDirty || isSendingEmail}

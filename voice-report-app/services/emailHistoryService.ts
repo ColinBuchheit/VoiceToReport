@@ -3,6 +3,7 @@
 // so that EmailHistorySidebar and other components can consume a stable API.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AttachmentMetadata } from './draftService';
 
 export interface EmailSummary {
   work_completed?: string;
@@ -20,6 +21,8 @@ export interface EmailHistoryItem {
   transcription?: string; // raw transcription text (optional, used when selecting history)
   summary: EmailSummary;
   rawBody?: string;
+  // Metadata-only attachment info (no file data stored)
+  attachments?: AttachmentMetadata[];
 }
 
 const STORAGE_KEY = 'email_history_v1';
@@ -107,6 +110,7 @@ class EmailHistoryService {
       transcription: entry.transcription, // persist original transcription if provided
       summary: entry.summary || {},
       rawBody: entry.rawBody,
+      attachments: entry.attachments, // metadata-only attachment info
     };
     // Add newest at top
     this.cache.unshift(item);

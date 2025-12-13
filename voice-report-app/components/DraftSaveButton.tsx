@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { TouchableOpacity, Text, ActivityIndicator, View, StyleSheet, ViewStyle, Modal, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import draftService from '../services/draftService';
+import draftService, { DraftAttachment } from '../services/draftService';
 import { CloseoutSummary } from '../types/aiAgent';
 import { useTheme } from '../context/ThemeContext';
 import { useFontScale } from '../context/FontScaleContext';
@@ -14,6 +14,7 @@ interface DraftSaveButtonProps {
   location?: string;
   transcription?: string;
   checklist?: Record<string, boolean>;
+  attachments?: DraftAttachment[];
   onSaved?: (draftId: string) => void;
   style?: ViewStyle;
   compact?: boolean;
@@ -29,6 +30,7 @@ export const DraftSaveButton: React.FC<DraftSaveButtonProps> = ({
   location,
   transcription,
   checklist,
+  attachments,
   onSaved,
   style,
   compact = false,
@@ -74,6 +76,7 @@ export const DraftSaveButton: React.FC<DraftSaveButtonProps> = ({
         summary: data,
         lastSavedRoute: currentRoute,
         checklist,
+        attachments,
         timestamp: new Date().toISOString(),
       });
       setLastSaved(new Date());
@@ -103,6 +106,7 @@ export const DraftSaveButton: React.FC<DraftSaveButtonProps> = ({
         summary: data,
         lastSavedRoute: currentRoute,
         checklist,
+        attachments,
         timestamp: new Date().toISOString(),
       });
       setLastSaved(new Date());
