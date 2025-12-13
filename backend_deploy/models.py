@@ -17,6 +17,8 @@ class CloseoutSummary(BaseModel):
     # Closeout Notes
     onsite_contact: Optional[str] = "Not mentioned"
     support_contact: Optional[str] = "Not mentioned"
+    checked_in_with: Optional[str] = "Not mentioned"
+    check_in_code: Optional[str] = "Not mentioned"
     work_completed: Optional[str] = "Not mentioned"
     delays: Optional[str] = "Not mentioned"
     troubleshooting_steps: Optional[str] = "Not mentioned"
@@ -44,11 +46,18 @@ class CloseoutSummary(BaseModel):
 class SummaryResponse(BaseModel):
     summary: CloseoutSummary
 
+# Email attachment model
+class EmailAttachment(BaseModel):
+    filename: str
+    content_type: str
+    data_base64: str
+
 class SendEmailRequest(BaseModel):
     summary: CloseoutSummary
     transcription: str
     # technician_name removed - not required by backend
     technician_email: Optional[str] = None
+    attachments: Optional[List[EmailAttachment]] = []
 
 class EmailResponse(BaseModel):
     success: bool

@@ -385,6 +385,8 @@ async def send_email_endpoint(request: SendEmailRequest):
 
         logger.info(f"📥 Received summary.work_order (raw): {summary_dict.get('work_order') if isinstance(summary_dict, dict) else getattr(request.summary, 'work_order', None)}")
         logger.info(f"📥 Received summary payload: {summary_dict}")
+        if request.attachments:
+            logger.info(f"📎 Received {len(request.attachments)} attachment(s)")
 
         # Send email with summary and transcription
         result = email_service.send_closeout_email(
@@ -392,6 +394,7 @@ async def send_email_endpoint(request: SendEmailRequest):
             request.transcription,
             None,
             request.technician_email,
+            request.attachments,
         )
         
         if result.get("success", False):

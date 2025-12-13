@@ -46,11 +46,18 @@ class CloseoutSummary(BaseModel):
 class SummaryResponse(BaseModel):
     summary: CloseoutSummary
 
+# Email attachment model
+class EmailAttachment(BaseModel):
+    filename: str
+    content_type: str
+    data_base64: str
+
 class SendEmailRequest(BaseModel):
     summary: CloseoutSummary
     transcription: str
     # technician_name removed - not required by backend
     technician_email: Optional[str] = None
+    attachments: Optional[List[EmailAttachment]] = []
 
 class EmailResponse(BaseModel):
     success: bool
