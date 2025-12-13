@@ -268,17 +268,22 @@ class EmailService:
 
         # Build a simplified, ordered copy block for easy paste into emails or portals
         copy_lines: list[str] = []
-        # Technician line (optional)
-        if tech_name or technician_email:
-            if tech_name and technician_email:
-                copy_lines.append(f"Technician - {tech_name} ({technician_email})")
-            elif tech_name:
-                copy_lines.append(f"Technician - {tech_name}")
-            else:
-                copy_lines.append(f"Technician - {technician_email}")
+        
+        # JOB DETAILS section
+        copy_lines.append("JOB DETAILS")
+        if work_order and work_order != 'Not Specified':
+            copy_lines.append(f"Work Order # - {work_order}")
+        if location_name and location_name not in ('Not specified', 'Not mentioned', None, ''):
+            copy_lines.append(f"Location - {location_name}")
+        if tech_name:
+            copy_lines.append(f"Technician Name - {tech_name}")
+        elif technician_email:
+            copy_lines.append(f"Technician - {technician_email}")
+        copy_lines.append("")  # Empty line between sections
 
-        # Canonical order and labels (flattened for copy/paste)
-        ordered_fields: list[tuple[str, str]] = [
+        # SERVICE SUMMARY section
+        copy_lines.append("SERVICE SUMMARY")
+        service_summary_fields: list[tuple[str, str]] = [
             ("scope_completed", "Scope Status"),
             ("checked_in_with", "Checked In With"),
             ("check_in_code", "Check In Code"),
@@ -286,27 +291,42 @@ class EmailService:
             ("support_contact", "Support Contact"),
             ("released_by", "Released By"),
             ("release_code", "Release Code"),
+        ]
+        for field_name, label in service_summary_fields:
+            value = self._value_for(closeout_data, field_name)
+            if value and value not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no', '']:
+                copy_lines.append(f"{label} - {value}")
+        # Add transcription at end of Service Summary
+        if isinstance(transcription, str) and transcription.strip():
+            copy_lines.append(f"Transcription - {transcription.strip()}")
+        copy_lines.append("")  # Empty line between sections
+
+        # TECHNICAL INFORMATION section
+        copy_lines.append("TECHNICAL INFORMATION")
+        technical_fields: list[tuple[str, str]] = [
             ("work_completed", "Work Completed"),
             ("troubleshooting_steps", "Troubleshooting Steps"),
             ("delays", "Delays & Issues"),
             ("out_of_scope_work", "Out of Scope Work"),
+        ]
+        for field_name, label in technical_fields:
+            value = self._value_for(closeout_data, field_name)
+            if value and value not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no', '']:
+                copy_lines.append(f"{label} - {value}")
+        copy_lines.append("")  # Empty line between sections
+
+        # CLOSEOUT DETAILS section
+        copy_lines.append("CLOSEOUT DETAILS")
+        closeout_fields: list[tuple[str, str]] = [
             ("return_tracking", "Return Tracking"),
             ("materials_used", "Materials Used"),
             ("expenses", "Expenses"),
             ("photos_uploaded", "Photos Uploaded"),
         ]
-
-        # Use _value_for to benefit from synonyms/fallbacks
-        for field_name, label in ordered_fields:
+        for field_name, label in closeout_fields:
             value = self._value_for(closeout_data, field_name)
-            # Skip fields with placeholders or explicit "None"
-            if value and value not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no']:
-                # Prefer dash formatting for quick paste
+            if value and value not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no', '']:
                 copy_lines.append(f"{label} - {value}")
-
-        # Append transcription at end if available
-        if transcription and str(transcription).strip() and str(transcription) not in ['Not specified', 'Not mentioned', 'None', 'none', 'No', 'no']:
-            copy_lines.append("Transcription - " + str(transcription).strip())
 
         # Use HTML line breaks for better mobile compatibility; sanitize each line to preserve <br>
         sanitized_lines = [line.replace('<', '\u27e8').replace('>', '\u27e9') for line in copy_lines]
