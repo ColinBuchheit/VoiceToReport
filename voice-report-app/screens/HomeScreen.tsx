@@ -295,6 +295,18 @@ function HomeScreenInner({ navigation }: Props) {
     })();
   }, [navigation]);
 
+  // Helper to build a user-friendly draft display name for resume banner
+  const draftDisplayName = (d: DraftItem): string => {
+    const explicit = (d.title || '').trim();
+    if (explicit) return explicit;
+    const wo = (d.workOrder || '').trim();
+    const loc = (d.location || '').trim();
+    if (wo && loc) return `WO ${wo} – ${loc}`;
+    if (wo) return `WO ${wo}`;
+    if (loc) return loc;
+    return 'Untitled Draft';
+  };
+
   // If we just exited a draft, ensure Home resets all state on focus
   useFocusEffect(
     React.useCallback(() => {
@@ -570,7 +582,7 @@ function HomeScreenInner({ navigation }: Props) {
             <View style={styles.continueBannerTextWrap}>
               <Text style={[styles.continueBannerTitle, { color: colors.textPrimary }]}>Resume your recent draft?</Text>
               <Text style={[styles.continueBannerSubtitle, { color: colors.textSecondary }]}>
-                We'll take you back to {continueDraft.lastSavedRoute === 'Transcript' ? 'Transcription' : (continueDraft.lastSavedRoute === 'Home' ? 'Home' : 'Summary')} for WO {continueDraft.workOrder || 'N/A'} at {continueDraft.location || 'Unknown'}
+                We'll take you back to {continueDraft.lastSavedRoute === 'Transcript' ? 'Transcription' : (continueDraft.lastSavedRoute === 'Home' ? 'Home' : 'Summary')} for {draftDisplayName(continueDraft)}
               </Text>
             </View>
             <View style={styles.continueBannerActions}>

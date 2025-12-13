@@ -54,6 +54,9 @@
       "eas": {
         "projectId": "d494af9e-4a50-40f5-8022-434a11074f11"
       }
-    }
+    },
+    "plugins": [
+      "expo-mail-composer"
+    ]
   }
 }

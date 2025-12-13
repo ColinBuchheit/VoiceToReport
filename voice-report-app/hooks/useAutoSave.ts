@@ -1,6 +1,6 @@
 // voice-report-app/hooks/useAutoSave.ts
 import { useEffect, useRef, useState } from 'react';
-import draftService from '../services/draftService';
+import draftService, { DraftAttachment } from '../services/draftService';
 import { CloseoutSummary } from '../types/aiAgent';
 
 interface AutoSaveOptions {
@@ -14,6 +14,8 @@ interface AutoSaveOptions {
   currentRoute?: 'Home' | 'Transcript' | 'Summary';
   // Optional checklist progress to persist with draft
   checklist?: Record<string, boolean>;
+  // Optional file attachments to persist with draft
+  attachments?: DraftAttachment[];
   // Optional signal to force recomputing dirty state after an external save
   externalSaveSignal?: number;
 }
@@ -44,6 +46,16 @@ export function useAutoSave(
     return true;
   };
 
+  const equalAttachments = (a?: DraftAttachment[], b?: DraftAttachment[]) => {
+    const aArr = a || [];
+    const bArr = b || [];
+    if (aArr.length !== bArr.length) return false;
+    // Compare by uri (unique identifier for each attachment)
+    const aUris = aArr.map(att => att.uri).sort();
+    const bUris = bArr.map(att => att.uri).sort();
+    return aUris.every((uri, i) => uri === bUris[i]);
+  };
+
   // Compute dirtiness by comparing against saved draft (or empty baseline)
   useEffect(() => {
     let cancelled = false;
@@ -51,30 +63,32 @@ export function useAutoSave(
       try {
         const text = normalizeStr(options?.transcription);
         const anyChecklist = Object.values(options?.checklist || {}).some(Boolean);
+        const anyAttachments = (options?.attachments || []).length > 0;
         if (!options?.draftId) {
           const anySummary = Object.values(data || {}).some(v => normalizeStr(v) !== '');
-          const dirty = anySummary || text.length > 0 || anyChecklist;
+          const dirty = anySummary || text.length > 0 || anyChecklist || anyAttachments;
           if (!cancelled) setIsDirty(dirty);
           return;
         }
         const saved = await draftService.getDraftById(options.draftId);
         if (!saved) {
           const anySummary = Object.values(data || {}).some(v => normalizeStr(v) !== '');
-          const dirty = anySummary || text.length > 0 || anyChecklist;
+          const dirty = anySummary || text.length > 0 || anyChecklist || anyAttachments;
           if (!cancelled) setIsDirty(dirty);
           return;
         }
         const sameSummary = summariesEqual(saved.summary as any, data);
         const sameText = normalizeStr(saved.transcription) === text;
         const sameChecklist = equalChecklist(saved.checklist, options?.checklist);
-        if (!cancelled) setIsDirty(!(sameSummary && sameText && sameChecklist));
+        const sameAttachments = equalAttachments(saved.attachments, options?.attachments);
+        if (!cancelled) setIsDirty(!(sameSummary && sameText && sameChecklist && sameAttachments));
       } catch (e) {
         if (!cancelled) setIsDirty(true);
       }
     })();
     return () => { cancelled = true; };
     // Re-evaluate when inputs that affect dirtiness change
-  }, [options?.draftId, options?.transcription, options?.checklist, options?.externalSaveSignal, data]);
+  }, [options?.draftId, options?.transcription, options?.checklist, options?.attachments, options?.externalSaveSignal, data]);
 
   // Auto-save with debounce
   useEffect(() => {
@@ -91,6 +105,7 @@ export function useAutoSave(
           summary: data,
           lastSavedRoute: options.currentRoute,
           checklist: options.checklist,
+          attachments: options.attachments,
         });
         setLastSaved(new Date());
         setIsDirty(false);
@@ -117,6 +132,7 @@ export function useAutoSave(
         summary: data,
         lastSavedRoute: options.currentRoute,
         checklist: options.checklist,
+        attachments: options.attachments,
       });
       setLastSaved(new Date());
       setIsDirty(false);

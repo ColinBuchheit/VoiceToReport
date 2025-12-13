@@ -17,6 +17,13 @@ export interface EmailResponse {
   recipients: string[];
 }
 
+// Email attachment type
+export interface EmailAttachment {
+  filename: string;
+  content_type: string;
+  data_base64: string;
+}
+
 export interface CloseoutSummary {
   // Closeout Notes
   onsite_contact?: string;

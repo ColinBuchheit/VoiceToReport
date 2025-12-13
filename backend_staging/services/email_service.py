@@ -417,7 +417,7 @@ class EmailService:
         """
         return html_body
     
-    def send_closeout_email(self, closeout_data: Union[Dict[str, Any], object], transcription: str, technician_name: str | None = None, technician_email: str | None = None) -> Dict[str, Any]:
+    def send_closeout_email(self, closeout_data: Union[Dict[str, Any], object], transcription: str, technician_name: str | None = None, technician_email: str | None = None, attachments: List[Any] | None = None) -> Dict[str, Any]:
         """Send the closeout email to the specified recipients using sleek HTML format."""
         
         try:
@@ -502,6 +502,43 @@ class EmailService:
             except Exception as e:
                 logger.warning(f"⚠️ Failed to attach inline logo: {e}")
             
+            # Attach user-provided files (PDFs, images, documents)
+            if attachments:
+                for attachment in attachments:
+                    try:
+                        # Get attachment data from Pydantic model or dict
+                        if hasattr(attachment, 'filename'):
+                            filename = attachment.filename
+                            content_type = attachment.content_type
+                            data_base64 = attachment.data_base64
+                        else:
+                            filename = attachment.get('filename', 'attachment')
+                            content_type = attachment.get('content_type', 'application/octet-stream')
+                            data_base64 = attachment.get('data_base64', '')
+                        
+                        if not data_base64:
+                            logger.warning(f"⚠️ Skipping attachment '{filename}' - no data")
+                            continue
+                        
+                        # Decode base64 data
+                        file_data = base64.b64decode(data_base64)
+                        
+                        # Create appropriate MIME part based on content type
+                        maintype, _, subtype = content_type.partition('/')
+                        if maintype == 'image':
+                            part = MIMEImage(file_data, _subtype=subtype or 'jpeg')
+                        else:
+                            part = MIMEBase(maintype or 'application', subtype or 'octet-stream')
+                            part.set_payload(file_data)
+                            encoders.encode_base64(part)
+                        
+                        # Add headers for attachment
+                        part.add_header('Content-Disposition', 'attachment', filename=filename)
+                        msg.attach(part)
+                        logger.info(f"📎 Attached file: {filename} ({content_type}, {len(file_data)} bytes)")
+                    except Exception as attach_err:
+                        logger.warning(f"⚠️ Failed to attach file: {attach_err}")
+
             # Send email
             # Use a verified CA bundle for TLS (fixes local TLS errors)
             ctx = ssl.create_default_context(cafile=certifi.where())

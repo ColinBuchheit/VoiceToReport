@@ -1013,6 +1013,15 @@ export default function EmailHistorySidebar({
                                   {email.summary.work_completed}
                                 </Text>
                               )}
+                              {/* Attachment metadata display */}
+                              {email.attachments && email.attachments.length > 0 && (
+                                <View style={[styles.attachmentMetaRow, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+                                  <Ionicons name="attach" size={scaled(14)} color={colors.textSecondary} />
+                                  <Text style={[styles.attachmentMetaText, { color: colors.textSecondary, fontSize: scaled(11) }]} numberOfLines={1}>
+                                    {email.attachments.length} attachment{email.attachments.length !== 1 ? 's' : ''}: {email.attachments.map(a => a.name).join(', ')}
+                                  </Text>
+                                </View>
+                              )}
                               <View style={styles.actionRowCompact}>
             <Text style={[styles.actionTextCompact, { color: colors.textSecondary, fontSize: scaled(11) }]}>Swipe right to delete • Tap for details</Text>
                               </View>
@@ -1599,4 +1608,19 @@ const styles = StyleSheet.create({
     borderColor: '#FFCBB0',
   },
   compactToggleText: { fontSize: 13, fontWeight: '600' },
+  // Attachment metadata styles
+  attachmentMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 6,
+  },
+  attachmentMetaText: {
+    flex: 1,
+    fontStyle: 'italic',
+  },
 });
